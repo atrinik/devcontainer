@@ -1,0 +1,138 @@
+name: Auto Tag
+
+on:
+  pull_request_target:
+    types:
+      - closed
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-tag-images
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag merged pull request
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-26.04
+    outputs:
+      linux_changed: ${{ steps.tag.outputs.linux_changed }}
+      tag: ${{ steps.tag.outputs.tag }}
+      windows_changed: ${{ steps.tag.outputs.windows_changed }}
+    steps:
+      - name: Check out trusted source and tags
+        uses: actions/checkout@v6
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Create merge tag
+        id: tag
+        env:
+          COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          if [[ ! "${COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid merged commit SHA: ${COMMIT_SHA}" >&2
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor \
+              "${COMMIT_SHA}" refs/remotes/origin/master; then
+            echo "Merged commit ${COMMIT_SHA} is not on master." >&2
+            exit 1
+          fi
+
+          linux_changed=false
+          windows_changed=false
+          while IFS= read -r path; do
+            case "${path}" in
+            dependencies/* | linux/* | .github/workflows/publish-linux.yml)
+              linux_changed=true
+              ;;
+            esac
+            case "${path}" in
+            dependencies/* | windows/* | .github/workflows/publish-windows.yml)
+              windows_changed=true
+              ;;
+            esac
+          done < <(git diff-tree --no-commit-id --name-only -r \
+            "${COMMIT_SHA}^" "${COMMIT_SHA}")
+
+          latest_major=0
+          latest_minor=0
+          latest_patch=0
+          while IFS= read -r existing_tag; do
+            if [[ ! "${existing_tag}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              continue
+            fi
+
+            major=$((10#${BASH_REMATCH[1]}))
+            minor=$((10#${BASH_REMATCH[2]}))
+            patch=$((10#${BASH_REMATCH[3]}))
+            if ((major > latest_major \
+                || (major == latest_major && minor > latest_minor) \
+                || (major == latest_major && minor == latest_minor \
+                    && patch > latest_patch))); then
+              latest_major=${major}
+              latest_minor=${minor}
+              latest_patch=${patch}
+            fi
+          done < <(git tag --list 'v*.*.*')
+
+          tag="v${latest_major}.${latest_minor}.$((latest_patch + 1))"
+          if git rev-parse --verify --quiet "refs/tags/${tag}" >/dev/null; then
+            echo "Tag ${tag} already exists." >&2
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${tag}" "${COMMIT_SHA}" -m "Atrinik images ${tag}"
+          git push origin "refs/tags/${tag}"
+
+          {
+            echo "linux_changed=${linux_changed}"
+            echo "tag=${tag}"
+            echo "windows_changed=${windows_changed}"
+          } >> "${GITHUB_OUTPUT}"
+
+  publish-linux:
+    name: Queue Linux image
+    needs: tag
+    if: needs.tag.outputs.linux_changed == 'true'
+    runs-on: ubuntu-26.04
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch Linux publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.tag.outputs.tag }}
+        run: |
+          gh workflow run publish-linux.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "${RELEASE_TAG}"
+
+  publish-windows:
+    name: Queue Windows image
+    needs: tag
+    if: needs.tag.outputs.windows_changed == 'true'
+    runs-on: ubuntu-26.04
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch Windows publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.tag.outputs.tag }}
+        run: |
+          gh workflow run publish-windows.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "${RELEASE_TAG}"
