@@ -15,24 +15,6 @@ and a `sha-<commit>` tag. Publishing from an image-repository tag matching
 detects Linux and Windows input changes independently, so changing one image
 does not rebuild the other.
 
-## Repository setup
-
-Create the repository as `atrinik/devcontainer`, push this tree to `master`,
-and enable GitHub Actions. The workflows use only `GITHUB_TOKEN` and require no
-additional secrets.
-
-The package names already exist under the Atrinik organization. Before the
-first workflow run, open each existing package's settings and grant the new
-`atrinik/devcontainer` repository write access under **Manage Actions access**.
-After the first publication, make both packages public so pull requests,
-devcontainers, and local Compose builds can pull them without repository
-credentials. If the packages remain private, grant `atrinik/atrinik` read
-access under **Manage Actions access** instead.
-
-After the initial push and package-access setup, manually dispatch both publish
-workflows once to bootstrap the rolling tags. Subsequent squash-merged pull
-requests publish affected images automatically.
-
 ## Publishing
 
 Merged pull requests are automatically tagged by incrementing the patch
