@@ -50,12 +50,12 @@ jobs:
           windows_changed=false
           while IFS= read -r path; do
             case "${path}" in
-            dependencies/* | linux/* | .github/workflows/publish-linux.yml)
+            linux/* | .github/workflows/publish-linux.yml)
               linux_changed=true
               ;;
             esac
             case "${path}" in
-            dependencies/* | windows/* | .github/workflows/publish-windows.yml)
+            windows/* | .github/workflows/publish-windows.yml)
               windows_changed=true
               ;;
             esac

@@ -62,9 +62,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         valgrind \
         zlib1g-dev
 
-COPY dependencies /tmp/atrinik-dependencies
-RUN bash /tmp/atrinik-dependencies/build-libpcpnatpmp.sh native
-
 # Ubuntu packages fd as "fdfind" to avoid a naming conflict. Provide the
 # conventional command name expected by editor integrations and CLI tooling.
 RUN ln -s /usr/bin/fdfind /usr/local/bin/fd
