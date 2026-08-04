@@ -1,5 +1,9 @@
 # Atrinik devcontainer images
 
+[![Validate build images](https://github.com/atrinik/devcontainer/actions/workflows/validate.yml/badge.svg)](https://github.com/atrinik/devcontainer/actions/workflows/validate.yml)
+[![Publish Linux build image](https://github.com/atrinik/devcontainer/actions/workflows/publish-linux.yml/badge.svg)](https://github.com/atrinik/devcontainer/actions/workflows/publish-linux.yml)
+[![Publish Windows build image](https://github.com/atrinik/devcontainer/actions/workflows/publish-windows.yml/badge.svg)](https://github.com/atrinik/devcontainer/actions/workflows/publish-windows.yml)
+
 This repository owns the reusable Linux and Windows build environments for
 Atrinik. Keeping these images separate from the game repository means changes
 to game code do not rebuild the toolchains.
