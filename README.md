@@ -24,7 +24,7 @@ does not rebuild the other.
 Merged pull requests are automatically tagged by incrementing the patch
 component of the highest existing `vMAJOR.MINOR.PATCH` tag. A repository with
 no tags starts at `v0.0.1`. The auto-tag workflow validates the squash-merge
-commit on `master` and dispatches only the Linux and/or Windows publisher whose
+commit on `main` and dispatches only the Linux and/or Windows publisher whose
 inputs changed. Each dispatched workflow publishes the version tag together
 with its rolling, `latest`, and commit tags.
 
