@@ -5,7 +5,7 @@ on:
     types:
       - closed
     branches:
-      - master
+      - main
 
 permissions:
   contents: write
@@ -27,7 +27,7 @@ jobs:
       - name: Check out trusted source and tags
         uses: actions/checkout@v6
         with:
-          ref: master
+          ref: main
           fetch-depth: 0
 
       - name: Create merge tag
@@ -41,8 +41,8 @@ jobs:
           fi
 
           if ! git merge-base --is-ancestor \
-              "${COMMIT_SHA}" refs/remotes/origin/master; then
-            echo "Merged commit ${COMMIT_SHA} is not on master." >&2
+              "${COMMIT_SHA}" refs/remotes/origin/main; then
+            echo "Merged commit ${COMMIT_SHA} is not on main." >&2
             exit 1
           fi
 
