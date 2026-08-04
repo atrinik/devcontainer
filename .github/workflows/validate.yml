@@ -1,0 +1,131 @@
+name: Validate build images
+
+on:
+  pull_request:
+    paths:
+      - ".dockerignore"
+      - ".github/actionlint.yaml"
+      - ".github/workflows/validate.yml"
+      - "linux/**"
+      - "windows/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-images-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Select changed images
+    runs-on: ubuntu-26.04
+    outputs:
+      linux: ${{ steps.changes.outputs.linux }}
+      windows: ${{ steps.changes.outputs.windows }}
+    steps:
+      - name: Check out image sources
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect image changes
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          linux=false
+          windows=false
+          while IFS= read -r path; do
+            case "${path}" in
+            .dockerignore | .github/actionlint.yaml | \
+                .github/workflows/validate.yml | linux/*)
+              linux=true
+              ;;
+            esac
+            case "${path}" in
+            .dockerignore | .github/workflows/validate.yml | windows/*)
+              windows=true
+              ;;
+            esac
+          done < <(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
+          {
+            echo "linux=${linux}"
+            echo "windows=${windows}"
+          } >> "${GITHUB_OUTPUT}"
+
+  linux:
+    name: Linux image
+    needs: changes
+    if: needs.changes.outputs.linux == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out image sources
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build Linux image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: linux/Dockerfile
+          load: true
+          tags: atrinik-linux-build:validation
+          cache-from: type=gha,scope=linux-build-image
+          cache-to: type=gha,mode=max,scope=linux-build-image,ignore-error=true
+
+      - name: Validate Linux tools and workflows
+        run: |
+          docker run --rm atrinik-linux-build:validation clang --version
+          docker run --rm atrinik-linux-build:validation gh --version
+          docker run --rm atrinik-linux-build:validation llvm-config --version
+          docker run --rm atrinik-linux-build:validation devcontainer --version
+          docker run --rm atrinik-linux-build:validation ssh -V
+          docker run --rm \
+            --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
+            --workdir /workspace \
+            atrinik-linux-build:validation \
+            actionlint
+
+  windows:
+    name: Windows cross-build image
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 180
+    steps:
+      - name: Check out image sources
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build Windows image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: windows/Dockerfile
+          load: true
+          tags: atrinik-windows-build:validation
+          build-args: MXE_BUILD_JOBS=4
+          cache-from: type=gha,scope=windows-build-image
+          cache-to: type=gha,mode=max,scope=windows-build-image,ignore-error=true
+
+      - name: Validate MXE driver discovery
+        run: |
+          docker run --rm atrinik-windows-build:validation \
+            bash -lc 'command -v x86_64-w64-mingw32.shared-gcc &&
+              x86_64-w64-mingw32.shared-gcc --version'
+          docker run --rm atrinik-windows-build:validation \
+            bash -lc 'command -v x86_64-w64-mingw32.shared-cmake'
+          docker run --rm --user vscode atrinik-windows-build:validation \
+            bash -lc 'command -v x86_64-w64-mingw32.shared-gcc &&
+              x86_64-w64-mingw32.shared-gcc --version'
+          docker run --rm --user vscode atrinik-windows-build:validation \
+            bash -lc 'command -v x86_64-w64-mingw32.shared-cmake'
+          docker run --rm --user vscode atrinik-windows-build:validation \
+            ssh -V

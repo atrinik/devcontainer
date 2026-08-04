@@ -31,6 +31,7 @@ RUN apt-get update \
         make \
         mingw-w64-tools \
         ninja-build \
+        openssh-client \
         openssl \
         p7zip-full \
         patch \
@@ -133,3 +134,17 @@ RUN apt-get update \
         python3-dev \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
+
+COPY windows/mxe-path.sh /etc/profile.d/mxe-path.sh
+
+RUN command -v x86_64-w64-mingw32.shared-gcc \
+    && command -v x86_64-w64-mingw32.shared-cmake \
+    && bash -lc 'command -v x86_64-w64-mingw32.shared-gcc' \
+    && bash -lc 'command -v x86_64-w64-mingw32.shared-cmake' \
+    && su --login vscode --command \
+        'command -v x86_64-w64-mingw32.shared-gcc' \
+    && su --login vscode --command \
+        'command -v x86_64-w64-mingw32.shared-cmake' \
+    && x86_64-w64-mingw32.shared-gcc --version \
+    && /opt/mxe/usr/x86_64-pc-linux-gnu/bin/cmake --version \
+    && ssh -V
