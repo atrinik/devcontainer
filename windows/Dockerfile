@@ -1,8 +1,14 @@
+# syntax=docker/dockerfile:1
+
 FROM mcr.microsoft.com/devcontainers/base:bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update \
+RUN rm -f /etc/apt/apt.conf.d/docker-clean
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
     && apt-get install -y --no-install-recommends \
         autoconf \
         automake \
@@ -47,8 +53,7 @@ RUN apt-get update \
         unzip \
         wget \
         xz-utils \
-        zip \
-    && rm -rf /var/lib/apt/lists/*
+        zip
 
 ARG MXE_REF=0b88e56678ee5b2afe9c294e53a23c9d8ac30a15
 ARG MXE_BUILD_JOBS=2
@@ -56,7 +61,7 @@ ARG MINIUPNPC_COMMIT=bf4215a7574f88aa55859db9db00e3ae58cf42d6
 ARG PYTHON_VERSION=3.14.6
 ARG PYTHON_EMBED_SHA256=df901e84a896ff1ee720ad03377e0c8d8c2244fda79808aeeaff6316df1cb75c
 ARG PYTHON_SOURCE_SHA256=143b1dddefaec3bd2e21e3b839b34a2b7fb9842272883c576420d605e9f30c63
-RUN git clone https://github.com/mxe/mxe.git /opt/mxe \
+RUN git clone --filter=blob:none https://github.com/mxe/mxe.git /opt/mxe \
     && git -C /opt/mxe checkout "${MXE_REF}"
 
 COPY windows/curl-openssl.patch /tmp/curl-openssl.patch
@@ -83,7 +88,7 @@ RUN make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
 RUN test "$(/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/curl-config --ssl-backends)" \
         = "OpenSSL"
 
-RUN git clone https://github.com/miniupnp/miniupnp.git /tmp/miniupnp \
+RUN git clone --filter=blob:none https://github.com/miniupnp/miniupnp.git /tmp/miniupnp \
     && git -C /tmp/miniupnp checkout "${MINIUPNPC_COMMIT}" \
     && x86_64-w64-mingw32.shared-cmake \
         -S /tmp/miniupnp/miniupnpc \
@@ -126,14 +131,15 @@ USER root
 
 # Native build dependencies used by Atrinik's build-windows.sh to run the Linux
 # world maker before cross-compiling and packaging the Windows server.
-RUN apt-get update \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
     && apt-get install -y --no-install-recommends \
         libcurl4-openssl-dev \
         libgd-dev \
         libminiupnpc-dev \
         python3-dev \
-        zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+        zlib1g-dev
 
 COPY windows/mxe-path.sh /etc/profile.d/mxe-path.sh
 

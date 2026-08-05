@@ -70,6 +70,10 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha,scope=windows-build-image
-          cache-to: type=gha,mode=max,scope=windows-build-image,ignore-error=true
+          cache-from: |
+            type=registry,ref=ghcr.io/atrinik/windows-build:mxe
+            type=gha,scope=windows-build-image
+          cache-to: |
+            type=inline
+            type=gha,mode=max,scope=windows-build-image,ignore-error=true
           build-args: MXE_BUILD_JOBS=4
