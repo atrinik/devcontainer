@@ -2,12 +2,6 @@ name: Validate build images
 
 on:
   pull_request:
-    paths:
-      - ".dockerignore"
-      - ".github/actionlint.yaml"
-      - ".github/workflows/validate.yml"
-      - "linux/**"
-      - "windows/**"
 
 permissions:
   contents: read
@@ -129,3 +123,30 @@ jobs:
             bash -lc 'command -v x86_64-w64-mingw32.shared-cmake'
           docker run --rm --user vscode atrinik-windows-build:validation \
             ssh -V
+
+  required:
+    name: Required checks
+    needs:
+      - changes
+      - linux
+      - windows
+    if: always()
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Require successful applicable validations
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          LINUX_RESULT: ${{ needs.linux.result }}
+          WINDOWS_RESULT: ${{ needs.windows.result }}
+        run: |
+          if [[ "${CHANGES_RESULT}" != success ]]; then
+            echo "Change selection concluded ${CHANGES_RESULT}." >&2
+            exit 1
+          fi
+
+          for result in "${LINUX_RESULT}" "${WINDOWS_RESULT}"; do
+            if [[ "${result}" != success && "${result}" != skipped ]]; then
+              echo "Image validation concluded ${result}." >&2
+              exit 1
+            fi
+          done
