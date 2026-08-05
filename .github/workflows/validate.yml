@@ -2,15 +2,10 @@ name: Validate build images
 
 on:
   pull_request:
-    paths:
-      - ".dockerignore"
-      - ".github/actionlint.yaml"
-      - ".github/workflows/validate.yml"
-      - "linux/**"
-      - "windows/**"
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: validate-images-${{ github.event.pull_request.number || github.ref }}
@@ -73,23 +68,12 @@ jobs:
         with:
           context: .
           file: linux/Dockerfile
-          load: true
-          tags: atrinik-linux-build:validation
-          cache-from: type=gha,scope=linux-build-image
+          target: validation
+          outputs: type=cacheonly
+          cache-from: |
+            type=registry,ref=ghcr.io/atrinik/linux-build:ubuntu-26.04
+            type=gha,scope=linux-build-image
           cache-to: type=gha,mode=max,scope=linux-build-image,ignore-error=true
-
-      - name: Validate Linux tools and workflows
-        run: |
-          docker run --rm atrinik-linux-build:validation clang --version
-          docker run --rm atrinik-linux-build:validation gh --version
-          docker run --rm atrinik-linux-build:validation llvm-config --version
-          docker run --rm atrinik-linux-build:validation devcontainer --version
-          docker run --rm atrinik-linux-build:validation ssh -V
-          docker run --rm \
-            --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
-            --workdir /workspace \
-            atrinik-linux-build:validation \
-            actionlint
 
   windows:
     name: Windows cross-build image
@@ -109,23 +93,36 @@ jobs:
         with:
           context: .
           file: windows/Dockerfile
-          load: true
-          tags: atrinik-windows-build:validation
+          outputs: type=cacheonly
           build-args: MXE_BUILD_JOBS=4
-          cache-from: type=gha,scope=windows-build-image
+          cache-from: |
+            type=registry,ref=ghcr.io/atrinik/windows-build:mxe
+            type=gha,scope=windows-build-image
           cache-to: type=gha,mode=max,scope=windows-build-image,ignore-error=true
 
-      - name: Validate MXE driver discovery
+  required:
+    name: Required checks
+    needs:
+      - changes
+      - linux
+      - windows
+    if: always()
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Require successful applicable validations
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          LINUX_RESULT: ${{ needs.linux.result }}
+          WINDOWS_RESULT: ${{ needs.windows.result }}
         run: |
-          docker run --rm atrinik-windows-build:validation \
-            bash -lc 'command -v x86_64-w64-mingw32.shared-gcc &&
-              x86_64-w64-mingw32.shared-gcc --version'
-          docker run --rm atrinik-windows-build:validation \
-            bash -lc 'command -v x86_64-w64-mingw32.shared-cmake'
-          docker run --rm --user vscode atrinik-windows-build:validation \
-            bash -lc 'command -v x86_64-w64-mingw32.shared-gcc &&
-              x86_64-w64-mingw32.shared-gcc --version'
-          docker run --rm --user vscode atrinik-windows-build:validation \
-            bash -lc 'command -v x86_64-w64-mingw32.shared-cmake'
-          docker run --rm --user vscode atrinik-windows-build:validation \
-            ssh -V
+          if [[ "${CHANGES_RESULT}" != success ]]; then
+            echo "Change selection concluded ${CHANGES_RESULT}." >&2
+            exit 1
+          fi
+
+          for result in "${LINUX_RESULT}" "${WINDOWS_RESULT}"; do
+            if [[ "${result}" != success && "${result}" != skipped ]]; then
+              echo "Image validation concluded ${result}." >&2
+              exit 1
+            fi
+          done

@@ -70,5 +70,9 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha,scope=linux-build-image
-          cache-to: type=gha,mode=max,scope=linux-build-image,ignore-error=true
+          cache-from: |
+            type=registry,ref=ghcr.io/atrinik/linux-build:ubuntu-26.04
+            type=gha,scope=linux-build-image
+          cache-to: |
+            type=inline
+            type=gha,mode=max,scope=linux-build-image,ignore-error=true

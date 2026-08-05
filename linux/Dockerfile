@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM ubuntu:26.04
+FROM ubuntu:26.04 AS toolchain
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -111,3 +111,14 @@ RUN clang --version \
     && llvm-config --version \
     && ssh -V \
     && unzip -v >/dev/null
+
+FROM toolchain AS validation
+
+COPY .github/actionlint.yaml /workspace/.github/actionlint.yaml
+COPY .github/workflows /workspace/.github/workflows
+
+RUN actionlint \
+    -config-file /workspace/.github/actionlint.yaml \
+    /workspace/.github/workflows/*.yml
+
+FROM toolchain AS final

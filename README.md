@@ -74,11 +74,15 @@ available. The images intentionally do not copy or mount the host's private key
 files. SSH host configuration and `known_hosts` remain container-local.
 
 The Windows image compiles MXE and its dependency stack and can take a long
-time on a cold build. GitHub Actions uses separate BuildKit cache scopes for
-the two images; cache export failures are non-fatal because publishing a usable
-image is more important than preserving an optimization.
+time on a genuinely cold build. Pull-request validation restores both the
+published rolling image's inline BuildKit cache and the image-specific GitHub
+Actions cache. It exports cache-only results instead of loading the completed
+images into the runner's Docker daemon. Release builds publish inline cache
+metadata for cross-ref reuse and also retain the max-mode Actions cache;
+Actions-cache export failures are non-fatal because publishing a usable image
+is more important than preserving an optimization.
 
 Pull requests build each image whose inputs changed. Linux validation also
-runs actionlint over the repository workflows from inside the completed image;
+runs actionlint over the repository workflows in a dedicated validation stage;
 Windows validation checks that the MXE compiler and CMake wrapper are directly
 discoverable through the image's default `PATH`.
