@@ -15,18 +15,18 @@ Published images:
 
 Every successful image publication updates `latest`, its rolling platform tag,
 and a `sha-<commit>` tag. Publishing from an image-repository tag matching
-`vX.Y.Z` also publishes the corresponding `X.Y.Z` image tag. Auto-tagging
+`vX.Y.Z` also publishes the corresponding `X.Y.Z` image tag. Release automation
 detects Linux and Windows input changes independently, so changing one image
 does not rebuild the other.
 
 ## Publishing
 
-Merged pull requests are automatically tagged by incrementing the patch
-component of the highest existing `vMAJOR.MINOR.PATCH` tag. A repository with
-no tags starts at `v0.0.1`. The auto-tag workflow validates the squash-merge
-commit on `main` and dispatches only the Linux and/or Windows publisher whose
-inputs changed. Each dispatched workflow publishes the version tag together
-with its rolling, `latest`, and commit tags.
+After a validated squash merge, semantic-release interprets its Conventional
+Commits title. Fixes and performance changes advance the patch version,
+features advance the minor version, and breaking changes advance the major
+version. Commits without a user-facing release type create no tag. A new tag
+dispatches only the Linux and/or Windows publisher whose inputs changed; the
+1.0.0 baseline publishes both images.
 
 Either publisher can also be started manually from the Actions page. To create
 and publish an image version manually:
@@ -62,7 +62,7 @@ docker run --rm --user vscode atrinik-windows-build ssh -V
 The Linux image includes GCC, Clang with compiler-rt, LLVM, clangd,
 clang-tidy, actionlint, the GitHub CLI, the OpenSSH client, and the standalone
 Dev Containers CLI. It also provides SDL3, SDL3_image, SDL3_ttf, and a pinned
-source build of SDL3_mixer for Atrinik's legacy client. Its ccache directory
+source build of SDL3_mixer for Atrinik's SDL client. Its ccache directory
 defaults to writable container-local storage under `/tmp`; CI can override
 `CCACHE_DIR` with a persistent cache. The Windows image provides the same SDL3
 family through MXE and the official SDL3_mixer MinGW SDK. It also includes the
