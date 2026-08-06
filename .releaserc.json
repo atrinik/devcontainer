@@ -5,7 +5,8 @@
     [
       "@semantic-release/commit-analyzer",
       {
-        "preset": "conventionalcommits"
+        "preset": "conventionalcommits",
+        "releaseRules": [{"type": "*", "release": "patch"}]
       }
     ],
     [
@@ -23,4 +24,3 @@
     "@semantic-release/github"
   ]
 }
-
