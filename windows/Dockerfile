@@ -86,7 +86,20 @@ RUN make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
         openssl
 RUN make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
         MXE_TARGETS=x86_64-w64-mingw32.shared \
-        cc cmake curl openssl zlib libxml2 sdl3 sdl3_image sdl3_ttf
+        cc cmake curl openssl zlib libxml2 sdl3
+COPY --chown=vscode:vscode windows/sdl3-image-disable-tiff.patch \
+        /tmp/sdl3-image-disable-tiff.patch
+RUN git -C /opt/mxe apply /tmp/sdl3-image-disable-tiff.patch \
+    && make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
+        MXE_TARGETS=x86_64-w64-mingw32.shared \
+        sdl3_image \
+    || { \
+        cat /opt/mxe/log/sdl3_image_x86_64-w64-mingw32.shared; \
+        exit 1; \
+    }
+RUN make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
+        MXE_TARGETS=x86_64-w64-mingw32.shared \
+        sdl3_ttf
 RUN test "$(/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/curl-config --ssl-backends)" \
         = "OpenSSL"
 

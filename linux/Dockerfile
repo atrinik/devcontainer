@@ -49,10 +49,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libsdl3-ttf-dev \
         libssl-dev \
         libsubunit-dev \
-        libx11-dev \
         libxml2-dev \
         libxml2-utils \
-        libxmu-dev \
         llvm \
         ninja-build \
         nodejs \
