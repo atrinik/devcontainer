@@ -1,6 +1,7 @@
 name: Semantic Release
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -35,4 +36,3 @@ jobs:
           --package=@semantic-release/exec@7.1.0
           --package=conventional-changelog-conventionalcommits@10.2.1
           semantic-release
-
