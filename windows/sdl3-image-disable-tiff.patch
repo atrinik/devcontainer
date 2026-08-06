@@ -1,0 +1,18 @@
+diff --git a/src/sdl3_image.mk b/src/sdl3_image.mk
+index 29724a740..3570d30e5 100644
+--- a/src/sdl3_image.mk
++++ b/src/sdl3_image.mk
+@@ -9,10 +9,11 @@ $(PKG)_FILE     := SDL3_image-$($(PKG)_VERSION).tar.gz
+ $(PKG)_CHECKSUM := a725bd6d04261fdda0dd8d950659e1dc15a8065d025275ef460d32ae7dcfc182
+ $(PKG)_GH_CONF  := libsdl-org/SDL_image/releases/tag,release-,,
+-$(PKG)_DEPS     := cc jpeg libpng libwebp sdl3 tiff
++$(PKG)_DEPS     := cc jpeg libpng libwebp sdl3
+ 
+ define $(PKG)_BUILD
+     cd '$(BUILD_DIR)' && $(TARGET)-cmake '$(SOURCE_DIR)' \
+-        -DBUILD_SHARED_LIBS=$(CMAKE_SHARED_BOOL)
++        -DBUILD_SHARED_LIBS=$(CMAKE_SHARED_BOOL) \
++        -DSDLIMAGE_TIF=OFF
+     $(MAKE) -C '$(BUILD_DIR)' -j '$(JOBS)'
+     $(MAKE) -C '$(BUILD_DIR)' -j 1 install
+ endef

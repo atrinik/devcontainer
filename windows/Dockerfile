@@ -55,9 +55,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         xz-utils \
         zip
 
-ARG MXE_REF=0b88e56678ee5b2afe9c294e53a23c9d8ac30a15
+ARG MXE_REF=8784776b145a8ddd350ce32aa0908ac10977060c
 ARG MXE_BUILD_JOBS=2
 ARG MINIUPNPC_COMMIT=bf4215a7574f88aa55859db9db00e3ae58cf42d6
+ARG SDL3_MIXER_VERSION=3.2.4
+ARG SDL3_MIXER_MINGW_SHA256=2ff5f59be4683e0afb4339c4fa73c6228651e52d37b040ecf80da08edb3cecd6
 ARG PYTHON_VERSION=3.14.6
 ARG PYTHON_EMBED_SHA256=df901e84a896ff1ee720ad03377e0c8d8c2244fda79808aeeaff6316df1cb75c
 ARG PYTHON_SOURCE_SHA256=143b1dddefaec3bd2e21e3b839b34a2b7fb9842272883c576420d605e9f30c63
@@ -84,9 +86,39 @@ RUN make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
         openssl
 RUN make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
         MXE_TARGETS=x86_64-w64-mingw32.shared \
-        cc cmake curl openssl zlib libxml2 sdl sdl_image sdl_mixer sdl_ttf
+        cc cmake curl openssl zlib libxml2 sdl3
+COPY --chown=vscode:vscode windows/sdl3-image-disable-tiff.patch \
+        /tmp/sdl3-image-disable-tiff.patch
+RUN git -C /opt/mxe apply /tmp/sdl3-image-disable-tiff.patch \
+    && make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
+        MXE_TARGETS=x86_64-w64-mingw32.shared \
+        sdl3_image \
+    || { \
+        cat /opt/mxe/log/sdl3_image_x86_64-w64-mingw32.shared; \
+        exit 1; \
+    }
+RUN make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
+        MXE_TARGETS=x86_64-w64-mingw32.shared \
+        sdl3_ttf
 RUN test "$(/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/curl-config --ssl-backends)" \
         = "OpenSSL"
+
+# MXE does not yet package SDL3_mixer. Install the official, checksum-pinned
+# x86_64 MinGW SDK into the MXE prefix; its DLL has no non-system dependency
+# beyond the SDL3 DLL built above.
+RUN wget -q \
+        "https://github.com/libsdl-org/SDL_mixer/releases/download/release-${SDL3_MIXER_VERSION}/SDL3_mixer-devel-${SDL3_MIXER_VERSION}-mingw.tar.gz" \
+        -O /tmp/SDL3_mixer-mingw.tar.gz \
+    && echo "${SDL3_MIXER_MINGW_SHA256}  /tmp/SDL3_mixer-mingw.tar.gz" \
+        | sha256sum -c - \
+    && mkdir -p /tmp/SDL3_mixer-mingw \
+    && tar -xzf /tmp/SDL3_mixer-mingw.tar.gz -C /tmp/SDL3_mixer-mingw \
+    && cp -a \
+        "/tmp/SDL3_mixer-mingw/SDL3_mixer-${SDL3_MIXER_VERSION}/x86_64-w64-mingw32/." \
+        "${MXE_PREFIX}/" \
+    && rm -rf /tmp/SDL3_mixer-mingw /tmp/SDL3_mixer-mingw.tar.gz \
+    && test "$(x86_64-w64-mingw32.shared-pkg-config --modversion sdl3-mixer)" \
+        = "${SDL3_MIXER_VERSION}"
 
 RUN git clone --filter=blob:none https://github.com/miniupnp/miniupnp.git /tmp/miniupnp \
     && git -C /tmp/miniupnp checkout "${MINIUPNPC_COMMIT}" \
@@ -153,4 +185,8 @@ RUN command -v x86_64-w64-mingw32.shared-gcc \
         'command -v x86_64-w64-mingw32.shared-cmake' \
     && x86_64-w64-mingw32.shared-gcc --version \
     && /opt/mxe/usr/x86_64-pc-linux-gnu/bin/cmake --version \
+    && test -f "${MXE_RUNTIME_DIR}/SDL3.dll" \
+    && test -f "${MXE_RUNTIME_DIR}/SDL3_image.dll" \
+    && test -f "${MXE_RUNTIME_DIR}/SDL3_mixer.dll" \
+    && test -f "${MXE_RUNTIME_DIR}/SDL3_ttf.dll" \
     && ssh -V
