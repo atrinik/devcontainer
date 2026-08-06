@@ -89,3 +89,9 @@ Pull requests build each image whose inputs changed. Linux validation also
 runs actionlint over the repository workflows in a dedicated validation stage;
 Windows validation checks that the MXE compiler and CMake wrapper are directly
 discoverable through the image's default `PATH`.
+
+## License
+
+The repository's original build configuration and automation are MIT licensed;
+see [LICENSE](LICENSE). Software installed into the published images retains
+its own upstream license.
