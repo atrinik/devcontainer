@@ -16,17 +16,17 @@ Published images:
 Every successful image publication updates `latest`, its rolling platform tag,
 and a `sha-<commit>` tag. Publishing from an image-repository tag matching
 `vX.Y.Z` also publishes the corresponding `X.Y.Z` image tag. Release automation
-detects Linux and Windows input changes independently, so changing one image
-does not rebuild the other.
+publishes both Linux and Windows images for every version so consumers can pin
+a matched toolchain release.
 
 ## Publishing
 
 After a validated squash merge, semantic-release interprets its Conventional
 Commits title. Fixes and performance changes advance the patch version,
 features advance the minor version, and breaking changes advance the major
-version. Commits without a user-facing release type create no tag. A new tag
-dispatches only the Linux and/or Windows publisher whose inputs changed; the
-1.0.0 baseline publishes both images.
+version. Every other conventional type advances at least the patch version, so
+every squash merge creates a tag. Each new tag dispatches both image
+publishers.
 
 Either publisher can also be started manually from the Actions page. To create
 and publish an image version manually:
@@ -36,8 +36,8 @@ git tag -a v1.0.0 -m "Devcontainer images v1.0.0"
 git push origin v1.0.0
 ```
 
-Tags pushed outside the auto-tag workflow intentionally build both images,
-providing matching immutable versions for a coordinated toolchain release.
+Tags pushed outside semantic-release also build both images, providing
+matching immutable versions for a coordinated toolchain release.
 
 ## Local validation
 
@@ -89,3 +89,9 @@ Pull requests build each image whose inputs changed. Linux validation also
 runs actionlint over the repository workflows in a dedicated validation stage;
 Windows validation checks that the MXE compiler and CMake wrapper are directly
 discoverable through the image's default `PATH`.
+
+## License
+
+The repository's original build configuration and automation are MIT licensed;
+see [LICENSE](LICENSE). Software installed into the published images retains
+its own upstream license.
