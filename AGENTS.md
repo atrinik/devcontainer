@@ -1,0 +1,23 @@
+# Atrinik devcontainer image repository guide
+
+- This repository owns reusable Linux and Windows build-toolchain images. The
+  workspace wrapper owns checkout composition and VS Code launch configuration;
+  component repositories own their source builds.
+- Keep Linux and MXE/Windows toolchains coherent for supported client/server
+  releases. Pin base images and downloaded toolchains according to project
+  policy, preserve non-root usage, and avoid embedding credentials or mutable
+  workspace state.
+- Treat Dockerfile inputs, `.dockerignore`, cache scopes, build arguments,
+  published tags, and workflow path filters as one contract. If a relevant file
+  changes, the required aggregate validation must still run.
+- Every semantic release publishes both images and their supported tags. Do not
+  create manual release tags as a substitute for semantic-release.
+- Validate Dockerfiles with `docker build --check`. Build and smoke-test each
+  affected image; note that a cold Windows/MXE build is expensive and may rely
+  on CI cache for final verification.
+- Workflow changes also require actionlint and Atrinik GitHub-governance review
+  for permissions, pinned actions, check names, and ruleset compatibility.
+- Commits and pull-request titles use Conventional Commits. Preserve unrelated
+  work and finish with `git diff --check`.
+- Update this `AGENTS.md` in the same change when major rework alters image
+  ownership, toolchains, tags, workflow contracts, or validation.
