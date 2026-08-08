@@ -13,6 +13,7 @@ jq -e '
   ])
   and (.consumers | length == 7)
   and (.graphics.headless_validation == true)
+  and (.graphics.virtual_display == "Xvfb")
 ' "${expected}" >/dev/null
 
 if [[ -n ${installed} ]]; then
@@ -34,4 +35,6 @@ if [[ -n ${installed} ]]; then
     "$(jq -r '.tools.syft' "${expected}")"
   test "$(trivy --version | sed -n '1s/^Version: //p')" = \
     "$(jq -r '.tools.trivy' "${expected}")"
+  command -v Xvfb >/dev/null
+  command -v xvfb-run >/dev/null
 fi

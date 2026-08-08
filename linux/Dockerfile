@@ -65,6 +65,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         unzip \
         valgrind \
         vulkan-tools \
+        xauth \
+        xvfb \
         xz-utils \
         zlib1g-dev
 
@@ -237,6 +239,8 @@ RUN clang --version \
     && trivy --version \
     && pkg-config --exists vulkan \
     && command -v vulkaninfo \
+    && command -v Xvfb \
+    && command -v xvfb-run \
     && ssh -V \
     && unzip -v >/dev/null
 

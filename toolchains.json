@@ -24,7 +24,8 @@
     "headless_validation": true,
     "linux_backend": "Vulkan",
     "native_windows_backend": "D3D12",
-    "sdl_major": 3
+    "sdl_major": 3,
+    "virtual_display": "Xvfb"
   },
   "consumers": [
     "atrinik/client",

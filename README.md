@@ -73,8 +73,9 @@ Node.js, pnpm, Syft, and Trivy. It also includes GCC, Clang with compiler-rt,
 LLVM, clangd, clang-tidy, actionlint, the GitHub CLI, the OpenSSH client, and
 the standalone Dev Containers CLI. SDL3, SDL3_image, SDL3_ttf, Vulkan
 diagnostics, and a pinned source build of SDL3_mixer support Rust client,
-editor, and renderer development. Headless checks do not require a display or
-physical GPU; opening SDL windows requires display forwarding. Native Windows
+editor, and renderer development. Mesa's software Vulkan implementation and
+Xvfb provide repeatable offscreen and SDL window validation without a physical
+GPU or display. Interactive windows still require display forwarding. Native Windows
 D3D12 validation runs on Windows runners rather than pretending the MXE image
 is a Windows runtime. The image's ccache directory
 defaults to writable container-local storage under `/tmp`; CI can override
