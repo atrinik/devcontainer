@@ -54,15 +54,30 @@ docker run --rm atrinik-linux-build clang --version
 docker run --rm atrinik-linux-build gh --version
 docker run --rm atrinik-linux-build actionlint --version
 docker run --rm atrinik-linux-build devcontainer --version
+docker run --rm atrinik-linux-build go version
+docker run --rm atrinik-linux-build rustc --version
+docker run --rm atrinik-linux-build buf --version
+docker run --rm atrinik-linux-build protoc --version
+docker run --rm atrinik-linux-build protoc-gen-go --version
+docker run --rm atrinik-linux-build protoc-gen-prost --version
+docker run --rm atrinik-linux-build node --version
+docker run --rm atrinik-linux-build pnpm --version
 docker run --rm atrinik-windows-build \
   x86_64-w64-mingw32.shared-gcc --version
 docker run --rm --user vscode atrinik-windows-build ssh -V
 ```
 
-The Linux image includes GCC, Clang with compiler-rt, LLVM, clangd,
-clang-tidy, actionlint, the GitHub CLI, the OpenSSH client, and the standalone
-Dev Containers CLI. It also provides SDL3, SDL3_image, SDL3_ttf, and a pinned
-source build of SDL3_mixer for Atrinik's SDL client. Its ccache directory
+The Linux image includes the pinned replacement toolchains recorded in
+[`toolchains.json`](toolchains.json): Go, Rust/rustup, Protobuf/protoc, Buf,
+Node.js, pnpm, Syft, and Trivy. It also includes GCC, Clang with compiler-rt,
+LLVM, clangd, clang-tidy, actionlint, the GitHub CLI, the OpenSSH client, and
+the standalone Dev Containers CLI. SDL3, SDL3_image, SDL3_ttf, Vulkan
+diagnostics, and a pinned source build of SDL3_mixer support Rust client,
+editor, and renderer development. Mesa's software Vulkan implementation and
+Xvfb provide repeatable offscreen and SDL window validation without a physical
+GPU or display. Interactive windows still require display forwarding. Native Windows
+D3D12 validation runs on Windows runners rather than pretending the MXE image
+is a Windows runtime. The image's ccache directory
 defaults to writable container-local storage under `/tmp`; CI can override
 `CCACHE_DIR` with a persistent cache. The Windows image provides the same SDL3
 family through MXE and the official SDL3_mixer MinGW SDK. It also includes the
