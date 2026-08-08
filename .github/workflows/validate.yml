@@ -35,7 +35,8 @@ jobs:
           while IFS= read -r path; do
             case "${path}" in
             .dockerignore | .github/actionlint.yaml | \
-                .github/workflows/validate.yml | linux/*)
+                .github/workflows/validate.yml | linux/* | \
+                toolchains.json | tools/validate-toolchains.sh)
               linux=true
               ;;
             esac

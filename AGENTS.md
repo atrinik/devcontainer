@@ -7,6 +7,11 @@
   releases. Pin base images and downloaded toolchains according to project
   policy, preserve non-root usage, and avoid embedding credentials or mutable
   workspace state.
+- `toolchains.json` is the machine-readable replacement-stack compatibility
+  contract. Keep its Go, Rust, Protobuf, Buf, Node, pnpm, SBOM, vulnerability,
+  target, and graphics declarations synchronized with the Linux Dockerfile and
+  smoke checks. Native Windows Rust/D3D12 validation belongs on Windows
+  runners; the MXE image remains the explicit classic cross-build owner.
 - Treat Dockerfile inputs, `.dockerignore`, cache scopes, build arguments,
   published tags, and workflow path filters as one contract. If a relevant file
   changes, the required aggregate validation must still run.
