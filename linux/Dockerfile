@@ -68,6 +68,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         xauth \
         xvfb \
         xz-utils \
+        zip \
         zlib1g-dev
 
 # Declare independently updatable downloaded tools after the distribution
@@ -242,6 +243,7 @@ RUN clang --version \
     && command -v Xvfb \
     && command -v xvfb-run \
     && ssh -V \
+    && zip -v >/dev/null \
     && unzip -v >/dev/null
 
 COPY toolchains.json /usr/local/share/atrinik/toolchains.json

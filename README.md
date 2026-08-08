@@ -71,7 +71,9 @@ The Linux image includes the pinned replacement toolchains recorded in
 [`toolchains.json`](toolchains.json): Go, Rust/rustup, Protobuf/protoc, Buf,
 Node.js, pnpm, Syft, and Trivy. It also includes GCC, Clang with compiler-rt,
 LLVM, clangd, clang-tidy, actionlint, the GitHub CLI, the OpenSSH client, and
-the standalone Dev Containers CLI. SDL3, SDL3_image, SDL3_ttf, Vulkan
+the standalone Dev Containers CLI. Standard `zip`/`unzip` archive tooling is
+present for deterministic cross-platform release assembly. SDL3, SDL3_image,
+SDL3_ttf, Vulkan
 diagnostics, and a pinned source build of SDL3_mixer support Rust client,
 editor, and renderer development. Mesa's software Vulkan implementation and
 Xvfb provide repeatable offscreen and SDL window validation without a physical
