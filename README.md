@@ -28,16 +28,12 @@ version. Every other conventional type advances at least the patch version, so
 every squash merge creates a tag. Each new tag dispatches both image
 publishers.
 
-Either publisher can also be started manually from the Actions page. To create
-and publish an image version manually:
-
-```sh
-git tag -a v1.0.0 -m "Devcontainer images v1.0.0"
-git push origin v1.0.0
-```
-
-Tags pushed outside semantic-release also build both images, providing
-matching immutable versions for a coordinated toolchain release.
+Either publisher can also be started manually from the Actions page for a
+reviewed rebuild or recovery of an existing ref. Manual dispatch does not
+create a Git tag or semantic release. Semantic-release alone creates new
+`vX.Y.Z` tags; do not create or push a release tag manually. When recovering a
+versioned release, dispatch both publishers against the same existing tag so
+the Linux and Windows image versions remain matched.
 
 ## Local validation
 
