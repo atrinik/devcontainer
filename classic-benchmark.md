@@ -74,26 +74,81 @@ assertion by themselves. Persistent consumers must use a stable numeric UID;
 mode 1777 makes the root mount initially writable but does not make ccache's
 owner-writable nested directories safe to reuse under a different UID.
 
-## Required candidate-digest comparison
+## Hosted candidate-digest comparison
 
-Before issue closure, replace every pending cell below with raw measurements
-from equivalent clean runners and link the associated devcontainer and Classic
-reviews. Use the immutable digest resolved from the final reviewed
-`candidate-sha-<commit>` tag.
+The candidate was published by
+[devcontainer run 31427897129](https://github.com/atrinik/devcontainer/actions/runs/31427897129)
+from reviewed source `b9a86c4f52205c927373caa7583d3a43989cfca7`.
+The tag
+`candidate-sha-b9a86c4f52205c927373caa7583d3a43989cfca7`
+resolved to index digest
+`sha256:e117b858d5aecdb8eb39dc56451378b6e6bd72dd5e042ab96fee5b6154000043`;
+its amd64 manifest is
+`sha256:cdba4bfd40f288e577842b3308e88ccfb7252623ac7b13d08074fc45cc305b8e`.
 
-| Measurement | Existing apt job | Candidate digest job | Status |
-| --- | ---: | ---: | --- |
-| Compressed transfer size | pending | pending | pending publication |
-| Cold pull | n/a | pending | pending publication |
-| Immediate repeat pull with local layers present | n/a | pending | pending publication |
-| Cold container startup | n/a | pending | pending publication |
-| Warm container startup | n/a | pending | pending publication |
-| Dependency/setup time | pending | pending | pending consumer branch |
-| Server build/test/coverage | pending | pending | pending consumer branch |
-| Client build/test/coverage | pending | pending | pending consumer branch |
-| End-to-end job time | pending | pending | pending consumer branch |
-| Warm ccache hits/misses | pending | pending | pending consumer branch |
+The linked [Classic review](https://github.com/atrinik/classic/pull/98) tested
+source `934af663a1f0d5892026a366f12b907459f3cd50`. The apt baseline was
+[run 31405779774](https://github.com/atrinik/classic/actions/runs/31405779774).
+Candidate [run 31430896836](https://github.com/atrinik/classic/actions/runs/31430896836)
+attempt 3 started without matching compiler caches; unchanged attempt 4 ran on
+new hosted runners and restored all three caches. All three executions used
+GitHub's `ubuntu-24.04` image version `20260720.247.2` and runner `2.336.0`.
+The same runner image in
+[final evidence run 31432805795](https://github.com/atrinik/classic/actions/runs/31432805795)
+recorded the remaining hosted environment details:
 
-Record the runner image, CPU allocation, Docker version, commands, raw samples,
-and both review URLs with the completed table. Do not compare timings collected
-on materially different runners.
+- Runner OS / architecture / logical CPUs: `ubuntu24` / `X64` / `4`
+- Kernel: `Linux 6.17.0-1020-azure x86_64 GNU/Linux`
+- Docker client / server: `28.0.4` / `28.0.4`
+
+Each candidate attempt removed the exact local image reference before its first
+pull, immediately repeated the pull with local layers present, then measured
+one cold and five warm `docker run --rm IMAGE true` invocations. Compressed
+size is the sum of the registry manifest's amd64 layers, not a sampled Docker
+archive.
+
+| Measurement | Cold-cache attempt 3 | Restored-cache attempt 4 |
+| --- | ---: | ---: |
+| Compressed amd64 layers | 401,282,166 B | 401,282,166 B |
+| Docker content size | 1,136,279,102 B | 1,136,279,102 B |
+| First pull | 18,226 ms | 21,643 ms |
+| Immediate repeat pull | 210 ms | 176 ms |
+| Cold startup | 269 ms | 272 ms |
+| Warm startup samples | 184, 173, 178, 171, 187 ms | 180, 193, 186, 189, 197 ms |
+| Warm startup mean | 178.6 ms | 189.0 ms |
+
+Job times are exact differences between GitHub's `started_at` and
+`completed_at` timestamps. They are hosted samples, not performance
+guarantees.
+
+| Job | Apt baseline | Candidate cold | Candidate warm | Warm vs baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Core validation | 206 s | 116 s | 84 s | -122 s (-59.2%) |
+| Client validation | 84 s | 67 s | 40 s | -44 s (-52.4%) |
+| Server validation | 202 s | 235 s | 141 s | -61 s (-30.2%) |
+
+The baseline core dependency-install step took 28 seconds. Its complete client
+and server validation steps took 67 and 185 seconds. The cold candidate paid
+25 and 33 seconds for the client and server first pulls; its respective
+validation steps took 19 and 181 seconds. With restored compiler caches those
+steps took 9 and 100 seconds.
+
+The complete uploaded `ccache --print-stats` outputs report:
+
+| Component | Cold direct hits | Cold misses | Warm direct hits | Warm misses |
+| --- | ---: | ---: | ---: | ---: |
+| Core | 0 | 87 | 87 | 0 |
+| Client | 0 | 193 | 193 | 0 |
+| Server | 10 | 986 | 996 | 0 |
+
+The ten cold server hits occurred within its repeated configurations. The new
+warm runners restored 1,276 direct hits and recorded zero misses. GitHub stored
+exactly three component-separated PR cache keys under `refs/pull/98/merge`; a
+lookup for the trusted-main prefix returned no entry.
+
+The Classic repository preserves the raw coordinates, commands, measurements,
+cache evidence, invalidation tests, and reproduction procedure in
+[`docs/CI-LINUX-IMAGE.md`](https://github.com/atrinik/classic/blob/perf/ci-linux-cache/docs/CI-LINUX-IMAGE.md).
+The candidate digest is pre-merge evidence only. After this publisher change is
+released, Classic must verify the versioned image's inventories and pin its
+released digest before its consumer review becomes ready.

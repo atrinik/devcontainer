@@ -14,12 +14,12 @@ Published images:
 - `ghcr.io/atrinik/classic-build:ubuntu-26.04`
 - `ghcr.io/atrinik/windows-build:mxe`
 
-Every successful image publication updates `latest`, its rolling platform tag,
-and a `sha-<commit>` tag. Publishing from an image-repository tag matching
-`vX.Y.Z` also publishes the corresponding `X.Y.Z` image tag. Release automation
-publishes the broad Linux development image, the slim Classic Check image, and
-the Windows cross-build image for every version so consumers can pin a matched
-toolchain release.
+Every successful non-candidate image publication updates `latest`, its rolling
+platform tag, and a `sha-<commit>` tag. Publishing from an image-repository tag
+matching `vX.Y.Z` also publishes the corresponding `X.Y.Z` image tag. Release
+automation publishes the broad Linux development image, the slim Classic Check
+image, and the Windows cross-build image for every version so consumers can pin
+a matched toolchain release.
 
 ## Publishing
 
