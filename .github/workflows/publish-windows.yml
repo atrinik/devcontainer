@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: publish-windows-build-image
@@ -17,6 +16,9 @@ concurrency:
 jobs:
   publish-candidates:
     name: Publish immutable candidates
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-26.04
     timeout-minutes: 180
     outputs:
@@ -155,6 +157,7 @@ jobs:
   windows-native:
     name: Verify immutable Classic Check candidate on Windows
     needs: publish-candidates
+    permissions: {}
     runs-on: windows-2025
     timeout-minutes: 10
     steps:
@@ -191,6 +194,9 @@ jobs:
     needs:
       - publish-candidates
       - windows-native
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:

@@ -5,7 +5,6 @@ on:
 
 permissions:
   contents: read
-  packages: read
 
 concurrency:
   group: validate-images-${{ github.event.pull_request.number || github.ref }}
@@ -91,6 +90,9 @@ jobs:
     name: Windows cross-build images
     needs: changes
     if: needs.changes.outputs.windows == 'true'
+    permissions:
+      contents: read
+      packages: read
     runs-on: ubuntu-26.04
     timeout-minutes: 180
     steps:
@@ -228,6 +230,7 @@ jobs:
       - changes
       - windows
     if: needs.changes.outputs.windows == 'true'
+    permissions: {}
     runs-on: windows-2025
     timeout-minutes: 10
     steps:
@@ -267,6 +270,7 @@ jobs:
       - windows
       - windows-native
     if: always()
+    permissions: {}
     runs-on: ubuntu-26.04
     steps:
       - name: Require successful applicable validations
