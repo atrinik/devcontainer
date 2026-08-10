@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schema_version": 1,
+  "target": "classic-check",
+  "consumer": {
+    "repository": "atrinik/classic",
+    "validation_commit": "2d3ecad2117733b1262f5195c0dd414fef4b45f3",
+    "workflow": ".github/workflows/check.yml",
+    "jobs": [
+      "Build native Windows tests",
+      "Native Windows security tests"
+    ]
+  },
+  "base": {
+    "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+    "digest": "sha256:73d85a96694a2cadca1ba3fcb5721f2312a64f1d571dd86f6c77e10a708931dc"
+  },
+  "host_packages": [
+    "ca-certificates",
+    "cmake",
+    "git",
+    "ninja-build",
+    "python3"
+  ],
+  "mxe": {
+    "repository": "mxe/mxe",
+    "commit": "8784776b145a8ddd350ce32aa0908ac10977060c",
+    "target": "x86_64-w64-mingw32.shared",
+    "packages": [
+      "cc",
+      "cmake",
+      "curl",
+      "libidn2",
+      "libxml2",
+      "openssl",
+      "sdl3",
+      "sdl3_image",
+      "sdl3_ttf",
+      "zlib"
+    ],
+    "additional_libraries": [
+      "miniupnpc",
+      "SDL3_mixer",
+      "libogg",
+      "libopus",
+      "libopusfile"
+    ],
+    "copied_roots": [
+      "/opt/mxe/usr/bin",
+      "/opt/mxe/usr/lib",
+      "/opt/mxe/usr/libexec",
+      "/opt/mxe/usr/share",
+      "/opt/mxe/usr/x86_64-w64-mingw32.shared",
+      "/opt/mxe/usr/x86_64-pc-linux-gnu/bin/{cmake,cpack,ctest,pkgconf,x86_64-w64-mingw32.shared-g++,x86_64-w64-mingw32.shared-gcc}",
+      "/opt/mxe/usr/x86_64-pc-linux-gnu/share/cmake-3.31",
+      "/opt/mxe/.ccache/bin",
+      "/opt/mxe/.ccache/etc"
+    ],
+    "ccache_path": "/opt/mxe/.ccache/bin/ccache",
+    "runtime_directory": "/opt/mxe/usr/x86_64-w64-mingw32.shared/bin"
+  },
+  "staging": {
+    "commands": [
+      "bash",
+      "cmake",
+      "cpack",
+      "git",
+      "ninja",
+      "python3",
+      "x86_64-w64-mingw32.shared-cmake",
+      "x86_64-w64-mingw32.shared-gcc",
+      "x86_64-w64-mingw32.shared-objdump"
+    ],
+    "python_modules": [
+      "hashlib",
+      "json",
+      "pathlib",
+      "shutil",
+      "subprocess",
+      "tarfile",
+      "urllib.request",
+      "zipfile"
+    ]
+  },
+  "runtime_contract": {
+    "inventory": "/usr/local/share/atrinik/audio-toolchain.json",
+    "sbom": "/usr/local/share/atrinik/audio-toolchain.spdx.json",
+    "probe": "/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/atrinik-sdl3-mixer-probe.exe",
+    "import_contract_source": "audio-toolchain.json#windows"
+  },
+  "excluded": {
+    "paths": [
+      "/opt/mxe/.git",
+      "/opt/mxe/.ccache/ccache",
+      "/opt/mxe/log",
+      "/opt/mxe/pkg",
+      "/opt/mxe/python-runtime",
+      "/opt/mxe/usr/x86_64-pc-linux-gnu/icu4c",
+      "/opt/mxe/usr/x86_64-w64-mingw32.shared/include/python3.14",
+      "/opt/mxe/usr/x86_64-w64-mingw32.shared/lib/libpython314.dll.a"
+    ],
+    "capabilities": [
+      "native Linux worldmaker build",
+      "Windows server Python plugin SDK and runtime",
+      "general-purpose MXE development checkout"
+    ],
+    "reason": "Classic Check builds and stages only libatrinik and client native Windows tests; server packaging and worldmaker remain on the general-purpose image."
+  }
+}

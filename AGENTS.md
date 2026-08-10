@@ -15,8 +15,11 @@
 - Treat Dockerfile inputs, `.dockerignore`, cache scopes, build arguments,
   published tags, and workflow path filters as one contract. If a relevant file
   changes, the required aggregate validation must still run.
-- Every semantic release publishes both images and their supported tags. Do not
-  create manual release tags as a substitute for semantic-release.
+- Every semantic release publishes the Linux image plus the general and
+  task-focused Windows images with their supported tags. Keep the
+  `classic-check` target after the expensive MXE foundation, preserve the
+  general Windows image as the default Dockerfile result, and do not create
+  manual release tags as a substitute for semantic-release.
 - Validate Dockerfiles with `docker build --check`. Build and smoke-test each
   affected image; note that a cold Windows/MXE build is expensive and may rely
   on CI cache for final verification.

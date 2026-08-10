@@ -7,8 +7,11 @@ audio_expected=${3:-audio-toolchain.json}
 audio_installed=${4:-}
 audio_sbom_expected=${5:-audio-toolchain.spdx.json}
 audio_sbom_installed=${6:-}
+classic_check_expected=${7:-}
+classic_check_installed=${8:-}
 
-jq -e '
+if [[ -n ${classic_check_expected} ]]; then
+  jq -e '
   .schema_version == 1
   and .platform == "linux/amd64"
   and (.tools | keys == [
@@ -120,4 +123,40 @@ jq -e --slurpfile inventory "${audio_expected}" '
 
 if [[ -n ${audio_sbom_installed} ]]; then
   cmp --silent "${audio_sbom_expected}" "${audio_sbom_installed}"
+fi
+
+jq -e '
+  .schema_version == 1
+  and .target == "classic-check"
+  and .consumer.repository == "atrinik/classic"
+  and (.consumer.validation_commit | test("^[0-9a-f]{40}$"))
+  and .base.digest == "sha256:73d85a96694a2cadca1ba3fcb5721f2312a64f1d571dd86f6c77e10a708931dc"
+  and .host_packages == [
+    "ca-certificates", "cmake", "git", "ninja-build", "python3"
+  ]
+  and .mxe.commit == "8784776b145a8ddd350ce32aa0908ac10977060c"
+  and .mxe.target == "x86_64-w64-mingw32.shared"
+  and .mxe.ccache_path == "/opt/mxe/.ccache/bin/ccache"
+  and .mxe.runtime_directory == "/opt/mxe/usr/x86_64-w64-mingw32.shared/bin"
+  and (.mxe.packages | index("cc") != null)
+  and (.mxe.packages | index("curl") != null)
+  and (.mxe.packages | index("libidn2") != null)
+  and (.mxe.packages | index("libxml2") != null)
+  and (.mxe.packages | index("openssl") != null)
+  and (.mxe.packages | index("sdl3") != null)
+  and (.mxe.packages | index("sdl3_image") != null)
+  and (.mxe.packages | index("sdl3_ttf") != null)
+  and (.mxe.packages | index("zlib") != null)
+  and (.mxe.additional_libraries | index("SDL3_mixer") != null)
+  and .runtime_contract.inventory == "/usr/local/share/atrinik/audio-toolchain.json"
+  and .runtime_contract.sbom == "/usr/local/share/atrinik/audio-toolchain.spdx.json"
+  and (.excluded.paths | index("/opt/mxe/python-runtime") != null)
+  and (.excluded.paths | index("/opt/mxe/.ccache/ccache") != null)
+  and (.excluded.paths | index("/opt/mxe/usr/x86_64-pc-linux-gnu/icu4c") != null)
+  and (.excluded.capabilities | index("native Linux worldmaker build") != null)
+' "${classic_check_expected}" >/dev/null
+fi
+
+if [[ -n ${classic_check_installed} ]]; then
+  cmp --silent "${classic_check_expected}" "${classic_check_installed}"
 fi
