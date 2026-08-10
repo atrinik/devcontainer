@@ -91,8 +91,6 @@ ARG PROTOC_GEN_PROST_VERSION=0.5.0
 ARG RUST_VERSION=1.97.1
 ARG RUSTUP_VERSION=1.29.0
 ARG RUSTUP_SHA256=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
-ARG SDL3_MIXER_VERSION=3.2.4
-ARG SDL3_MIXER_SHA256=182a07c745375e113dc740d43964ff21b0be29f29f59876c4dbc4db3d32f6901
 ARG SYFT_VERSION=1.50.0
 ARG SYFT_SHA256=bf7b29ff57f06da30918266a0e1c2885a8f99784798d1bdb1628886aa015d788
 ARG TRIVY_VERSION=0.73.0
@@ -157,40 +155,29 @@ RUN curl --fail --location --silent --show-error \
     && tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy \
     && rm -f /tmp/syft.tar.gz /tmp/trivy.tar.gz
 
-# Ubuntu does not currently package SDL3_mixer. Build the official release
-# with its dependency-free Ogg Vorbis and MP3 decoders, matching the formats
-# Atrinik ships while keeping the image small and reproducible.
-RUN curl --fail --location --silent --show-error \
-        "https://github.com/libsdl-org/SDL_mixer/releases/download/release-${SDL3_MIXER_VERSION}/SDL3_mixer-${SDL3_MIXER_VERSION}.tar.gz" \
-        --output /tmp/SDL3_mixer.tar.gz \
-    && echo "${SDL3_MIXER_SHA256}  /tmp/SDL3_mixer.tar.gz" | sha256sum -c - \
-    && tar -xzf /tmp/SDL3_mixer.tar.gz -C /tmp \
-    && cmake \
-        -S "/tmp/SDL3_mixer-${SDL3_MIXER_VERSION}" \
-        -B /tmp/SDL3_mixer-build \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DSDLMIXER_DEPS_SHARED=OFF \
-        -DSDLMIXER_EXAMPLES=OFF \
-        -DSDLMIXER_FLAC=OFF \
-        -DSDLMIXER_GME=OFF \
-        -DSDLMIXER_INSTALL=ON \
-        -DSDLMIXER_MIDI=OFF \
-        -DSDLMIXER_MOD=OFF \
-        -DSDLMIXER_MP3=ON \
-        -DSDLMIXER_MP3_DRMP3=ON \
-        -DSDLMIXER_MP3_MPG123=OFF \
-        -DSDLMIXER_OPUS=OFF \
-        -DSDLMIXER_TESTS=OFF \
-        -DSDLMIXER_VORBIS_STB=ON \
-        -DSDLMIXER_VORBIS_VORBISFILE=OFF \
-        -DSDLMIXER_WAVPACK=OFF \
-    && cmake --build /tmp/SDL3_mixer-build --parallel "$(nproc)" \
-    && cmake --install /tmp/SDL3_mixer-build \
+# Ubuntu does not currently package SDL3_mixer. Build the checksum-pinned
+# release with static libogg, libopus, and libopusfile inputs so OPUS, WAV,
+# and built-in Vorbis remain available without host codec libraries.
+COPY audio-toolchain.json /tmp/audio-toolchain.json
+COPY tools/build-sdl3-mixer.sh /tmp/build-sdl3-mixer.sh
+RUN /tmp/build-sdl3-mixer.sh \
+        /tmp/audio-toolchain.json cmake /usr/local "$(nproc)" \
     && ldconfig \
-    && rm -rf "/tmp/SDL3_mixer-${SDL3_MIXER_VERSION}" \
-        /tmp/SDL3_mixer-build \
-        /tmp/SDL3_mixer.tar.gz \
-    && test "$(pkg-config --modversion sdl3-mixer)" = "${SDL3_MIXER_VERSION}"
+    && test "$(pkg-config --modversion sdl3-mixer)" \
+        = "$(jq -r '.sdl_mixer.version' /tmp/audio-toolchain.json)"
+
+COPY tools/audio/opus-probe.opus /usr/local/share/atrinik/audio/opus-probe.opus
+COPY tools/audio/sdl3-mixer-probe.c /tmp/sdl3-mixer-probe.c
+RUN test "$(sha256sum /usr/local/share/atrinik/audio/opus-probe.opus \
+        | cut -d' ' -f1)" \
+        = "$(jq -r '.fixture.sha256' /tmp/audio-toolchain.json)" \
+    && cc -std=c17 -Wall -Wextra -Werror \
+        /tmp/sdl3-mixer-probe.c \
+        -o /usr/local/bin/atrinik-sdl3-mixer-probe \
+        $(pkg-config --cflags --libs sdl3-mixer) \
+    && atrinik-sdl3-mixer-probe \
+        /usr/local/share/atrinik/audio/opus-probe.opus \
+    && rm /tmp/sdl3-mixer-probe.c
 
 RUN curl --fail --location --silent --show-error \
         "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
@@ -249,18 +236,31 @@ RUN clang --version \
     && unzip -v >/dev/null
 
 COPY toolchains.json /usr/local/share/atrinik/toolchains.json
+COPY audio-toolchain.json /usr/local/share/atrinik/audio-toolchain.json
+COPY audio-toolchain.spdx.json /usr/local/share/atrinik/audio-toolchain.spdx.json
 
 FROM toolchain AS validation
 
 COPY .github/actionlint.yaml /workspace/.github/actionlint.yaml
 COPY .github/workflows /workspace/.github/workflows
 COPY toolchains.json /workspace/toolchains.json
+COPY audio-toolchain.json /workspace/audio-toolchain.json
+COPY audio-toolchain.spdx.json /workspace/audio-toolchain.spdx.json
 COPY tools/validate-toolchains.sh /workspace/tools/validate-toolchains.sh
 
 RUN actionlint \
     -config-file /workspace/.github/actionlint.yaml \
     /workspace/.github/workflows/*.yml \
     && /workspace/tools/validate-toolchains.sh \
-        /workspace/toolchains.json /usr/local/share/atrinik/toolchains.json
+        /workspace/toolchains.json /usr/local/share/atrinik/toolchains.json \
+        /workspace/audio-toolchain.json \
+        /usr/local/share/atrinik/audio-toolchain.json \
+        /workspace/audio-toolchain.spdx.json \
+        /usr/local/share/atrinik/audio-toolchain.spdx.json \
+    && syft dir:/ --override-default-catalogers sbom-cataloger -o json \
+        | jq -e --slurpfile inventory /workspace/audio-toolchain.json \
+            '([.artifacts[] | [.name, .version]] | sort) == \
+             (($inventory[0].dependencies + [$inventory[0].sdl_mixer]) \
+              | map([.name, .version]) | sort)'
 
 FROM toolchain AS final

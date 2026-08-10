@@ -58,8 +58,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 ARG MXE_REF=8784776b145a8ddd350ce32aa0908ac10977060c
 ARG MXE_BUILD_JOBS=2
 ARG MINIUPNPC_COMMIT=bf4215a7574f88aa55859db9db00e3ae58cf42d6
-ARG SDL3_MIXER_VERSION=3.2.4
-ARG SDL3_MIXER_MINGW_SHA256=2ff5f59be4683e0afb4339c4fa73c6228651e52d37b040ecf80da08edb3cecd6
 ARG PYTHON_VERSION=3.14.6
 ARG PYTHON_EMBED_SHA256=df901e84a896ff1ee720ad03377e0c8d8c2244fda79808aeeaff6316df1cb75c
 ARG PYTHON_SOURCE_SHA256=143b1dddefaec3bd2e21e3b839b34a2b7fb9842272883c576420d605e9f30c63
@@ -103,22 +101,57 @@ RUN make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
 RUN test "$(/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/curl-config --ssl-backends)" \
         = "OpenSSL"
 
-# MXE does not yet package SDL3_mixer. Install the official, checksum-pinned
-# x86_64 MinGW SDK into the MXE prefix; its DLL has no non-system dependency
-# beyond the SDL3 DLL built above.
-RUN wget -q \
-        "https://github.com/libsdl-org/SDL_mixer/releases/download/release-${SDL3_MIXER_VERSION}/SDL3_mixer-devel-${SDL3_MIXER_VERSION}-mingw.tar.gz" \
-        -O /tmp/SDL3_mixer-mingw.tar.gz \
-    && echo "${SDL3_MIXER_MINGW_SHA256}  /tmp/SDL3_mixer-mingw.tar.gz" \
-        | sha256sum -c - \
-    && mkdir -p /tmp/SDL3_mixer-mingw \
-    && tar -xzf /tmp/SDL3_mixer-mingw.tar.gz -C /tmp/SDL3_mixer-mingw \
-    && cp -a \
-        "/tmp/SDL3_mixer-mingw/SDL3_mixer-${SDL3_MIXER_VERSION}/x86_64-w64-mingw32/." \
-        "${MXE_PREFIX}/" \
-    && rm -rf /tmp/SDL3_mixer-mingw /tmp/SDL3_mixer-mingw.tar.gz \
+# Install the audio manifest reader after the expensive MXE foundation so this
+# small dependency does not invalidate the established cross-toolchain cache.
+USER root
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends jq
+USER vscode
+
+# MXE does not yet package SDL3_mixer. Cross-build the checksum-pinned release
+# with static libogg, libopus, and libopusfile inputs. This keeps the shared
+# SDL3_mixer DLL self-contained instead of creating an easy-to-miss codec DLL
+# closure for packaged clients.
+COPY --chown=vscode:vscode audio-toolchain.json /tmp/audio-toolchain.json
+COPY --chown=vscode:vscode tools/build-sdl3-mixer.sh /tmp/build-sdl3-mixer.sh
+RUN /tmp/build-sdl3-mixer.sh \
+        /tmp/audio-toolchain.json \
+        x86_64-w64-mingw32.shared-cmake \
+        "${MXE_PREFIX}" "${MXE_BUILD_JOBS}" \
     && test "$(x86_64-w64-mingw32.shared-pkg-config --modversion sdl3-mixer)" \
-        = "${SDL3_MIXER_VERSION}"
+        = "$(jq -r '.sdl_mixer.version' /tmp/audio-toolchain.json)"
+
+COPY --chown=vscode:vscode tools/audio/opus-probe.opus \
+        ${MXE_PREFIX}/share/atrinik/audio/opus-probe.opus
+COPY --chown=vscode:vscode tools/audio/sdl3-mixer-probe.c \
+        /tmp/sdl3-mixer-probe.c
+COPY --chown=vscode:vscode tools/verify-pe-imports.sh \
+        /tmp/verify-pe-imports.sh
+RUN test "$(sha256sum "${MXE_PREFIX}/share/atrinik/audio/opus-probe.opus" \
+        | cut -d' ' -f1)" \
+        = "$(jq -r '.fixture.sha256' /tmp/audio-toolchain.json)" \
+    && x86_64-w64-mingw32.shared-gcc \
+        -std=c17 -Wall -Wextra -Werror \
+        /tmp/sdl3-mixer-probe.c \
+        -o "${MXE_RUNTIME_DIR}/atrinik-sdl3-mixer-probe.exe" \
+        $(x86_64-w64-mingw32.shared-pkg-config \
+            --cflags --libs sdl3-mixer) \
+    && jq -r '.windows.sdl_mixer_imports[]' \
+        /tmp/audio-toolchain.json \
+        | xargs /tmp/verify-pe-imports.sh \
+            x86_64-w64-mingw32.shared-objdump \
+            "${MXE_RUNTIME_DIR}/SDL3_mixer.dll" \
+    && jq -r '.windows.support_runtime_imports["libssp-0.dll"][]' \
+        /tmp/audio-toolchain.json \
+        | xargs /tmp/verify-pe-imports.sh \
+            x86_64-w64-mingw32.shared-objdump \
+            "${MXE_RUNTIME_DIR}/libssp-0.dll" \
+    && ! find "${MXE_RUNTIME_DIR}" -maxdepth 1 -type f \
+        \( -iname '*opus*.dll' -o -iname 'libogg*.dll' \) \
+        -print -quit | grep -q . \
+    && rm /tmp/sdl3-mixer-probe.c
 
 RUN git clone --filter=blob:none https://github.com/miniupnp/miniupnp.git /tmp/miniupnp \
     && git -C /tmp/miniupnp checkout "${MINIUPNPC_COMMIT}" \
@@ -174,6 +207,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         zlib1g-dev
 
 COPY windows/mxe-path.sh /etc/profile.d/mxe-path.sh
+COPY audio-toolchain.json /usr/local/share/atrinik/audio-toolchain.json
+COPY audio-toolchain.spdx.json /usr/local/share/atrinik/audio-toolchain.spdx.json
 
 RUN command -v x86_64-w64-mingw32.shared-gcc \
     && command -v x86_64-w64-mingw32.shared-cmake \
@@ -188,5 +223,6 @@ RUN command -v x86_64-w64-mingw32.shared-gcc \
     && test -f "${MXE_RUNTIME_DIR}/SDL3.dll" \
     && test -f "${MXE_RUNTIME_DIR}/SDL3_image.dll" \
     && test -f "${MXE_RUNTIME_DIR}/SDL3_mixer.dll" \
+    && test -f "${MXE_RUNTIME_DIR}/atrinik-sdl3-mixer-probe.exe" \
     && test -f "${MXE_RUNTIME_DIR}/SDL3_ttf.dll" \
     && ssh -V
