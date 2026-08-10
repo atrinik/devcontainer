@@ -7,6 +7,8 @@ audio_expected=${3:-audio-toolchain.json}
 audio_installed=${4:-}
 audio_sbom_expected=${5:-audio-toolchain.spdx.json}
 audio_sbom_installed=${6:-}
+classic_check_expected=${7:-}
+classic_check_installed=${8:-}
 
 jq -e '
   .schema_version == 1
@@ -120,4 +122,114 @@ jq -e --slurpfile inventory "${audio_expected}" '
 
 if [[ -n ${audio_sbom_installed} ]]; then
   cmp --silent "${audio_sbom_expected}" "${audio_sbom_installed}"
+fi
+
+if [[ -n ${classic_check_expected} ]]; then
+  jq -e '
+  keys == [
+    "$schema", "base", "consumer", "excluded", "host_packages", "mxe",
+    "runtime_contract", "schema_version", "staging", "target", "verification"
+  ]
+  and .["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+  and .schema_version == 1
+  and .target == "classic-check"
+  and (.consumer | keys == ["jobs", "repository", "validation_commit", "workflow"])
+  and .consumer.repository == "atrinik/classic"
+  and (.consumer.validation_commit | test("^[0-9a-f]{40}$"))
+  and .consumer.workflow == ".github/workflows/check.yml"
+  and .consumer.jobs == [
+    "Build native Windows tests", "Native Windows security tests"
+  ]
+  and .base == {
+    "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+    "digest": "sha256:73d85a96694a2cadca1ba3fcb5721f2312a64f1d571dd86f6c77e10a708931dc"
+  }
+  and .host_packages == [
+    "ca-certificates", "cmake", "git", "ninja-build", "python3"
+  ]
+  and (.mxe | keys == [
+    "additional_libraries", "ccache_path", "commit", "copied_roots",
+    "packages", "repository", "runtime_directory", "sources", "target"
+  ])
+  and .mxe.repository == "mxe/mxe"
+  and .mxe.commit == "8784776b145a8ddd350ce32aa0908ac10977060c"
+  and .mxe.target == "x86_64-w64-mingw32.shared"
+  and .mxe.packages == [
+    "cc", "cmake", "curl", "libidn2", "libxml2", "openssl", "sdl3",
+    "sdl3_image", "sdl3_ttf", "zlib"
+  ]
+  and .mxe.additional_libraries == [
+    "miniupnpc", "SDL3_mixer", "libogg", "libopus", "libopusfile"
+  ]
+  and .mxe.sources == {
+    "miniupnpc": {
+      "repository": "miniupnp/miniupnp",
+      "commit": "bf4215a7574f88aa55859db9db00e3ae58cf42d6"
+    }
+  }
+  and .mxe.copied_roots == [
+    "/opt/mxe/usr/bin",
+    "/opt/mxe/usr/include",
+    "/opt/mxe/usr/installed",
+    "/opt/mxe/usr/lib",
+    "/opt/mxe/usr/libexec",
+    "/opt/mxe/usr/share",
+    "/opt/mxe/usr/x86_64-w64-mingw32.shared",
+    "/opt/mxe/usr/x86_64-pc-linux-gnu/bin/{cmake,cpack,ctest,pkgconf,x86_64-w64-mingw32.shared-g++,x86_64-w64-mingw32.shared-gcc}",
+    "/opt/mxe/usr/x86_64-pc-linux-gnu/share/cmake-3.31",
+    "/opt/mxe/.ccache/bin",
+    "/opt/mxe/.ccache/etc"
+  ]
+  and .mxe.ccache_path == "/opt/mxe/.ccache/bin/ccache"
+  and .mxe.runtime_directory == "/opt/mxe/usr/x86_64-w64-mingw32.shared/bin"
+  and .staging == {
+    "commands": [
+      "bash", "cmake", "cpack", "git", "ninja", "python3",
+      "x86_64-w64-mingw32.shared-cmake",
+      "x86_64-w64-mingw32.shared-gcc",
+      "x86_64-w64-mingw32.shared-objdump"
+    ],
+    "python_modules": [
+      "hashlib", "json", "pathlib", "shutil", "subprocess", "tarfile",
+      "urllib.request", "zipfile"
+    ]
+  }
+  and .runtime_contract == {
+    "inventory": "/usr/local/share/atrinik/audio-toolchain.json",
+    "sbom": "/usr/local/share/atrinik/audio-toolchain.spdx.json",
+    "probe": "/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/atrinik-sdl3-mixer-probe.exe",
+    "import_contract_source": "audio-toolchain.json#windows"
+  }
+  and (.verification | keys == ["native_tests"])
+  and .verification.native_tests == [
+    {"executable":"libatrinik-path.exe","build_target":"libatrinik-path","source":"libatrinik/build/windows-tests/libatrinik-path.exe","arguments":[]},
+    {"executable":"libatrinik-rendezvous.exe","build_target":"libatrinik-rendezvous","source":"libatrinik/build/windows-tests/libatrinik-rendezvous.exe","arguments":["fixtures/rendezvous-invite-v1.json","fixtures/rendezvous-invite-v1-negative.json"]},
+    {"executable":"libatrinik-metaserver-publisher.exe","build_target":"libatrinik-metaserver-publisher","source":"libatrinik/build/windows-tests/libatrinik-metaserver-publisher.exe","arguments":["fixtures/metaserver-publisher-v1.json"]},
+    {"executable":"libatrinik-metaserver-url.exe","build_target":"libatrinik-metaserver-url","source":"libatrinik/build/windows-tests/libatrinik-metaserver-url.exe","arguments":[]},
+    {"executable":"libatrinik-stun.exe","build_target":"libatrinik-stun","source":"libatrinik/build/windows-tests/libatrinik-stun.exe","arguments":[]},
+    {"executable":"client-rich-presence-tests.exe","build_target":null,"source":"client/build/windows-release/client-rich-presence-tests.exe","arguments":[]}
+  ]
+  and .excluded == {
+    "paths": [
+      "/opt/mxe/.git", "/opt/mxe/.ccache/ccache", "/opt/mxe/log",
+      "/opt/mxe/pkg", "/opt/mxe/python-runtime",
+      "/opt/mxe/usr/x86_64-pc-linux-gnu/icu4c",
+      "/opt/mxe/usr/x86_64-w64-mingw32.shared/include/python3.14",
+      "/opt/mxe/usr/x86_64-w64-mingw32.shared/lib/libpython314.dll.a"
+    ],
+    "capabilities": [
+      "native Linux worldmaker build",
+      "Windows server Python plugin SDK and runtime",
+      "general-purpose MXE development checkout"
+    ],
+    "reason": "Classic Check builds and stages only libatrinik and client native Windows tests; server packaging and worldmaker remain on the general-purpose image."
+  }
+' "${classic_check_expected}" >/dev/null
+
+  if [[ -n ${classic_check_installed} ]]; then
+    cmp --silent "${classic_check_expected}" "${classic_check_installed}"
+  fi
+elif [[ -n ${classic_check_installed} ]]; then
+  echo "classic-check installed inventory requires an expected inventory" >&2
+  exit 2
 fi

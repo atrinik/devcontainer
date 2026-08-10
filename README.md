@@ -13,13 +13,27 @@ Published images:
 - `ghcr.io/atrinik/linux-build:ubuntu-26.04`
 - `ghcr.io/atrinik/classic-build:ubuntu-26.04`
 - `ghcr.io/atrinik/windows-build:mxe`
+- `ghcr.io/atrinik/windows-build:classic-check-mxe`
 
-Every successful non-candidate image publication updates `latest`, its rolling
-platform tag, and a `sha-<commit>` tag. Publishing from an image-repository tag
-matching `vX.Y.Z` also publishes the corresponding `X.Y.Z` image tag. Release
-automation publishes the broad Linux development image, the slim Classic Check
-image, and the Windows cross-build image for every version so consumers can pin
-a matched toolchain release.
+Every non-candidate Linux publication updates `latest`, `ubuntu-26.04`, and a
+`sha-<commit>` tag for both Linux packages. A Windows publication first creates
+immutable `sha-<commit>` and `classic-check-sha-<commit>` candidates in the
+existing private `windows-build` package, preserving its governed Classic
+Actions read access. It smokes the exact published Classic digest and executes
+its six staged tests on Windows before promoting `latest`, `mxe`,
+`classic-check`, and `classic-check-mxe`. Publishing from an image-repository
+tag matching `vX.Y.Z` also promotes the corresponding `X.Y.Z` and
+`classic-check-X.Y.Z` aliases.
+Release automation publishes the broad Linux, slim Linux Classic, general
+Windows, and task-focused Windows Classic variants for every version so
+consumers can pin a matched, verified toolchain release.
+
+GHCR cannot atomically move aliases for two different manifests. The Windows
+promotion job therefore moves the Classic aliases first and the general aliases
+last, after both immutable candidates and native tests pass. If the final
+registry operation fails, rerun the failed promotion job in that same workflow
+run. The job idempotently reapplies both alias sets from the preserved,
+verified digest outputs; do not create a replacement release tag.
 
 ## Publishing
 
@@ -39,7 +53,7 @@ publisher produces both `linux-build` and `classic-build`. Its
 `candidate-sha-<commit>` without moving any stable or version tag. When
 recovering a versioned release, leave that input disabled and dispatch the
 Linux and Windows publishers against the same existing tag so all three image
-versions remain matched.
+packages and all four variants remain matched.
 
 ## Local validation
 
@@ -59,6 +73,10 @@ docker build --file linux/Dockerfile \
 docker build --file windows/Dockerfile \
   --build-arg MXE_BUILD_JOBS="$(nproc)" \
   --tag atrinik-windows-build .
+docker build --file windows/Dockerfile \
+  --target classic-check \
+  --build-arg MXE_BUILD_JOBS="$(nproc)" \
+  --tag atrinik-windows-check .
 
 docker run --rm atrinik-linux-build clang --version
 docker run --rm atrinik-linux-build gh --version
@@ -83,6 +101,8 @@ docker run --rm atrinik-linux-build \
 docker run --rm atrinik-windows-build \
   x86_64-w64-mingw32.shared-gcc --version
 docker run --rm --user vscode atrinik-windows-build ssh -V
+docker run --rm --user vscode atrinik-windows-check \
+  x86_64-w64-mingw32.shared-gcc --version
 ```
 
 Run the pinned full Classic contract from this repository root, substituting
@@ -208,16 +228,16 @@ exact Windows import contract. The matching
 [`audio-toolchain.spdx.json`](audio-toolchain.spdx.json) records SDL3_mixer and
 all three statically linked codec packages in SPDX 2.3 form, because a scanner
 cannot infer static source dependencies from the resulting shared library.
-All three images carry the inventory and SBOM under
+All four image variants carry the inventory and SBOM under
 `/usr/local/share/atrinik/`; Syft's nested-SBOM cataloger incorporates those
 packages in whole-image SBOM output.
 
-All three builds compile the same no-device decoder probe. Linux validation runs it
-during the image build, enumerates the required `WAV`, `STBVORBIS`, `DRMP3`,
-and `OPUS` decoders, rejects MIDI and module decoders, fully decodes the
-bundled Opus fixture, and rejects empty PCM. The
-Windows image puts `atrinik-sdl3-mixer-probe.exe` and the fixture under the MXE
-prefix so a clean native Windows package test can copy and run the identical
+Both Dockerfiles compile the same no-device decoder probe for their image
+variants. Linux validation runs it during the image build, enumerates the
+required `WAV`, `STBVORBIS`, `DRMP3`, and `OPUS` decoders, rejects MIDI and
+module decoders, fully decodes the bundled Opus fixture, and rejects empty PCM.
+The Windows image puts `atrinik-sdl3-mixer-probe.exe` and the fixture under the
+MXE prefix so a clean native Windows package test can copy and run the identical
 contract without installing codecs separately. The MXE build cannot execute a
 Windows binary, so its image validation instead compiles the probe and verifies
 the exact imports of the self-contained `SDL3_mixer.dll`; native execution
@@ -229,21 +249,51 @@ then use `ssh-add -l` in the opened container to confirm that its identities are
 available. The images intentionally do not copy or mount the host's private key
 files. SSH host configuration and `known_hosts` remain container-local.
 
-The Windows image compiles MXE and its dependency stack and can take a long
-time on a genuinely cold build. Pull-request validation restores both the
-published rolling image's inline BuildKit cache and the image-specific GitHub
-Actions cache. It exports cache-only results instead of loading the completed
-images into the runner's Docker daemon. Release builds publish inline cache
-metadata for cross-ref reuse and also retain the max-mode Actions cache;
-Actions-cache export failures are non-fatal because publishing a usable image
-is more important than preserving an optimization.
+The general Windows image compiles MXE and its dependency stack and can take a
+long time on a genuinely cold build. Its `classic-check` target starts again
+from the pinned base and copies only the completed MXE compiler/sysroot,
+ccache, client DLL closure, and host-side tools used by
+Classic Check. It intentionally excludes MXE source/build caches, the embedded
+Windows Python SDK/runtime, and native Linux worldmaker dependencies required
+only by server packaging. The exact included and excluded contract is recorded
+in [`windows/classic-check-toolchain.json`](windows/classic-check-toolchain.json),
+while the audio inventory and SPDX document are present unchanged in both
+images.
+
+Pull-request validation is deliberately private-package-free so fork-controlled
+code never receives a GHCR read token or the private baseline image. It uses
+image-specific GitHub Actions caches, exports the general image cache-only, and
+loads the Classic Check target for its full smoke, cross-build, and native
+Windows execution. A separate same-repository branch-push/dispatch workflow
+authenticates to GHCR, restores the published inline cache, repeats the exact
+candidate smoke and native tests, and publishes the size/pull measurements.
+Release builds first publish immutable general and Classic SHA candidates with
+inline cache metadata, smoke the exact Classic repository digest, and execute
+its staged bundle on `windows-2025`. Only then does a separate promotion job
+move the rolling and version aliases, with the general aliases promoted last.
+Max-mode Actions caches are also retained for both targets; Actions-cache export
+failures are non-fatal because publishing usable images is more important than
+preserving an optimization.
+
+The performance check compares the currently pinned Classic image with the
+immutable candidate digest on a GitHub-hosted Ubuntu runner. Compressed sizes
+come from a local OCI registry. Four counterbalanced cold/warm pull trials per
+image alternate order evenly and each use a fresh Docker-in-Docker daemon
+against that registry to remove GHCR network variance and daemon-layer reuse;
+every trial averages five container starts. The artifact records raw samples,
+checkout/head/base source coordinates, manifest digests, runner metadata, and
+medians. The pinned image's first and warm GHCR pulls are also recorded, and
+the JSON plus Markdown evidence is retained as the
+`classic-check-image-measurements` workflow artifact for 30 days.
 
 Pull requests build each image whose inputs changed. Linux validation also
-runs actionlint over the repository workflows in a dedicated validation stage;
-Windows validation checks that the MXE compiler and CMake wrapper are directly
-discoverable through the image's default `PATH`. Classic validation builds its
-smoke/SBOM target, loads the slim final target, and runs the pinned Classic
-client and server checks as a non-root user.
+runs actionlint over the repository workflows in a dedicated validation stage.
+Windows validation checks that ccache, the MXE compiler, and the CMake wrapper
+are directly discoverable through the image's default `PATH`, cross-builds and
+stages every native test in the pinned Classic Check contract without network
+access, and executes the complete bundle on `windows-2025`. Linux Classic
+validation builds its smoke/SBOM target, loads the slim final target, and runs
+the pinned Classic client and server checks as a non-root user.
 
 ## License
 

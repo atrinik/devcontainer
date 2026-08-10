@@ -22,19 +22,28 @@
 - Keep a stable numeric runner UID when restoring a Classic ccache directory;
   the mode-1777 mount root supports non-root initialization but does not make
   ccache's owner-writable nested directories reusable across different UIDs.
-- Every semantic release publishes all three images and their supported tags.
-  The Linux publisher owns both `linux-build` and `classic-build`; the Windows
-  publisher owns `windows-build`. Do not create manual release tags as a
-  substitute for semantic-release.
 - A Linux `candidate_only` dispatch is the pre-merge Classic review path. It
   must publish only `classic-build:candidate-sha-<commit>` after validation and
   must never move a rolling, platform, or version tag.
+- Every semantic release publishes the broad Linux, slim Linux Classic,
+  general Windows, and task-focused Windows Classic images with their
+  supported tags. The Linux publisher owns `linux-build` and `classic-build`;
+  the Windows publisher owns both `windows-build` variants. Keep the
+  `classic-check` target branched from the expensive shared MXE foundation
+  before general-image Python/worldmaker additions, preserve the general
+  Windows image as the default Dockerfile result, validate immutable SHA
+  candidates before promoting rolling/version aliases, and recover partial
+  alias promotion by rerunning the failed job from the same workflow run. Do
+  not create manual release tags as a substitute for semantic-release.
 - Validate Dockerfiles with `docker build --check`. Build and smoke-test each
-  affected image, including `classic-validation` before `classic-final`; note
-  that a cold Windows/MXE build is expensive and may rely on CI cache for final
+  affected image, including `classic-validation` before `classic-final` and the
+  Windows `classic-check` target plus native bundle; note that a cold
+  Windows/MXE build is expensive and may rely on CI cache for final
   verification.
 - Workflow changes also require actionlint and Atrinik GitHub-governance review
   for permissions, pinned actions, check names, and ruleset compatibility.
+  Never expose private-package permissions or images to `pull_request` code;
+  authenticated measurements belong to the same-repository push/dispatch path.
 - Commits and pull-request titles use Conventional Commits. Preserve unrelated
   work and finish with `git diff --check`.
 - Update this `AGENTS.md` in the same change when major rework alters image

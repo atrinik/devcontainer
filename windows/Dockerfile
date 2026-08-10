@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 
-FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:73d85a96694a2cadca1ba3fcb5721f2312a64f1d571dd86f6c77e10a708931dc
+FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:73d85a96694a2cadca1ba3fcb5721f2312a64f1d571dd86f6c77e10a708931dc AS windows-shared
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -153,7 +153,16 @@ RUN test "$(sha256sum "${MXE_PREFIX}/share/atrinik/audio/opus-probe.opus" \
         -print -quit | grep -q . \
     && rm /tmp/sdl3-mixer-probe.c
 
-RUN git clone --filter=blob:none https://github.com/miniupnp/miniupnp.git /tmp/miniupnp \
+COPY --chown=vscode:vscode windows/classic-check-toolchain.json \
+    /tmp/classic-check-toolchain.json
+RUN mxe_commit=$(jq -er '.mxe.commit' \
+        /tmp/classic-check-toolchain.json) \
+    && test "${mxe_commit}" = "${MXE_REF}" \
+    && miniupnpc_commit=$(jq -er '.mxe.sources.miniupnpc.commit' \
+        /tmp/classic-check-toolchain.json) \
+    && test "${miniupnpc_commit}" = "${MINIUPNPC_COMMIT}" \
+    && git clone --filter=blob:none https://github.com/miniupnp/miniupnp.git \
+        /tmp/miniupnp \
     && git -C /tmp/miniupnp checkout "${MINIUPNPC_COMMIT}" \
     && x86_64-w64-mingw32.shared-cmake \
         -S /tmp/miniupnp/miniupnpc \
@@ -163,7 +172,10 @@ RUN git clone --filter=blob:none https://github.com/miniupnp/miniupnp.git /tmp/m
         -DUPNPC_BUILD_TESTS=OFF \
     && cmake --build /tmp/miniupnp-build --parallel "${MXE_BUILD_JOBS}" \
     && cmake --install /tmp/miniupnp-build \
-    && rm -rf /tmp/miniupnp /tmp/miniupnp-build
+    && rm -rf /tmp/miniupnp /tmp/miniupnp-build \
+        /tmp/classic-check-toolchain.json
+
+FROM windows-shared AS windows-build
 
 RUN mkdir -p "${ATRINIK_WINDOWS_PYTHON_RUNTIME_DIR}" /tmp/python-sdk \
     && wget -q \
@@ -228,3 +240,111 @@ RUN command -v x86_64-w64-mingw32.shared-gcc \
     && test -f "${MXE_RUNTIME_DIR}/SDL3_ttf.dll" \
     && pkg-config --exists libidn2 \
     && ssh -V
+
+# The Classic pull-request Check only needs the completed cross-toolchain and
+# staging utilities. Start again from the pinned base so MXE sources, logs,
+# package caches, the Windows Python SDK/runtime, and native worldmaker
+# dependencies do not become layers in this task-focused image. This stage is
+# deliberately branches from the shared toolchain before general-image Python
+# and worldmaker additions, so changes to those additions cannot invalidate it.
+FROM windows-shared AS classic-check-export
+
+USER root
+RUN mkdir -p /opt/classic-check/mxe \
+    && tar -C /opt/mxe \
+        --exclude='usr/x86_64-w64-mingw32.shared/include/python3.14' \
+        --exclude='usr/x86_64-w64-mingw32.shared/lib/libpython314.dll.a' \
+        -cf - \
+        usr/bin \
+        usr/include \
+        usr/installed \
+        usr/lib \
+        usr/libexec \
+        usr/share \
+        usr/x86_64-w64-mingw32.shared \
+        .ccache/bin \
+        .ccache/etc \
+        | tar -C /opt/classic-check/mxe -xf - \
+    && mkdir -p \
+        /opt/classic-check/mxe/usr/x86_64-pc-linux-gnu/bin \
+        /opt/classic-check/mxe/usr/x86_64-pc-linux-gnu/share \
+    && cp -a \
+        /opt/mxe/usr/x86_64-pc-linux-gnu/bin/cmake \
+        /opt/mxe/usr/x86_64-pc-linux-gnu/bin/cpack \
+        /opt/mxe/usr/x86_64-pc-linux-gnu/bin/ctest \
+        /opt/mxe/usr/x86_64-pc-linux-gnu/bin/pkgconf \
+        /opt/mxe/usr/x86_64-pc-linux-gnu/bin/x86_64-w64-mingw32.shared-g++ \
+        /opt/mxe/usr/x86_64-pc-linux-gnu/bin/x86_64-w64-mingw32.shared-gcc \
+        /opt/classic-check/mxe/usr/x86_64-pc-linux-gnu/bin/ \
+    && cp -a /opt/mxe/usr/x86_64-pc-linux-gnu/share/cmake-3.31 \
+        /opt/classic-check/mxe/usr/x86_64-pc-linux-gnu/share/
+
+FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:73d85a96694a2cadca1ba3fcb5721f2312a64f1d571dd86f6c77e10a708931dc AS classic-check
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN rm -f /etc/apt/apt.conf.d/docker-clean
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        cmake \
+        git \
+        ninja-build \
+        python3
+
+COPY --from=classic-check-export --chown=vscode:vscode \
+    /opt/classic-check/mxe/ /opt/mxe/
+
+ENV MXE_ROOT=/opt/mxe \
+    MXE_TARGET=x86_64-w64-mingw32.shared \
+    MXE_PREFIX=/opt/mxe/usr/x86_64-w64-mingw32.shared \
+    MXE_TOOLCHAIN_FILE=/opt/mxe/usr/x86_64-w64-mingw32.shared/share/cmake/mxe-conf.cmake \
+    MXE_RUNTIME_DIR=/opt/mxe/usr/x86_64-w64-mingw32.shared/bin \
+    PATH=/opt/mxe/.ccache/bin:/opt/mxe/usr/bin:${PATH}
+
+COPY windows/mxe-path.sh /etc/profile.d/mxe-path.sh
+COPY windows/classic-check-toolchain.json \
+    /usr/local/share/atrinik/classic-check-toolchain.json
+COPY audio-toolchain.json /usr/local/share/atrinik/audio-toolchain.json
+COPY audio-toolchain.spdx.json \
+    /usr/local/share/atrinik/audio-toolchain.spdx.json
+
+RUN test "$(command -v ccache)" = /opt/mxe/.ccache/bin/ccache \
+    && test "$(command -v x86_64-w64-mingw32.shared-gcc)" \
+        = /opt/mxe/usr/bin/x86_64-w64-mingw32.shared-gcc \
+    && test "$(readlink /opt/mxe/usr/x86_64-pc-linux-gnu/bin/x86_64-w64-mingw32.shared-gcc)" \
+        = /opt/mxe/.ccache/bin/ccache \
+    && command -v x86_64-w64-mingw32.shared-cmake \
+    && command -v x86_64-w64-mingw32.shared-objdump \
+    && command -v x86_64-w64-mingw32.shared-pkg-config \
+    && command -v cmake \
+    && command -v cpack \
+    && command -v git \
+    && command -v ninja \
+    && command -v python3 \
+    && for package in \
+        libcurl libidn2 libxml-2.0 miniupnpc openssl \
+        sdl3 sdl3-image sdl3-mixer sdl3-ttf; do \
+        x86_64-w64-mingw32.shared-pkg-config --exists "${package}"; \
+    done \
+    && test -f "${MXE_TOOLCHAIN_FILE}" \
+    && test -f "${MXE_RUNTIME_DIR}/SDL3.dll" \
+    && test -f "${MXE_RUNTIME_DIR}/SDL3_image.dll" \
+    && test -f "${MXE_RUNTIME_DIR}/SDL3_mixer.dll" \
+    && test -f "${MXE_RUNTIME_DIR}/SDL3_ttf.dll" \
+    && test -f "${MXE_RUNTIME_DIR}/atrinik-sdl3-mixer-probe.exe" \
+    && test ! -e /opt/mxe/python-runtime \
+    && test ! -e /opt/mxe/.ccache/ccache \
+    && test ! -e /opt/mxe/usr/x86_64-pc-linux-gnu/icu4c \
+    && test ! -e "${MXE_PREFIX}/include/python3.14" \
+    && test ! -e "${MXE_PREFIX}/lib/libpython314.dll.a" \
+    && su --login vscode --command \
+        'test "$(command -v ccache)" = /opt/mxe/.ccache/bin/ccache' \
+    && su --login vscode --command \
+        'test "$(command -v x86_64-w64-mingw32.shared-gcc)" = /opt/mxe/usr/bin/x86_64-w64-mingw32.shared-gcc'
+
+# Preserve the historical default build result for the general-purpose image.
+FROM windows-build AS windows
