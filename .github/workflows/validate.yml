@@ -64,7 +64,7 @@ jobs:
               windows=true
               ;;
             esac
-          done < <(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
+          done < <(git diff --no-renames --name-only "${BASE_SHA}" "${HEAD_SHA}")
           {
             echo "classic=${classic}"
             echo "linux=${linux}"
@@ -171,7 +171,7 @@ jobs:
 
       - name: Run Classic client and server checks as the runner user
         run: |
-          install -d -m 0777 "${RUNNER_TEMP}/classic-ccache"
+          install -d -m 1777 "${RUNNER_TEMP}/classic-ccache"
           docker run --rm \
             --user "$(id -u):$(id -g)" \
             --env CCACHE_DIR=/cache/ccache \

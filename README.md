@@ -83,6 +83,25 @@ docker run --rm atrinik-windows-build \
 docker run --rm --user vscode atrinik-windows-build ssh -V
 ```
 
+Run the pinned full Classic contract from this repository root, substituting
+isolated absolute paths for the source checkout and cache:
+
+```sh
+classic_source=/absolute/path/to/atrinik-classic
+classic_cache=/absolute/path/to/empty-classic-ccache
+install -d -m 1777 "${classic_cache}"
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  --env CCACHE_DIR=/cache/ccache \
+  --env HOME=/tmp/classic-home \
+  --volume "$(pwd):/image-source:ro" \
+  --volume "${classic_source}:/workspace" \
+  --volume "${classic_cache}:/cache/ccache" \
+  --workdir /workspace \
+  atrinik-classic-build \
+  /image-source/tools/validate-classic-check.sh /workspace
+```
+
 The `classic-final` target is a separate, amd64-only CI contract rather than a
 trimmed development image. It starts from the same digest-pinned Ubuntu 26.04
 base, bootstraps exact locked CA and TLS runtime packages, and resolves all
@@ -128,12 +147,16 @@ the digest, never a rolling tag. To update that pin:
 4. On clean equivalent runners, time the first digest pull plus container
    startup, remove only the local pulled copy, and repeat for the warm registry
    cache. Run the apt-based and image-based client/server jobs, record total and
-   setup/build/test timings plus ccache statistics, and attach the comparison
-   to both reviews.
+   setup/build/test timings plus ccache statistics in
+   [`classic-benchmark.md`](classic-benchmark.md), and attach the comparison to
+   both reviews.
 5. After the evidence passes review, merge through semantic-release and wait
-   for both publisher workflows. Confirm the versioned Classic digest matches
-   the reviewed image content before updating the consumer from its candidate
-   reference; only then remove superseded apt or prefix-cache setup.
+   for both publisher workflows. Record the new versioned digest, rerun the
+   image smoke against it, and compare its embedded tool inventories, package
+   lock, and source checksums with the candidate before updating the consumer.
+   The manifest digests themselves will differ because revision labels and
+   provenance describe different builds. Only then remove superseded apt or
+   prefix-cache setup.
 
 The package snapshot is deliberately fail-closed: changing the snapshot or a
 locked version requires a reviewed inventory update. The initial CA/TLS
