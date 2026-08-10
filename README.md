@@ -118,17 +118,21 @@ Classic runs as the unprivileged `ubuntu` user by default. `/cache/ccache` is a
 mode-1777 mount contract so CI can run with its own numeric UID and persist the
 directory without granting root. Consumers must still select ccache explicitly
 with `-DCMAKE_C_COMPILER_LAUNCHER=ccache`; `CCACHE_DIR` alone does not activate
-compiler caching. The image smoke target proves a repeated compilation hits the
-cache, validates every locked direct package and tool version, checks the native
+compiler caching. Persistent reuse must keep that numeric UID stable because
+ccache's nested directories are owner-writable; if the runner UID changes,
+discard or reinitialize the cache instead of sharing it across UIDs. The image
+smoke target proves a repeated compilation hits the cache, validates every
+locked direct package and tool version, checks the native
 `pkg-config` surface, decodes the bundled Opus fixture, and inspects the image
 plus nested dependency inventory in one SPDX 2.3 scan. The attached BuildKit
 SBOM inventories discoverable image packages; the bundled
 `/usr/local/share/atrinik/audio-toolchain.spdx.json` is the authoritative source
 inventory for statically linked SDL3_mixer and codecs. Pull-request validation
-then runs representative client and server configure-build-test-coverage commands against
-the exact Classic revision recorded in the inventory as a non-root runner UID.
+then runs representative client and server configure-build-test-coverage
+commands against the exact Classic revision recorded in the inventory as a
+non-root runner UID.
 
-Every Classic publication updates `latest`, `ubuntu-26.04`, and
+Every non-candidate Classic publication updates `latest`, `ubuntu-26.04`, and
 `sha-<commit>`. A semantic-release tag also publishes the matching `X.Y.Z` tag,
 with BuildKit provenance and an attached SBOM. Consuming workflows should pin
 the digest, never a rolling tag. To update that pin:
@@ -144,10 +148,11 @@ the digest, never a rolling tag. To update that pin:
    `candidate_only` enabled. Resolve the immutable digest from
    `ghcr.io/atrinik/classic-build:candidate-sha-<commit>` and put that digest in
    the consuming review branch, including it in the ccache invalidation key.
-4. On clean equivalent runners, time the first digest pull plus container
-   startup, remove only the local pulled copy, and repeat for the warm registry
-   cache. Run the apt-based and image-based client/server jobs, record total and
-   setup/build/test timings plus ccache statistics in
+4. On clean equivalent runners with the digest absent, time the first digest
+   pull plus container startup. Without removing it, pull and start the same
+   digest again to measure the warm local layer cache. Run the apt-based and
+   image-based client/server jobs, record total and setup/build/test timings
+   plus ccache statistics in
    [`classic-benchmark.md`](classic-benchmark.md), and attach the comparison to
    both reviews.
 5. After the evidence passes review, merge through semantic-release and wait
@@ -163,7 +168,9 @@ locked version requires a reviewed inventory update. The initial CA/TLS
 bootstrap already uses the signed snapshot metadata and package hashes; only
 TLS peer verification is temporarily disabled because the minimal base has no
 CA bundle. After installing the exact locked TLS closure, a verified HTTPS
-snapshot update must pass before any remaining package is installed.
+snapshot update must pass before any remaining package is installed. Snapshot
+sources disable metadata expiry so the fixed timestamp remains rebuildable;
+APT still verifies its signed metadata and package hashes.
 
 The Linux image includes the pinned replacement toolchains recorded in
 [`toolchains.json`](toolchains.json): Go, Rust/rustup, Protobuf/protoc, Buf,

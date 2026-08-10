@@ -37,8 +37,7 @@ jobs:
           while IFS= read -r path; do
             case "${path}" in
             .dockerignore | .github/actionlint.yaml | \
-                .github/workflows/publish-linux.yml | \
-                .github/workflows/validate.yml | linux/* | \
+                .github/workflows/* | linux/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
                 toolchains.json | tools/audio/* | \
                 tools/build-sdl3-mixer.sh | tools/validate-toolchains.sh)
@@ -57,7 +56,8 @@ jobs:
               ;;
             esac
             case "${path}" in
-            .dockerignore | .github/workflows/validate.yml | windows/* | \
+            .dockerignore | .github/workflows/publish-windows.yml | \
+                .github/workflows/validate.yml | windows/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
                 tools/audio/* | \
                 tools/build-sdl3-mixer.sh | tools/verify-pe-imports.sh)

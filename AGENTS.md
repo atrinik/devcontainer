@@ -19,6 +19,9 @@
   direct package lock, tool inventory, non-root ccache mount, Classic validation
   revision, smoke/SBOM checks, and published tags synchronized. Do not make it
   inherit the broad replacement/development toolchain.
+- Keep a stable numeric runner UID when restoring a Classic ccache directory;
+  the mode-1777 mount root supports non-root initialization but does not make
+  ccache's owner-writable nested directories reusable across different UIDs.
 - Every semantic release publishes all three images and their supported tags.
   The Linux publisher owns both `linux-build` and `classic-build`; the Windows
   publisher owns `windows-build`. Do not create manual release tags as a

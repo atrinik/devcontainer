@@ -20,6 +20,13 @@ export CCACHE_NOHASHDIR=true
 test -w "${CCACHE_DIR}"
 test "$(stat --format='%a' "${CCACHE_DIR}")" = 1777
 
+ccache_hits() {
+  ccache --print-stats | awk -F '\t' '
+    $1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" { hits += $2 }
+    END { print hits + 0 }
+  '
+}
+
 ccache --zero-stats >/dev/null
 
 for component in server client; do
@@ -39,18 +46,15 @@ for component in server client; do
     --print-summary --xml "${component}-coverage.xml"
   # Force one identical rebuild against the mounted cache. A no-op incremental
   # build would not prove that consumer compiler outputs can be restored.
+  warm_hits_before=$(ccache_hits)
   cmake --build --preset linux-coverage --clean-first --parallel "${jobs}"
+  warm_hits_after=$(ccache_hits)
+  if [[ ${warm_hits_after} -le ${warm_hits_before} ]]; then
+    echo "Classic ${component} warm rebuild restored no compiler outputs from ccache" >&2
+    exit 1
+  fi
   popd >/dev/null
 done
-
-cache_hits=$(ccache --print-stats | awk -F '\t' '
-  $1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" { hits += $2 }
-  END { print hits + 0 }
-')
-if [[ ${cache_hits} -lt 1 ]]; then
-  echo "Classic warm rebuild did not restore any compiler output from ccache" >&2
-  exit 1
-fi
 
 ccache --show-config
 ccache --show-stats

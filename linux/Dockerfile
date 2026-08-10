@@ -280,6 +280,8 @@ RUN sed -i \
         -e "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
         -e "s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
         /etc/apt/sources.list.d/ubuntu.sources \
+    && sed -i '/^Signed-By:/a Check-Valid-Until: no' \
+        /etc/apt/sources.list.d/ubuntu.sources \
     && apt-get -o Acquire::https::Verify-Peer=false update \
     && awk -F= '$1 == "ca-certificates" \
             || $1 == "libssl3t64" \

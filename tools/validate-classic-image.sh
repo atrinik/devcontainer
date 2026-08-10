@@ -36,6 +36,8 @@ grep -Fqx "FROM ${expected_image}@${expected_digest} AS classic-ci" "${dockerfil
 test "${UBUNTU_SNAPSHOT}" = "${expected_snapshot}"
 grep -Fq "https://snapshot.ubuntu.com/ubuntu/${expected_snapshot}/" \
   /etc/apt/sources.list.d/ubuntu.sources
+test "$(grep -Fxc 'Check-Valid-Until: no' \
+  /etc/apt/sources.list.d/ubuntu.sources)" -eq 2
 if grep -Eq 'https?://(archive|security)\.ubuntu\.com/ubuntu/' \
   /etc/apt/sources.list.d/ubuntu.sources; then
   echo "mutable Ubuntu source remains configured" >&2
