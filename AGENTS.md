@@ -19,8 +19,10 @@
   task-focused Windows images with their supported tags. Keep the
   `classic-check` target branched from the expensive shared MXE foundation
   before general-image Python/worldmaker additions, preserve the general
-  Windows image as the default Dockerfile result, and do not create manual
-  release tags as a substitute for semantic-release.
+  Windows image as the default Dockerfile result, validate immutable SHA
+  candidates before promoting rolling/version aliases, and recover partial
+  alias promotion by rerunning the failed job from the same workflow run. Do
+  not create manual release tags as a substitute for semantic-release.
 - Validate Dockerfiles with `docker build --check`. Build and smoke-test each
   affected image; note that a cold Windows/MXE build is expensive and may rely
   on CI cache for final verification.

@@ -115,6 +115,13 @@ jobs:
           ref: ${{ steps.classic.outputs.ref }}
           path: build/classic
 
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
@@ -149,7 +156,7 @@ jobs:
           tags: atrinik-windows-check:validation
           build-args: MXE_BUILD_JOBS=4
           cache-from: |
-            type=registry,ref=ghcr.io/atrinik/windows-check:mxe
+            type=registry,ref=ghcr.io/atrinik/windows-build:classic-check-mxe
             type=registry,ref=ghcr.io/atrinik/windows-build:mxe
             type=gha,scope=windows-classic-check-image
             type=gha,scope=windows-build-image

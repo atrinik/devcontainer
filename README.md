@@ -12,15 +12,24 @@ Published images:
 
 - `ghcr.io/atrinik/linux-build:ubuntu-26.04`
 - `ghcr.io/atrinik/windows-build:mxe`
-- `ghcr.io/atrinik/windows-check:mxe`
+- `ghcr.io/atrinik/windows-build:classic-check-mxe`
 
-Every successful image publication updates `latest`, its rolling platform tag,
-and a `sha-<commit>` tag. The Windows publisher updates both the general
-`windows-build` image and the task-focused `windows-check` image from the same
-immutable source revision. Publishing from an image-repository tag matching
-`vX.Y.Z` also publishes the corresponding `X.Y.Z` image tag. Release automation
-publishes all three images for every version so consumers can pin a matched
-toolchain release.
+Every image publication creates an immutable `sha-<commit>` candidate. The
+Windows publisher also creates a `classic-check-sha-<commit>` candidate in the
+existing private `windows-build` package, preserving its governed Classic
+Actions read access. It smokes that exact published digest and executes its six
+staged tests on Windows before promoting `latest`, `mxe`, `classic-check`, and
+`classic-check-mxe`. Publishing from an image-repository tag matching `vX.Y.Z`
+also promotes the corresponding `X.Y.Z` and `classic-check-X.Y.Z` aliases.
+Release automation publishes all three image variants for every version so
+consumers can pin a matched, verified toolchain release.
+
+GHCR cannot atomically move aliases for two different manifests. The Windows
+promotion job therefore moves the Classic aliases first and the general aliases
+last, after both immutable candidates and native tests pass. If the final
+registry operation fails, rerun the failed promotion job in that same workflow
+run. The job idempotently reapplies both alias sets from the preserved,
+verified digest outputs; do not create a replacement release tag.
 
 ## Publishing
 
@@ -148,10 +157,13 @@ published rolling image's inline BuildKit cache and the image-specific GitHub
 Actions cache. It exports cache-only results instead of loading the completed
 general image into the runner's Docker daemon, then loads the Classic Check
 target for its full smoke, cross-build, native Windows execution, and size/pull
-measurements. Release builds publish inline cache metadata for cross-ref reuse
-and also retain max-mode Actions caches for both targets; Actions-cache export
-failures are non-fatal because publishing usable images is more important than
-preserving an optimization.
+measurements. Release builds first publish immutable general and Classic SHA
+candidates with inline cache metadata, smoke the exact Classic repository
+digest, and execute its staged bundle on `windows-2025`. Only then does a
+separate promotion job move the rolling and version aliases, with the general
+aliases promoted last. Max-mode Actions caches are also retained for both
+targets; Actions-cache export failures are non-fatal because publishing usable
+images is more important than preserving an optimization.
 
 The performance check compares the currently pinned Classic image with the
 immutable candidate digest on a GitHub-hosted Ubuntu runner. Compressed sizes
