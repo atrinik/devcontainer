@@ -39,7 +39,10 @@ jobs:
                 .github/workflows/* | linux/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
                 toolchains.json | tools/audio/* | \
-                tools/build-sdl3-mixer.sh | tools/validate-toolchains.sh)
+                tools/build-sdl3-mixer.sh | \
+                tools/require-image-checks.sh | \
+                tools/test-require-image-checks.sh | \
+                tools/validate-toolchains.sh)
               linux=true
               ;;
             esac
@@ -49,6 +52,8 @@ jobs:
                 audio-toolchain.json | audio-toolchain.spdx.json | \
                 classic-packages.lock | classic-toolchain.json | \
                 tools/audio/* | tools/build-sdl3-mixer.sh | \
+                tools/require-image-checks.sh | \
+                tools/test-require-image-checks.sh | \
                 tools/validate-classic-check.sh | \
                 tools/validate-classic-image.sh)
               classic=true
@@ -62,7 +67,9 @@ jobs:
                 tools/audio/* | \
                 tools/build-sdl3-mixer.sh | \
                 tools/measure-classic-check-images.sh | \
+                tools/require-image-checks.sh | \
                 tools/smoke-classic-check.sh | \
+                tools/test-require-image-checks.sh | \
                 tools/validate-toolchains.sh | \
                 tools/verify-classic-check-package.py | \
                 tools/verify-pe-imports.sh)
@@ -75,6 +82,9 @@ jobs:
             echo "linux=${linux}"
             echo "windows=${windows}"
           } >> "${GITHUB_OUTPUT}"
+
+      - name: Test required-check aggregation
+        run: tools/test-require-image-checks.sh
 
   linux:
     name: Linux image
@@ -322,33 +332,9 @@ jobs:
           WINDOWS_RESULT: ${{ needs.windows.result }}
           WINDOWS_NATIVE_RESULT: ${{ needs.windows-native.result }}
         run: |
-          if [[ "${CHANGES_RESULT}" != success ]]; then
-            echo "Change selection concluded ${CHANGES_RESULT}." >&2
-            exit 1
-          fi
-
-          for image in CLASSIC LINUX WINDOWS; do
-            selected_variable="${image}_SELECTED"
-            result_variable="${image}_RESULT"
-            selected=${!selected_variable}
-            result=${!result_variable}
-            if [[ "${selected}" == true && "${result}" != success ]]; then
-              echo "${image} validation was selected but concluded ${result}." >&2
-              exit 1
-            fi
-            if [[ "${selected}" == false && "${result}" != skipped ]]; then
-              echo "${image} validation was not selected but concluded ${result}." >&2
-              exit 1
-            fi
-          done
-
-          if [[ "${WINDOWS_SELECTED}" == true && \
-              "${WINDOWS_NATIVE_RESULT}" != success ]]; then
-            echo "Native Windows validation was selected but concluded ${WINDOWS_NATIVE_RESULT}." >&2
-            exit 1
-          fi
-          if [[ "${WINDOWS_SELECTED}" == false && \
-              "${WINDOWS_NATIVE_RESULT}" != skipped ]]; then
-            echo "Native Windows validation was not selected but concluded ${WINDOWS_NATIVE_RESULT}." >&2
-            exit 1
-          fi
+          tools/require-image-checks.sh \
+            "${CHANGES_RESULT}" \
+            "${CLASSIC_SELECTED}" "${CLASSIC_RESULT}" \
+            "${LINUX_SELECTED}" "${LINUX_RESULT}" \
+            "${WINDOWS_SELECTED}" "${WINDOWS_RESULT}" \
+            "${WINDOWS_NATIVE_RESULT}"
