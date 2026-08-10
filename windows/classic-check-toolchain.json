@@ -47,6 +47,8 @@
     ],
     "copied_roots": [
       "/opt/mxe/usr/bin",
+      "/opt/mxe/usr/include",
+      "/opt/mxe/usr/installed",
       "/opt/mxe/usr/lib",
       "/opt/mxe/usr/libexec",
       "/opt/mxe/usr/share",

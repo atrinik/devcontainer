@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 
-FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:73d85a96694a2cadca1ba3fcb5721f2312a64f1d571dd86f6c77e10a708931dc AS windows-build
+FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:73d85a96694a2cadca1ba3fcb5721f2312a64f1d571dd86f6c77e10a708931dc AS windows-shared
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -165,6 +165,8 @@ RUN git clone --filter=blob:none https://github.com/miniupnp/miniupnp.git /tmp/m
     && cmake --install /tmp/miniupnp-build \
     && rm -rf /tmp/miniupnp /tmp/miniupnp-build
 
+FROM windows-shared AS windows-build
+
 RUN mkdir -p "${ATRINIK_WINDOWS_PYTHON_RUNTIME_DIR}" /tmp/python-sdk \
     && wget -q \
         "https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-embed-amd64.zip" \
@@ -233,9 +235,9 @@ RUN command -v x86_64-w64-mingw32.shared-gcc \
 # staging utilities. Start again from the pinned base so MXE sources, logs,
 # package caches, the Windows Python SDK/runtime, and native worldmaker
 # dependencies do not become layers in this task-focused image. This stage is
-# deliberately after the complete toolchain so changes here retain the
-# expensive MXE cache.
-FROM windows-build AS classic-check-export
+# deliberately branches from the shared toolchain before general-image Python
+# and worldmaker additions, so changes to those additions cannot invalidate it.
+FROM windows-shared AS classic-check-export
 
 USER root
 RUN mkdir -p /opt/classic-check/mxe \
@@ -296,9 +298,8 @@ ENV MXE_ROOT=/opt/mxe \
 COPY windows/mxe-path.sh /etc/profile.d/mxe-path.sh
 COPY windows/classic-check-toolchain.json \
     /usr/local/share/atrinik/classic-check-toolchain.json
-COPY --from=windows-build /usr/local/share/atrinik/audio-toolchain.json \
-    /usr/local/share/atrinik/audio-toolchain.json
-COPY --from=windows-build /usr/local/share/atrinik/audio-toolchain.spdx.json \
+COPY audio-toolchain.json /usr/local/share/atrinik/audio-toolchain.json
+COPY audio-toolchain.spdx.json \
     /usr/local/share/atrinik/audio-toolchain.spdx.json
 
 RUN test "$(command -v ccache)" = /opt/mxe/.ccache/bin/ccache \

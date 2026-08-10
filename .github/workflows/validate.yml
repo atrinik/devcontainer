@@ -35,7 +35,7 @@ jobs:
           while IFS= read -r path; do
             case "${path}" in
             .dockerignore | .github/actionlint.yaml | \
-                .github/workflows/validate.yml | linux/* | \
+                .github/workflows/* | linux/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
                 toolchains.json | tools/audio/* | \
                 tools/build-sdl3-mixer.sh | tools/validate-toolchains.sh)
@@ -128,6 +128,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=windows-build-image,ignore-error=true
 
       - name: Build task-focused Classic Check image
+        id: classic-image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
@@ -143,14 +144,32 @@ jobs:
             type=gha,scope=windows-build-image
           cache-to: type=gha,mode=max,scope=windows-classic-check-image,ignore-error=true
 
+      - name: Resolve immutable Classic Check candidate
+        id: candidate
+        env:
+          CANDIDATE_DIGEST: ${{ steps.classic-image.outputs.digest }}
+        run: |
+          if [[ ! "${CANDIDATE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Invalid candidate digest: ${CANDIDATE_DIGEST}" >&2
+            exit 1
+          fi
+          candidate_image="atrinik-windows-check@${CANDIDATE_DIGEST}"
+          docker image inspect "${candidate_image}" >/dev/null
+          echo "image=${candidate_image}" >> "${GITHUB_OUTPUT}"
+
       - name: Cross-build and stage the complete Classic Check bundle
-        run: tools/smoke-classic-check.sh atrinik-windows-check:validation build/classic
+        env:
+          CANDIDATE_IMAGE: ${{ steps.candidate.outputs.image }}
+        run: tools/smoke-classic-check.sh "${CANDIDATE_IMAGE}" build/classic
 
       - name: Measure pinned and task-focused images
+        env:
+          CANDIDATE_IMAGE: ${{ steps.candidate.outputs.image }}
+          MEASUREMENT_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           tools/measure-classic-check-images.sh \
             ghcr.io/atrinik/windows-build:1.0.5@sha256:9cc373f620a577328fc0a7a7fa823bddaca6d7dc75ac73bcf21be421c49676f7 \
-            atrinik-windows-check:validation \
+            "${CANDIDATE_IMAGE}" \
             build/measurements
           cat build/measurements/classic-check-image-measurements.md \
             >> "${GITHUB_STEP_SUMMARY}"

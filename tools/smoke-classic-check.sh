@@ -20,17 +20,18 @@ fi
 python3 "${classic_checkout}/client/tools/dependencies.py" sync
 umask 077
 mkdir -p "${classic_checkout}/build"
-printf '%s\n' '111111111111111111' > \
-  "${classic_checkout}/client/data/discord-application-id"
-printf '%s\n' '123456789012345678' > \
-  "${classic_checkout}/build/discord-test-application-id"
+discord_test_file=$(mktemp \
+  "${classic_checkout}/build/discord-test-application-id.XXXXXX")
+trap 'rm -f -- "${discord_test_file}"' EXIT
+printf '%s\n' '123456789012345678' > "${discord_test_file}"
+discord_test_relative=${discord_test_file#"${classic_checkout}/"}
 
 docker run --rm --user "$(id -u):$(id -g)" --network none \
   --env CCACHE_DIR=/tmp/atrinik-classic-check-ccache \
   --env CCACHE_TEMPDIR=/tmp/atrinik-classic-check-ccache-tmp \
   --env CCACHE_MAXSIZE=250M \
   --env ATRINIK_PACKAGE_VERSION=0.0.0 \
-  --env ATRINIK_DISCORD_APPLICATION_ID_FILE=/workspace/build/discord-test-application-id \
+  --env ATRINIK_DISCORD_APPLICATION_ID_FILE="/workspace/${discord_test_relative}" \
   --volume "${classic_checkout}:/workspace" \
   --volume "${image_checkout}:/image-source:ro" \
   --workdir /workspace \
@@ -71,7 +72,8 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
       -name "atrinik-classic-client-*-windows-x86_64.zip" -print)
     test "${#packages[@]}" -eq 1
     package=${packages[0]}
-    python3 /image-source/tools/verify-classic-check-package.py "${package}"
+    python3 /image-source/tools/verify-classic-check-package.py \
+      "${package}" x86_64-w64-mingw32.shared-objdump
     cd ..
 
     stage=libatrinik/build/windows-test-bundle

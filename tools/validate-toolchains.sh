@@ -10,8 +10,7 @@ audio_sbom_installed=${6:-}
 classic_check_expected=${7:-}
 classic_check_installed=${8:-}
 
-if [[ -n ${classic_check_expected} ]]; then
-  jq -e '
+jq -e '
   .schema_version == 1
   and .platform == "linux/amd64"
   and (.tools | keys == [
@@ -125,7 +124,8 @@ if [[ -n ${audio_sbom_installed} ]]; then
   cmp --silent "${audio_sbom_expected}" "${audio_sbom_installed}"
 fi
 
-jq -e '
+if [[ -n ${classic_check_expected} ]]; then
+  jq -e '
   .schema_version == 1
   and .target == "classic-check"
   and .consumer.repository == "atrinik/classic"
@@ -136,6 +136,19 @@ jq -e '
   ]
   and .mxe.commit == "8784776b145a8ddd350ce32aa0908ac10977060c"
   and .mxe.target == "x86_64-w64-mingw32.shared"
+  and .mxe.copied_roots == [
+    "/opt/mxe/usr/bin",
+    "/opt/mxe/usr/include",
+    "/opt/mxe/usr/installed",
+    "/opt/mxe/usr/lib",
+    "/opt/mxe/usr/libexec",
+    "/opt/mxe/usr/share",
+    "/opt/mxe/usr/x86_64-w64-mingw32.shared",
+    "/opt/mxe/usr/x86_64-pc-linux-gnu/bin/{cmake,cpack,ctest,pkgconf,x86_64-w64-mingw32.shared-g++,x86_64-w64-mingw32.shared-gcc}",
+    "/opt/mxe/usr/x86_64-pc-linux-gnu/share/cmake-3.31",
+    "/opt/mxe/.ccache/bin",
+    "/opt/mxe/.ccache/etc"
+  ]
   and .mxe.ccache_path == "/opt/mxe/.ccache/bin/ccache"
   and .mxe.runtime_directory == "/opt/mxe/usr/x86_64-w64-mingw32.shared/bin"
   and (.mxe.packages | index("cc") != null)
@@ -155,8 +168,11 @@ jq -e '
   and (.excluded.paths | index("/opt/mxe/usr/x86_64-pc-linux-gnu/icu4c") != null)
   and (.excluded.capabilities | index("native Linux worldmaker build") != null)
 ' "${classic_check_expected}" >/dev/null
-fi
 
-if [[ -n ${classic_check_installed} ]]; then
-  cmp --silent "${classic_check_expected}" "${classic_check_installed}"
+  if [[ -n ${classic_check_installed} ]]; then
+    cmp --silent "${classic_check_expected}" "${classic_check_installed}"
+  fi
+elif [[ -n ${classic_check_installed} ]]; then
+  echo "classic-check installed inventory requires an expected inventory" >&2
+  exit 2
 fi

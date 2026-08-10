@@ -154,11 +154,13 @@ failures are non-fatal because publishing usable images is more important than
 preserving an optimization.
 
 The performance check compares the currently pinned Classic image with the
-candidate on a GitHub-hosted Ubuntu runner. Compressed sizes come from a local
-OCI registry, and cold/warm pulls use separate clean Docker-in-Docker daemons
-against that same registry to remove GHCR network variance. Five container
-start samples are averaged. The pinned image's first and warm GHCR pulls are
-also recorded, and the JSON plus Markdown evidence is retained as the
+immutable candidate digest on a GitHub-hosted Ubuntu runner. Compressed sizes
+come from a local OCI registry. Three counterbalanced cold/warm pull trials per
+image each use a fresh Docker-in-Docker daemon against that registry to remove
+GHCR network variance and daemon-layer reuse; every trial averages five
+container starts. The artifact records raw samples, source and manifest
+digests, runner metadata, and medians. The pinned image's first and warm GHCR
+pulls are also recorded, and the JSON plus Markdown evidence is retained as the
 `classic-check-image-measurements` workflow artifact for 30 days.
 
 Pull requests build each image whose inputs changed. Linux validation also

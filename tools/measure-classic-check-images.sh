@@ -10,17 +10,22 @@ fi
 baseline_image=$1
 candidate_image=$2
 output_directory=$3
+for image in "${baseline_image}" "${candidate_image}"; do
+  if [[ ! ${image} =~ @sha256:[0-9a-f]{64}$ ]]; then
+    echo "measurement image is not immutable: ${image}" >&2
+    exit 2
+  fi
+done
 registry_image=registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
 dind_image=docker:27.5.1-dind@sha256:aa3df78ecf320f5fafdce71c659f1629e96e9de0968305fe1de670e0ca9176ce
 suffix=${GITHUB_RUN_ID:-$$}-${GITHUB_RUN_ATTEMPT:-1}
 registry_name=classic-check-registry-${suffix}
-baseline_daemon=classic-check-baseline-${suffix}
-candidate_daemon=classic-check-candidate-${suffix}
 registry_port=5000
+measurement_trials=3
+containers=("${registry_name}")
 
 cleanup() {
-  docker rm --force "${baseline_daemon}" "${candidate_daemon}" \
-    "${registry_name}" >/dev/null 2>&1 || true
+  docker rm --force "${containers[@]}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -48,7 +53,7 @@ docker tag "${candidate_image}" localhost:${registry_port}/candidate:latest
 docker push localhost:${registry_port}/baseline:latest >/dev/null
 docker push localhost:${registry_port}/candidate:latest >/dev/null
 
-manifest_size() {
+manifest_metadata() {
   local repository=$1
   python3 - "${registry_port}" "${repository}" <<'PY'
 import json
@@ -67,16 +72,17 @@ accept = ", ".join(
 )
 
 
-def manifest(reference: str) -> dict[str, object]:
+def manifest(reference: str) -> tuple[dict[str, object], str]:
     request = urllib.request.Request(
         f"http://localhost:{port}/v2/{repository}/manifests/{reference}",
         headers={"Accept": accept},
     )
     with urllib.request.urlopen(request, timeout=30) as response:
-        return json.load(response)
+        digest = response.headers.get("Docker-Content-Digest", "")
+        return json.load(response), digest
 
 
-value = manifest("latest")
+value, digest = manifest("latest")
 if "manifests" in value:
     descriptor = next(
         item
@@ -84,13 +90,17 @@ if "manifests" in value:
         if item.get("platform", {}).get("os") == "linux"
         and item.get("platform", {}).get("architecture") == "amd64"
     )
-    value = manifest(descriptor["digest"])
-print(sum(layer["size"] for layer in value["layers"]))
+    value, digest = manifest(descriptor["digest"])
+if not digest.startswith("sha256:") or len(digest) != 71:
+    raise RuntimeError(f"registry did not return an immutable manifest digest: {digest}")
+print(sum(layer["size"] for layer in value["layers"]), digest)
 PY
 }
 
-baseline_compressed_bytes=$(manifest_size baseline)
-candidate_compressed_bytes=$(manifest_size candidate)
+read -r baseline_compressed_bytes baseline_registry_digest \
+  < <(manifest_metadata baseline)
+read -r candidate_compressed_bytes candidate_registry_digest \
+  < <(manifest_metadata candidate)
 
 start_daemon() {
   local name=$1
@@ -98,6 +108,7 @@ start_daemon() {
     --add-host registry.local:host-gateway \
     "${dind_image}" --insecure-registry registry.local:${registry_port} \
     --tls=false >/dev/null
+  containers+=("${name}")
   for _ in {1..60}; do
     if docker exec "${name}" docker info >/dev/null 2>&1; then
       return
@@ -111,8 +122,8 @@ start_daemon() {
 measure_image() {
   local name=$1
   local repository=$2
-  local output_prefix=$3
-  local image=registry.local:${registry_port}/${repository}:latest
+  local digest=$3
+  local image=registry.local:${registry_port}/${repository}@${digest}
   local start cold_ms warm_ms startup_total_ms uncompressed_bytes
 
   start_daemon "${name}"
@@ -130,25 +141,89 @@ measure_image() {
     docker exec "${name}" docker run --rm "${image}" true
     startup_total_ms=$((startup_total_ms + ($(date +%s%N) - start) / 1000000))
   done
-  printf -v "${output_prefix}_cold_ms" '%s' "${cold_ms}"
-  printf -v "${output_prefix}_warm_ms" '%s' "${warm_ms}"
-  printf -v "${output_prefix}_startup_ms" '%s' "$((startup_total_ms / 5))"
-  printf -v "${output_prefix}_uncompressed_bytes" '%s' "${uncompressed_bytes}"
+  measured_cold_ms=${cold_ms}
+  measured_warm_ms=${warm_ms}
+  measured_startup_ms=$((startup_total_ms / 5))
+  measured_uncompressed_bytes=${uncompressed_bytes}
+  docker rm --force "${name}" >/dev/null
 }
 
-measure_image "${baseline_daemon}" baseline baseline
-measure_image "${candidate_daemon}" candidate candidate
+baseline_cold_samples=()
+baseline_warm_samples=()
+baseline_startup_samples=()
+baseline_uncompressed_samples=()
+candidate_cold_samples=()
+candidate_warm_samples=()
+candidate_startup_samples=()
+candidate_uncompressed_samples=()
 
-export baseline_cold_ms baseline_warm_ms baseline_startup_ms \
-  baseline_uncompressed_bytes candidate_cold_ms candidate_warm_ms \
-  candidate_startup_ms candidate_uncompressed_bytes baseline_compressed_bytes \
-  candidate_compressed_bytes remote_baseline_first_ms remote_baseline_warm_ms \
-  baseline_image candidate_image
+measure_trial() {
+  local label=$1
+  local trial=$2
+  local repository digest daemon
+  if [[ ${label} == baseline ]]; then
+    repository=baseline
+    digest=${baseline_registry_digest}
+  else
+    repository=candidate
+    digest=${candidate_registry_digest}
+  fi
+  daemon=classic-check-${label}-${suffix}-${trial}
+  measure_image "${daemon}" "${repository}" "${digest}"
+  if [[ ${label} == baseline ]]; then
+    baseline_cold_samples+=("${measured_cold_ms}")
+    baseline_warm_samples+=("${measured_warm_ms}")
+    baseline_startup_samples+=("${measured_startup_ms}")
+    baseline_uncompressed_samples+=("${measured_uncompressed_bytes}")
+  else
+    candidate_cold_samples+=("${measured_cold_ms}")
+    candidate_warm_samples+=("${measured_warm_ms}")
+    candidate_startup_samples+=("${measured_startup_ms}")
+    candidate_uncompressed_samples+=("${measured_uncompressed_bytes}")
+  fi
+}
+
+for trial in $(seq 1 "${measurement_trials}"); do
+  if ((trial % 2)); then
+    measure_trial baseline "${trial}"
+    measure_trial candidate "${trial}"
+  else
+    measure_trial candidate "${trial}"
+    measure_trial baseline "${trial}"
+  fi
+done
+
+baseline_cold_samples_csv=$(IFS=,; echo "${baseline_cold_samples[*]}")
+baseline_warm_samples_csv=$(IFS=,; echo "${baseline_warm_samples[*]}")
+baseline_startup_samples_csv=$(IFS=,; echo "${baseline_startup_samples[*]}")
+baseline_uncompressed_samples_csv=$(IFS=,; echo "${baseline_uncompressed_samples[*]}")
+candidate_cold_samples_csv=$(IFS=,; echo "${candidate_cold_samples[*]}")
+candidate_warm_samples_csv=$(IFS=,; echo "${candidate_warm_samples[*]}")
+candidate_startup_samples_csv=$(IFS=,; echo "${candidate_startup_samples[*]}")
+candidate_uncompressed_samples_csv=$(IFS=,; echo "${candidate_uncompressed_samples[*]}")
+measurement_docker_version=$(docker version --format '{{.Server.Version}}')
+export baseline_cold_samples_csv baseline_warm_samples_csv \
+  baseline_startup_samples_csv baseline_uncompressed_samples_csv \
+  candidate_cold_samples_csv candidate_warm_samples_csv \
+  candidate_startup_samples_csv candidate_uncompressed_samples_csv \
+  baseline_compressed_bytes candidate_compressed_bytes \
+  baseline_registry_digest candidate_registry_digest \
+  remote_baseline_first_ms remote_baseline_warm_ms baseline_image \
+  candidate_image measurement_trials measurement_docker_version
+export measurement_source_sha=${MEASUREMENT_SOURCE_SHA:-${GITHUB_SHA:-unknown}} \
+  measurement_run_id=${GITHUB_RUN_ID:-local} \
+  measurement_run_attempt=${GITHUB_RUN_ATTEMPT:-1}
+if [[ ${GITHUB_ACTIONS:-false} == true ]]; then
+  export measurement_runner='GitHub-hosted ubuntu-26.04'
+else
+  export measurement_runner=local
+fi
 python3 - "${output_directory}/classic-check-image-measurements.json" \
   "${output_directory}/classic-check-image-measurements.md" <<'PY'
 import json
 import os
 from pathlib import Path
+import statistics
 import sys
 
 
@@ -156,31 +231,53 @@ def integer(name: str) -> int:
     return int(os.environ[name])
 
 
-baseline = {
-    "image": os.environ["baseline_image"],
-    "compressed_bytes": integer("baseline_compressed_bytes"),
-    "uncompressed_bytes": integer("baseline_uncompressed_bytes"),
-    "isolated_cold_pull_ms": integer("baseline_cold_ms"),
-    "isolated_warm_pull_ms": integer("baseline_warm_ms"),
-    "startup_mean_ms": integer("baseline_startup_ms"),
-    "ghcr_first_pull_ms": integer("remote_baseline_first_ms"),
-    "ghcr_warm_pull_ms": integer("remote_baseline_warm_ms"),
-}
-candidate = {
-    "image": os.environ["candidate_image"],
-    "compressed_bytes": integer("candidate_compressed_bytes"),
-    "uncompressed_bytes": integer("candidate_uncompressed_bytes"),
-    "isolated_cold_pull_ms": integer("candidate_cold_ms"),
-    "isolated_warm_pull_ms": integer("candidate_warm_ms"),
-    "startup_mean_ms": integer("candidate_startup_ms"),
-}
+def samples(name: str) -> list[int]:
+    return [int(value) for value in os.environ[name].split(",")]
+
+
+def image_result(prefix: str) -> dict[str, object]:
+    cold = samples(f"{prefix}_cold_samples_csv")
+    warm = samples(f"{prefix}_warm_samples_csv")
+    startup = samples(f"{prefix}_startup_samples_csv")
+    uncompressed = samples(f"{prefix}_uncompressed_samples_csv")
+    if len(set(uncompressed)) != 1:
+        raise RuntimeError(f"{prefix} uncompressed size changed between trials")
+    result: dict[str, object] = {
+        "image": os.environ[f"{prefix}_image"],
+        "local_registry_digest": os.environ[f"{prefix}_registry_digest"],
+        "compressed_bytes": integer(f"{prefix}_compressed_bytes"),
+        "uncompressed_bytes": uncompressed[0],
+        "isolated_cold_pull_ms": int(statistics.median(cold)),
+        "isolated_warm_pull_ms": int(statistics.median(warm)),
+        "startup_mean_ms": int(statistics.median(startup)),
+        "samples": {
+            "isolated_cold_pull_ms": cold,
+            "isolated_warm_pull_ms": warm,
+            "startup_five_run_mean_ms": startup,
+        },
+    }
+    return result
+
+
+baseline = image_result("baseline")
+baseline["ghcr_first_pull_ms"] = integer("remote_baseline_first_ms")
+baseline["ghcr_warm_pull_ms"] = integer("remote_baseline_warm_ms")
+candidate = image_result("candidate")
 result = {
     "schema_version": 1,
     "method": {
-        "runner": "GitHub-hosted ubuntu-26.04",
-        "pulls": "separate clean Docker-in-Docker daemons via one local registry",
-        "startup_samples": 5,
-        "note": "The isolated comparison removes GHCR network variance; the baseline GHCR first and warm pulls are recorded separately.",
+        "runner": os.environ["measurement_runner"],
+        "source_sha": os.environ["measurement_source_sha"],
+        "run_id": os.environ["measurement_run_id"],
+        "run_attempt": os.environ["measurement_run_attempt"],
+        "host_docker_version": os.environ["measurement_docker_version"],
+        "dind_image": "docker:27.5.1-dind@sha256:aa3df78ecf320f5fafdce71c659f1629e96e9de0968305fe1de670e0ca9176ce",
+        "pulls": "fresh Docker-in-Docker daemon per sample via one local registry",
+        "pull_trials_per_image": integer("measurement_trials"),
+        "order": "counterbalanced baseline/candidate then candidate/baseline",
+        "startup_samples_per_trial": 5,
+        "summary": "median of three pull trials and their five-run startup means",
+        "note": "The isolated comparison removes GHCR network variance; local-registry digests identify the measured manifests, and baseline GHCR first/warm pulls are supplemental.",
     },
     "baseline": baseline,
     "candidate": candidate,
@@ -201,14 +298,16 @@ Path(sys.argv[1]).write_text(json.dumps(result, indent=2) + "\n", encoding="utf-
 lines = [
     "# Classic Check image measurements",
     "",
-    "GitHub-hosted `ubuntu-26.04`; isolated pulls use separate clean Docker-in-Docker daemons and one local registry.",
+    f"Runner: `{result['method']['runner']}`. Three counterbalanced isolated pull trials use a fresh Docker-in-Docker daemon per sample and one local registry. Values below are medians.",
     "",
-    "| Image | Compressed bytes | Uncompressed bytes | Cold pull | Warm pull | Mean startup |",
-    "| --- | ---: | ---: | ---: | ---: | ---: |",
+    f"Source revision: `{result['method']['source_sha']}`; workflow run: `{result['method']['run_id']}` attempt `{result['method']['run_attempt']}`.",
+    "",
+    "| Image | Immutable measurement digest | Compressed bytes | Uncompressed bytes | Cold pull | Warm pull | Mean startup |",
+    "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
 ]
 for label, value in (("Pinned baseline", baseline), ("Classic Check candidate", candidate)):
     lines.append(
-        f"| {label} | {value['compressed_bytes']} | {value['uncompressed_bytes']} | "
+        f"| {label} | `{value['local_registry_digest']}` | {value['compressed_bytes']} | {value['uncompressed_bytes']} | "
         f"{value['isolated_cold_pull_ms']} ms | {value['isolated_warm_pull_ms']} ms | "
         f"{value['startup_mean_ms']} ms |"
     )
@@ -219,6 +318,9 @@ lines.extend(
         f"Uncompressed-size reduction: **{result['reduction']['uncompressed_percent']}%**.",
         "",
         f"Pinned GHCR baseline first/warm pulls: {baseline['ghcr_first_pull_ms']} ms / {baseline['ghcr_warm_pull_ms']} ms.",
+        "",
+        f"Baseline cold samples: `{baseline['samples']['isolated_cold_pull_ms']}` ms; candidate: `{candidate['samples']['isolated_cold_pull_ms']}` ms.",
+        f"Baseline warm samples: `{baseline['samples']['isolated_warm_pull_ms']}` ms; candidate: `{candidate['samples']['isolated_warm_pull_ms']}` ms.",
     ]
 )
 Path(sys.argv[2]).write_text("\n".join(lines) + "\n", encoding="utf-8")
