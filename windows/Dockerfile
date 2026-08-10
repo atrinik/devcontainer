@@ -155,7 +155,10 @@ RUN test "$(sha256sum "${MXE_PREFIX}/share/atrinik/audio/opus-probe.opus" \
 
 COPY --chown=vscode:vscode windows/classic-check-toolchain.json \
     /tmp/classic-check-toolchain.json
-RUN miniupnpc_commit=$(jq -er '.mxe.sources.miniupnpc.commit' \
+RUN mxe_commit=$(jq -er '.mxe.commit' \
+        /tmp/classic-check-toolchain.json) \
+    && test "${mxe_commit}" = "${MXE_REF}" \
+    && miniupnpc_commit=$(jq -er '.mxe.sources.miniupnpc.commit' \
         /tmp/classic-check-toolchain.json) \
     && test "${miniupnpc_commit}" = "${MINIUPNPC_COMMIT}" \
     && git clone --filter=blob:none https://github.com/miniupnp/miniupnp.git \
