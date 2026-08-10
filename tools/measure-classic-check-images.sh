@@ -32,7 +32,7 @@ baseline_local_tag=
 candidate_local_tag=
 baseline_tag_created=false
 candidate_tag_created=false
-measurement_trials=3
+measurement_trials=4
 containers=()
 
 cleanup() {
@@ -61,10 +61,11 @@ docker pull "${baseline_image}"
 remote_baseline_warm_ms=$((($(date +%s%N) - remote_start) / 1000000))
 
 network_id=$(docker network create "${network_name}")
-registry_id=$(docker run --detach --rm --name "${registry_name}" \
+registry_id=$(docker create --name "${registry_name}" \
   --network "${network_id}" --publish 127.0.0.1::5000 \
   "${registry_image}")
 containers+=("${registry_id}")
+docker start "${registry_id}" >/dev/null
 registry_address=$(docker port "${registry_id}" 5000/tcp)
 registry_port=${registry_address##*:}
 if [[ ! ${registry_port} =~ ^[0-9]+$ ]]; then
@@ -145,11 +146,12 @@ read -r candidate_compressed_bytes candidate_registry_digest \
 start_daemon() {
   local name=$1
   local container_id
-  container_id=$(docker run --detach --privileged --name "${name}" \
+  container_id=$(docker create --privileged --name "${name}" \
     --network "${network_id}" \
     "${dind_image}" --insecure-registry "${registry_name}:5000" \
     --tls=false)
   containers+=("${container_id}")
+  docker start "${container_id}" >/dev/null
   for _ in {1..60}; do
     if docker exec "${container_id}" docker info >/dev/null 2>&1; then
       measured_container_id=${container_id}
@@ -309,6 +311,7 @@ baseline["ghcr_first_pull_ms"] = integer("remote_baseline_first_ms")
 baseline["ghcr_warm_pull_ms"] = integer("remote_baseline_warm_ms")
 candidate = image_result("candidate")
 candidate["buildx_manifest_digest"] = os.environ["measurement_build_digest"]
+trial_count = integer("measurement_trials")
 result = {
     "schema_version": 1,
     "method": {
@@ -321,10 +324,10 @@ result = {
         "host_docker_version": os.environ["measurement_docker_version"],
         "dind_image": "docker:27.5.1-dind@sha256:aa3df78ecf320f5fafdce71c659f1629e96e9de0968305fe1de670e0ca9176ce",
         "pulls": "fresh Docker-in-Docker daemon per sample via one local registry",
-        "pull_trials_per_image": integer("measurement_trials"),
-        "order": "counterbalanced baseline/candidate then candidate/baseline",
+        "pull_trials_per_image": trial_count,
+        "order": "alternating baseline/candidate and candidate/baseline, two each",
         "startup_samples_per_trial": 5,
-        "summary": "median of three pull trials and their five-run startup means",
+        "summary": f"median of {trial_count} pull trials and their five-run startup means",
         "note": "The isolated comparison removes GHCR network variance; local-registry digests identify the measured manifests, and baseline GHCR first/warm pulls are supplemental.",
     },
     "baseline": baseline,
@@ -346,7 +349,7 @@ Path(sys.argv[1]).write_text(json.dumps(result, indent=2) + "\n", encoding="utf-
 lines = [
     "# Classic Check image measurements",
     "",
-    f"Runner: `{result['method']['runner']}`. Three counterbalanced isolated pull trials use a fresh Docker-in-Docker daemon per sample and one local registry. Values below are medians.",
+    f"Runner: `{result['method']['runner']}`. {trial_count} counterbalanced isolated pull trials use a fresh Docker-in-Docker daemon per sample and one local registry. Values below are medians.",
     "",
     f"Checked-out revision: `{result['method']['checkout_sha']}`; PR head/base: `{result['method']['head_sha']}` / `{result['method']['base_sha']}`; workflow run: `{result['method']['run_id']}` attempt `{result['method']['run_attempt']}`.",
     "",

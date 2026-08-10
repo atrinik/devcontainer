@@ -152,28 +152,30 @@ in [`windows/classic-check-toolchain.json`](windows/classic-check-toolchain.json
 while the audio inventory and SPDX document are present unchanged in both
 images.
 
-Pull-request validation restores both the
-published rolling image's inline BuildKit cache and the image-specific GitHub
-Actions cache. It exports cache-only results instead of loading the completed
-general image into the runner's Docker daemon, then loads the Classic Check
-target for its full smoke, cross-build, native Windows execution, and size/pull
-measurements. Release builds first publish immutable general and Classic SHA
-candidates with inline cache metadata, smoke the exact Classic repository
-digest, and execute its staged bundle on `windows-2025`. Only then does a
-separate promotion job move the rolling and version aliases, with the general
-aliases promoted last. Max-mode Actions caches are also retained for both
-targets; Actions-cache export failures are non-fatal because publishing usable
-images is more important than preserving an optimization.
+Pull-request validation is deliberately private-package-free so fork-controlled
+code never receives a GHCR read token or the private baseline image. It uses
+image-specific GitHub Actions caches, exports the general image cache-only, and
+loads the Classic Check target for its full smoke, cross-build, and native
+Windows execution. A separate same-repository branch-push/dispatch workflow
+authenticates to GHCR, restores the published inline cache, repeats the exact
+candidate smoke and native tests, and publishes the size/pull measurements.
+Release builds first publish immutable general and Classic SHA candidates with
+inline cache metadata, smoke the exact Classic repository digest, and execute
+its staged bundle on `windows-2025`. Only then does a separate promotion job
+move the rolling and version aliases, with the general aliases promoted last.
+Max-mode Actions caches are also retained for both targets; Actions-cache export
+failures are non-fatal because publishing usable images is more important than
+preserving an optimization.
 
 The performance check compares the currently pinned Classic image with the
 immutable candidate digest on a GitHub-hosted Ubuntu runner. Compressed sizes
-come from a local OCI registry. Three counterbalanced cold/warm pull trials per
-image each use a fresh Docker-in-Docker daemon against that registry to remove
-GHCR network variance and daemon-layer reuse; every trial averages five
-container starts. The artifact records raw samples, checkout/head/base source
-coordinates, manifest digests, runner metadata, and medians. The pinned image's
-first and warm GHCR pulls are also recorded, and the JSON plus Markdown evidence
-is retained as the
+come from a local OCI registry. Four counterbalanced cold/warm pull trials per
+image alternate order evenly and each use a fresh Docker-in-Docker daemon
+against that registry to remove GHCR network variance and daemon-layer reuse;
+every trial averages five container starts. The artifact records raw samples,
+checkout/head/base source coordinates, manifest digests, runner metadata, and
+medians. The pinned image's first and warm GHCR pulls are also recorded, and
+the JSON plus Markdown evidence is retained as the
 `classic-check-image-measurements` workflow artifact for 30 days.
 
 Pull requests build each image whose inputs changed. Linux validation also

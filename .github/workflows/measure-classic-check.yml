@@ -1,0 +1,203 @@
+name: Measure Classic Check image
+
+on:
+  push:
+    branches-ignore:
+      - main
+    paths:
+      - .dockerignore
+      - .github/workflows/measure-classic-check.yml
+      - .github/workflows/publish-windows.yml
+      - .github/workflows/validate.yml
+      - audio-toolchain.json
+      - audio-toolchain.spdx.json
+      - tools/audio/**
+      - tools/build-sdl3-mixer.sh
+      - tools/measure-classic-check-images.sh
+      - tools/smoke-classic-check.sh
+      - tools/validate-toolchains.sh
+      - tools/verify-classic-check-package.py
+      - tools/verify-pe-imports.sh
+      - windows/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: measure-classic-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    name: Measure immutable Classic Check candidate
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 180
+    outputs:
+      base_sha: ${{ steps.coordinates.outputs.base_sha }}
+    steps:
+      - name: Check out image sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Resolve source coordinates
+        id: coordinates
+        run: |
+          if [[ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]]; then
+            echo "Checked-out revision does not match GITHUB_SHA" >&2
+            exit 1
+          fi
+          base_sha=$(git merge-base HEAD origin/main)
+          if [[ ! "${base_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid merge-base revision: ${base_sha}" >&2
+            exit 1
+          fi
+          echo "base_sha=${base_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Select immutable Classic Check consumer
+        id: classic
+        run: |
+          classic_ref=$(jq -er '.consumer.validation_commit' \
+            windows/classic-check-toolchain.json)
+          if [[ ! "${classic_ref}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid Classic validation commit: ${classic_ref}" >&2
+            exit 1
+          fi
+          echo "ref=${classic_ref}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check out immutable Classic Check consumer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: atrinik/classic
+          ref: ${{ steps.classic.outputs.ref }}
+          path: build/classic
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Validate Classic Check inventory
+        run: |
+          tools/validate-toolchains.sh \
+            toolchains.json '' \
+            audio-toolchain.json '' \
+            audio-toolchain.spdx.json '' \
+            windows/classic-check-toolchain.json
+
+      - name: Build task-focused Classic Check image
+        id: classic-image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: windows/Dockerfile
+          target: classic-check
+          load: true
+          tags: atrinik-windows-check:measurement
+          build-args: MXE_BUILD_JOBS=4
+          cache-from: |
+            type=registry,ref=ghcr.io/atrinik/windows-build:classic-check-mxe
+            type=registry,ref=ghcr.io/atrinik/windows-build:mxe
+            type=gha,scope=windows-classic-check-image
+            type=gha,scope=windows-build-image
+          cache-to: type=gha,mode=max,scope=windows-classic-check-image,ignore-error=true
+
+      - name: Resolve immutable Classic Check candidate
+        id: candidate
+        env:
+          CANDIDATE_DIGEST: ${{ steps.classic-image.outputs.digest }}
+          CANDIDATE_IMAGE_ID: ${{ steps.classic-image.outputs.imageid }}
+        run: |
+          if [[ ! "${CANDIDATE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Invalid candidate digest: ${CANDIDATE_DIGEST}" >&2
+            exit 1
+          fi
+          if [[ ! "${CANDIDATE_IMAGE_ID}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Invalid candidate image ID: ${CANDIDATE_IMAGE_ID}" >&2
+            exit 1
+          fi
+          docker image inspect "${CANDIDATE_IMAGE_ID}" >/dev/null
+          {
+            echo "image=${CANDIDATE_IMAGE_ID}"
+            echo "build_digest=${CANDIDATE_DIGEST}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Cross-build and stage the complete Classic Check bundle
+        env:
+          CANDIDATE_IMAGE: ${{ steps.candidate.outputs.image }}
+        run: tools/smoke-classic-check.sh "${CANDIDATE_IMAGE}" build/classic
+
+      - name: Measure pinned and task-focused images
+        env:
+          CANDIDATE_IMAGE: ${{ steps.candidate.outputs.image }}
+          MEASUREMENT_BASE_SHA: ${{ steps.coordinates.outputs.base_sha }}
+          MEASUREMENT_BUILD_DIGEST: ${{ steps.candidate.outputs.build_digest }}
+          MEASUREMENT_HEAD_SHA: ${{ github.sha }}
+          MEASUREMENT_SOURCE_SHA: ${{ github.sha }}
+        run: |
+          tools/measure-classic-check-images.sh \
+            ghcr.io/atrinik/windows-build:1.0.5@sha256:9cc373f620a577328fc0a7a7fa823bddaca6d7dc75ac73bcf21be421c49676f7 \
+            "${CANDIDATE_IMAGE}" \
+            build/measurements
+          cat build/measurements/classic-check-image-measurements.md \
+            >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload measured native Windows test bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: classic-check-measured-native-windows-tests
+          path: build/classic/libatrinik/build/windows-test-bundle
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload image measurements
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: classic-check-image-measurements
+          path: build/measurements
+          if-no-files-found: error
+          retention-days: 30
+
+  windows-native:
+    name: Execute measured Classic Check candidate on Windows
+    needs: measure
+    permissions: {}
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Download measured native Windows test bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: classic-check-measured-native-windows-tests
+          path: build/native-windows-tests
+
+      - name: Execute every Classic Check native test
+        shell: pwsh
+        run: |
+          $bundle = (Resolve-Path "build/native-windows-tests").Path
+          $env:PATH = "${bundle};${env:PATH}"
+          $inventoryPath = Join-Path $bundle "classic-check-toolchain.json"
+          $tests = (Get-Content -Raw $inventoryPath | ConvertFrom-Json).verification.native_tests
+          if ($tests.Count -ne 6) { throw "Expected six declared native tests" }
+          foreach ($test in $tests) {
+            $executable = Join-Path $bundle $test.executable
+            $arguments = @($test.arguments | ForEach-Object {
+              if ([IO.Path]::IsPathRooted($_) -or $_ -like "../*" -or $_ -like "..\\*") {
+                throw "Unsafe native-test argument: $_"
+              }
+              Join-Path $bundle $_
+            })
+            & $executable @arguments
+            if ($LASTEXITCODE -ne 0) {
+              throw "$($test.executable) failed: ${LASTEXITCODE}"
+            }
+          }

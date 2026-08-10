@@ -28,6 +28,8 @@
   on CI cache for final verification.
 - Workflow changes also require actionlint and Atrinik GitHub-governance review
   for permissions, pinned actions, check names, and ruleset compatibility.
+  Never expose private-package permissions or images to `pull_request` code;
+  authenticated measurements belong to the same-repository push/dispatch path.
 - Commits and pull-request titles use Conventional Commits. Preserve unrelated
   work and finish with `git diff --check`.
 - Update this `AGENTS.md` in the same change when major rework alters image
