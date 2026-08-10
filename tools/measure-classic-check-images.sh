@@ -27,18 +27,27 @@ network_name=classic-check-measurement-${suffix}
 baseline_repository=baseline-${suffix}
 candidate_repository=candidate-${suffix}
 registry_port=
+network_id=
 baseline_local_tag=
 candidate_local_tag=
+baseline_tag_created=false
+candidate_tag_created=false
 measurement_trials=3
-containers=("${registry_name}")
+containers=()
 
 cleanup() {
-  docker rm --force "${containers[@]}" >/dev/null 2>&1 || true
-  if [[ -n ${baseline_local_tag} && -n ${candidate_local_tag} ]]; then
-    docker image rm "${baseline_local_tag}" "${candidate_local_tag}" \
-      >/dev/null 2>&1 || true
+  if ((${#containers[@]})); then
+    docker rm --force --volumes "${containers[@]}" >/dev/null 2>&1 || true
   fi
-  docker network rm "${network_name}" >/dev/null 2>&1 || true
+  if [[ ${baseline_tag_created} == true ]]; then
+    docker image rm "${baseline_local_tag}" >/dev/null 2>&1 || true
+  fi
+  if [[ ${candidate_tag_created} == true ]]; then
+    docker image rm "${candidate_local_tag}" >/dev/null 2>&1 || true
+  fi
+  if [[ -n ${network_id} ]]; then
+    docker network rm "${network_id}" >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
 
@@ -51,11 +60,12 @@ remote_start=$(date +%s%N)
 docker pull "${baseline_image}"
 remote_baseline_warm_ms=$((($(date +%s%N) - remote_start) / 1000000))
 
-docker network create "${network_name}" >/dev/null
-docker run --detach --rm --name "${registry_name}" \
-  --network "${network_name}" --publish 127.0.0.1::5000 \
-  "${registry_image}" >/dev/null
-registry_address=$(docker port "${registry_name}" 5000/tcp)
+network_id=$(docker network create "${network_name}")
+registry_id=$(docker run --detach --rm --name "${registry_name}" \
+  --network "${network_id}" --publish 127.0.0.1::5000 \
+  "${registry_image}")
+containers+=("${registry_id}")
+registry_address=$(docker port "${registry_id}" 5000/tcp)
 registry_port=${registry_address##*:}
 if [[ ! ${registry_port} =~ ^[0-9]+$ ]]; then
   echo "cannot resolve temporary registry port: ${registry_address}" >&2
@@ -71,8 +81,15 @@ curl --fail --silent "http://localhost:${registry_port}/v2/" >/dev/null
 
 baseline_local_tag=localhost:${registry_port}/${baseline_repository}:measurement
 candidate_local_tag=localhost:${registry_port}/${candidate_repository}:measurement
+if docker image inspect "${baseline_local_tag}" >/dev/null 2>&1 ||
+    docker image inspect "${candidate_local_tag}" >/dev/null 2>&1; then
+  echo "temporary measurement image tag already exists" >&2
+  exit 1
+fi
 docker tag "${baseline_image}" "${baseline_local_tag}"
+baseline_tag_created=true
 docker tag "${candidate_image}" "${candidate_local_tag}"
+candidate_tag_created=true
 docker push "${baseline_local_tag}" >/dev/null
 docker push "${candidate_local_tag}" >/dev/null
 
@@ -127,13 +144,15 @@ read -r candidate_compressed_bytes candidate_registry_digest \
 
 start_daemon() {
   local name=$1
-  docker run --detach --privileged --name "${name}" \
-    --network "${network_name}" \
+  local container_id
+  container_id=$(docker run --detach --privileged --name "${name}" \
+    --network "${network_id}" \
     "${dind_image}" --insecure-registry "${registry_name}:5000" \
-    --tls=false >/dev/null
-  containers+=("${name}")
+    --tls=false)
+  containers+=("${container_id}")
   for _ in {1..60}; do
-    if docker exec "${name}" docker info >/dev/null 2>&1; then
+    if docker exec "${container_id}" docker info >/dev/null 2>&1; then
+      measured_container_id=${container_id}
       return
     fi
     sleep 1
@@ -151,24 +170,24 @@ measure_image() {
 
   start_daemon "${name}"
   start=$(date +%s%N)
-  docker exec "${name}" docker pull "${image}" >/dev/null
+  docker exec "${measured_container_id}" docker pull "${image}" >/dev/null
   cold_ms=$((($(date +%s%N) - start) / 1000000))
   start=$(date +%s%N)
-  docker exec "${name}" docker pull "${image}" >/dev/null
+  docker exec "${measured_container_id}" docker pull "${image}" >/dev/null
   warm_ms=$((($(date +%s%N) - start) / 1000000))
-  uncompressed_bytes=$(docker exec "${name}" docker image inspect \
+  uncompressed_bytes=$(docker exec "${measured_container_id}" docker image inspect \
     --format '{{.Size}}' "${image}")
   startup_total_ms=0
   for _ in {1..5}; do
     start=$(date +%s%N)
-    docker exec "${name}" docker run --rm "${image}" true
+    docker exec "${measured_container_id}" docker run --rm "${image}" true
     startup_total_ms=$((startup_total_ms + ($(date +%s%N) - start) / 1000000))
   done
   measured_cold_ms=${cold_ms}
   measured_warm_ms=${warm_ms}
   measured_startup_ms=$((startup_total_ms / 5))
   measured_uncompressed_bytes=${uncompressed_bytes}
-  docker rm --force "${name}" >/dev/null
+  docker rm --force --volumes "${measured_container_id}" >/dev/null
 }
 
 baseline_cold_samples=()
