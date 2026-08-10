@@ -161,6 +161,10 @@ if [[ -n ${classic_check_expected} ]]; then
   and (.mxe.packages | index("sdl3_ttf") != null)
   and (.mxe.packages | index("zlib") != null)
   and (.mxe.additional_libraries | index("SDL3_mixer") != null)
+  and .mxe.sources.miniupnpc == {
+    "repository": "miniupnp/miniupnp",
+    "commit": "bf4215a7574f88aa55859db9db00e3ae58cf42d6"
+  }
   and .runtime_contract.inventory == "/usr/local/share/atrinik/audio-toolchain.json"
   and .runtime_contract.sbom == "/usr/local/share/atrinik/audio-toolchain.spdx.json"
   and (.excluded.paths | index("/opt/mxe/python-runtime") != null)

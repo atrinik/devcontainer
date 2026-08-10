@@ -16,6 +16,18 @@ if [[ ! -f ${classic_checkout}/client/tools/build-windows-package.sh ||
   echo "CLASSIC_CHECKOUT is not an Atrinik Classic checkout" >&2
   exit 1
 fi
+expected_classic_commit=$(jq -er '.consumer.validation_commit' \
+  "${image_checkout}/windows/classic-check-toolchain.json")
+actual_classic_commit=$(git -C "${classic_checkout}" rev-parse HEAD)
+if [[ ${actual_classic_commit} != "${expected_classic_commit}" ]]; then
+  echo "CLASSIC_CHECKOUT is at ${actual_classic_commit}, expected ${expected_classic_commit}" >&2
+  exit 1
+fi
+if ! git -C "${classic_checkout}" diff --quiet || \
+    ! git -C "${classic_checkout}" diff --cached --quiet; then
+  echo "CLASSIC_CHECKOUT has tracked changes" >&2
+  exit 1
+fi
 
 python3 "${classic_checkout}/client/tools/dependencies.py" sync
 umask 077

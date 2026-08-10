@@ -153,7 +153,13 @@ RUN test "$(sha256sum "${MXE_PREFIX}/share/atrinik/audio/opus-probe.opus" \
         -print -quit | grep -q . \
     && rm /tmp/sdl3-mixer-probe.c
 
-RUN git clone --filter=blob:none https://github.com/miniupnp/miniupnp.git /tmp/miniupnp \
+COPY --chown=vscode:vscode windows/classic-check-toolchain.json \
+    /tmp/classic-check-toolchain.json
+RUN miniupnpc_commit=$(jq -er '.mxe.sources.miniupnpc.commit' \
+        /tmp/classic-check-toolchain.json) \
+    && test "${miniupnpc_commit}" = "${MINIUPNPC_COMMIT}" \
+    && git clone --filter=blob:none https://github.com/miniupnp/miniupnp.git \
+        /tmp/miniupnp \
     && git -C /tmp/miniupnp checkout "${MINIUPNPC_COMMIT}" \
     && x86_64-w64-mingw32.shared-cmake \
         -S /tmp/miniupnp/miniupnpc \
@@ -163,7 +169,8 @@ RUN git clone --filter=blob:none https://github.com/miniupnp/miniupnp.git /tmp/m
         -DUPNPC_BUILD_TESTS=OFF \
     && cmake --build /tmp/miniupnp-build --parallel "${MXE_BUILD_JOBS}" \
     && cmake --install /tmp/miniupnp-build \
-    && rm -rf /tmp/miniupnp /tmp/miniupnp-build
+    && rm -rf /tmp/miniupnp /tmp/miniupnp-build \
+        /tmp/classic-check-toolchain.json
 
 FROM windows-shared AS windows-build
 

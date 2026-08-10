@@ -97,11 +97,22 @@ jobs:
       - name: Check out image sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Select immutable Classic Check consumer
+        id: classic
+        run: |
+          classic_ref=$(jq -er '.consumer.validation_commit' \
+            windows/classic-check-toolchain.json)
+          if [[ ! "${classic_ref}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid Classic validation commit: ${classic_ref}" >&2
+            exit 1
+          fi
+          echo "ref=${classic_ref}" >> "${GITHUB_OUTPUT}"
+
       - name: Check out immutable Classic Check consumer
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: atrinik/classic
-          ref: 2d3ecad2117733b1262f5195c0dd414fef4b45f3
+          ref: ${{ steps.classic.outputs.ref }}
           path: build/classic
 
       - name: Set up Docker Buildx
@@ -149,6 +160,10 @@ jobs:
         env:
           CANDIDATE_DIGEST: ${{ steps.classic-image.outputs.digest }}
         run: |
+          if [[ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]]; then
+            echo "Checked-out revision does not match GITHUB_SHA" >&2
+            exit 1
+          fi
           if [[ ! "${CANDIDATE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "Invalid candidate digest: ${CANDIDATE_DIGEST}" >&2
             exit 1
@@ -165,7 +180,9 @@ jobs:
       - name: Measure pinned and task-focused images
         env:
           CANDIDATE_IMAGE: ${{ steps.candidate.outputs.image }}
-          MEASUREMENT_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          MEASUREMENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MEASUREMENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MEASUREMENT_SOURCE_SHA: ${{ github.sha }}
         run: |
           tools/measure-classic-check-images.sh \
             ghcr.io/atrinik/windows-build:1.0.5@sha256:9cc373f620a577328fc0a7a7fa823bddaca6d7dc75ac73bcf21be421c49676f7 \

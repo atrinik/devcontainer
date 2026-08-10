@@ -26,6 +26,8 @@ containers=("${registry_name}")
 
 cleanup() {
   docker rm --force "${containers[@]}" >/dev/null 2>&1 || true
+  docker image rm localhost:${registry_port}/baseline:latest \
+    localhost:${registry_port}/candidate:latest >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -211,6 +213,8 @@ export baseline_cold_samples_csv baseline_warm_samples_csv \
   remote_baseline_first_ms remote_baseline_warm_ms baseline_image \
   candidate_image measurement_trials measurement_docker_version
 export measurement_source_sha=${MEASUREMENT_SOURCE_SHA:-${GITHUB_SHA:-unknown}} \
+  measurement_head_sha=${MEASUREMENT_HEAD_SHA:-unknown} \
+  measurement_base_sha=${MEASUREMENT_BASE_SHA:-unknown} \
   measurement_run_id=${GITHUB_RUN_ID:-local} \
   measurement_run_attempt=${GITHUB_RUN_ATTEMPT:-1}
 if [[ ${GITHUB_ACTIONS:-false} == true ]]; then
@@ -267,7 +271,9 @@ result = {
     "schema_version": 1,
     "method": {
         "runner": os.environ["measurement_runner"],
-        "source_sha": os.environ["measurement_source_sha"],
+        "checkout_sha": os.environ["measurement_source_sha"],
+        "head_sha": os.environ["measurement_head_sha"],
+        "base_sha": os.environ["measurement_base_sha"],
         "run_id": os.environ["measurement_run_id"],
         "run_attempt": os.environ["measurement_run_attempt"],
         "host_docker_version": os.environ["measurement_docker_version"],
@@ -300,7 +306,7 @@ lines = [
     "",
     f"Runner: `{result['method']['runner']}`. Three counterbalanced isolated pull trials use a fresh Docker-in-Docker daemon per sample and one local registry. Values below are medians.",
     "",
-    f"Source revision: `{result['method']['source_sha']}`; workflow run: `{result['method']['run_id']}` attempt `{result['method']['run_attempt']}`.",
+    f"Checked-out revision: `{result['method']['checkout_sha']}`; PR head/base: `{result['method']['head_sha']}` / `{result['method']['base_sha']}`; workflow run: `{result['method']['run_id']}` attempt `{result['method']['run_attempt']}`.",
     "",
     "| Image | Immutable measurement digest | Compressed bytes | Uncompressed bytes | Cold pull | Warm pull | Mean startup |",
     "| --- | --- | ---: | ---: | ---: | ---: | ---: |",

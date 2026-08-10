@@ -45,6 +45,12 @@
       "libopus",
       "libopusfile"
     ],
+    "sources": {
+      "miniupnpc": {
+        "repository": "miniupnp/miniupnp",
+        "commit": "bf4215a7574f88aa55859db9db00e3ae58cf42d6"
+      }
+    },
     "copied_roots": [
       "/opt/mxe/usr/bin",
       "/opt/mxe/usr/include",
