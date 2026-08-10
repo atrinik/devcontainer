@@ -263,4 +263,106 @@ RUN actionlint \
              (($inventory[0].dependencies + [$inventory[0].sdl_mixer]) \
               | map([.name, .version]) | sort)'
 
+# Classic Check uses a separate task-focused target. It intentionally starts
+# from the pinned Ubuntu base instead of inheriting the replacement toolchain,
+# and resolves packages from a fixed Ubuntu archive snapshot. Its exact CA and
+# TLS runtime packages are bootstrapped first because the minimal base cannot
+# validate the HTTPS snapshot service.
+FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS classic-ci
+
+ARG UBUNTU_SNAPSHOT=20260810T000000Z
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN rm -f /etc/apt/apt.conf.d/docker-clean
+
+COPY classic-packages.lock /tmp/classic-packages.lock
+RUN apt-get update \
+    && awk -F= '$1 == "ca-certificates" \
+            || $1 == "libssl3t64" \
+            || $1 == "openssl" \
+            || $1 == "openssl-provider-legacy" { print }' \
+        /tmp/classic-packages.lock \
+        | xargs -r apt-get install -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && sed -i \
+        -e "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
+        -e "s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
+        /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get update \
+    && xargs -r apt-get install -y --no-install-recommends \
+        < /tmp/classic-packages.lock \
+    && rm -rf /var/lib/apt/lists/*
+
+# Classic requires the same checksum-pinned SDL3_mixer contract as the broad
+# Linux image. Its codec dependencies are statically linked into the shared
+# library, while SDL3 and the remaining native libraries come from the frozen
+# Ubuntu package snapshot above.
+COPY audio-toolchain.json /tmp/audio-toolchain.json
+COPY tools/build-sdl3-mixer.sh /tmp/build-sdl3-mixer.sh
+RUN /tmp/build-sdl3-mixer.sh \
+        /tmp/audio-toolchain.json cmake /usr/local "$(nproc)" \
+    && ldconfig \
+    && test "$(pkg-config --modversion sdl3-mixer)" \
+        = "$(jq -r '.sdl_mixer.version' /tmp/audio-toolchain.json)"
+
+COPY tools/audio/opus-probe.opus /usr/local/share/atrinik/audio/opus-probe.opus
+COPY tools/audio/sdl3-mixer-probe.c /tmp/sdl3-mixer-probe.c
+RUN test "$(sha256sum /usr/local/share/atrinik/audio/opus-probe.opus \
+        | cut -d' ' -f1)" \
+        = "$(jq -r '.fixture.sha256' /tmp/audio-toolchain.json)" \
+    && cc -std=c17 -Wall -Wextra -Werror \
+        /tmp/sdl3-mixer-probe.c \
+        -o /usr/local/bin/atrinik-sdl3-mixer-probe \
+        $(pkg-config --cflags --libs sdl3-mixer) \
+    && atrinik-sdl3-mixer-probe \
+        /usr/local/share/atrinik/audio/opus-probe.opus \
+    && rm /tmp/sdl3-mixer-probe.c
+
+ENV CCACHE_DIR=/cache/ccache
+RUN install -d -m 1777 "${CCACHE_DIR}"
+
+COPY classic-toolchain.json /usr/local/share/atrinik/classic-toolchain.json
+COPY classic-packages.lock /usr/local/share/atrinik/classic-packages.lock
+COPY audio-toolchain.json /usr/local/share/atrinik/audio-toolchain.json
+COPY audio-toolchain.spdx.json /usr/local/share/atrinik/audio-toolchain.spdx.json
+
+USER ubuntu
+WORKDIR /workspace
+
+FROM classic-ci AS classic-validation
+
+USER root
+ARG SYFT_VERSION=1.50.0
+ARG SYFT_SHA256=bf7b29ff57f06da30918266a0e1c2885a8f99784798d1bdb1628886aa015d788
+RUN curl --fail --location --silent --show-error \
+        "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz" \
+        --output /tmp/syft.tar.gz \
+    && echo "${SYFT_SHA256}  /tmp/syft.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/syft.tar.gz -C /usr/local/bin syft \
+    && rm /tmp/syft.tar.gz
+
+COPY classic-packages.lock /workspace/classic-packages.lock
+COPY classic-toolchain.json /workspace/classic-toolchain.json
+COPY audio-toolchain.json /workspace/audio-toolchain.json
+COPY tools/validate-classic-image.sh /workspace/tools/validate-classic-image.sh
+
+USER ubuntu
+RUN /workspace/tools/validate-classic-image.sh \
+        /workspace/classic-packages.lock \
+        /workspace/classic-toolchain.json \
+        /usr/local/share/atrinik/classic-toolchain.json \
+        /workspace/audio-toolchain.json
+
+USER root
+RUN syft dir:/ -o spdx-json \
+        | jq -e '.spdxVersion == "SPDX-2.3" \
+            and ([.packages[].name] | index("ccache") != null) \
+            and ([.packages[].name] | index("cmake") != null) \
+            and ([.packages[].name] | index("gcc") != null)' \
+    && syft dir:/ --override-default-catalogers sbom-cataloger -o spdx-json \
+        | jq -e '.spdxVersion == "SPDX-2.3" \
+            and ([.packages[].name] | index("SDL3_mixer") != null)'
+
+FROM classic-ci AS classic-final
+
 FROM toolchain AS final

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schema_version": 1,
+  "platform": "linux/amd64",
+  "target": "classic-final",
+  "image": "ghcr.io/atrinik/classic-build",
+  "base": {
+    "image": "ubuntu:26.04",
+    "digest": "sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03",
+    "apt_snapshot": "20260810T000000Z"
+  },
+  "tools": {
+    "ccache": "4.12.3",
+    "cmake": "4.2.3",
+    "gcc": "15.2.0",
+    "gcovr": "7.2",
+    "ninja": "1.13.2",
+    "python": "3.14.4"
+  },
+  "ccache": {
+    "directory": "/cache/ccache",
+    "default_user": "ubuntu",
+    "compiler_launcher_required": true
+  },
+  "pkg_config": [
+    "libcurl",
+    "libidn2",
+    "openssl",
+    "sdl3",
+    "sdl3-image",
+    "sdl3-mixer",
+    "sdl3-ttf",
+    "libxml-2.0",
+    "zlib"
+  ],
+  "consumer_validation": {
+    "repository": "atrinik/classic",
+    "commit": "2d3ecad2117733b1262f5195c0dd414fef4b45f3"
+  }
+}

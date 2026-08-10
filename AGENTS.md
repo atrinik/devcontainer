@@ -15,11 +15,18 @@
 - Treat Dockerfile inputs, `.dockerignore`, cache scopes, build arguments,
   published tags, and workflow path filters as one contract. If a relevant file
   changes, the required aggregate validation must still run.
-- Every semantic release publishes both images and their supported tags. Do not
-  create manual release tags as a substitute for semantic-release.
+- `classic-final` is the slim Classic Check target. Keep its Ubuntu snapshot,
+  direct package lock, tool inventory, non-root ccache mount, Classic validation
+  revision, smoke/SBOM checks, and published tags synchronized. Do not make it
+  inherit the broad replacement/development toolchain.
+- Every semantic release publishes all three images and their supported tags.
+  The Linux publisher owns both `linux-build` and `classic-build`; the Windows
+  publisher owns `windows-build`. Do not create manual release tags as a
+  substitute for semantic-release.
 - Validate Dockerfiles with `docker build --check`. Build and smoke-test each
-  affected image; note that a cold Windows/MXE build is expensive and may rely
-  on CI cache for final verification.
+  affected image, including `classic-validation` before `classic-final`; note
+  that a cold Windows/MXE build is expensive and may rely on CI cache for final
+  verification.
 - Workflow changes also require actionlint and Atrinik GitHub-governance review
   for permissions, pinned actions, check names, and ruleset compatibility.
 - Commits and pull-request titles use Conventional Commits. Preserve unrelated

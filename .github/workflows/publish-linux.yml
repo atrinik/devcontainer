@@ -48,6 +48,32 @@ jobs:
             echo EOF
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Select Classic image tags
+        id: classic-metadata
+        env:
+          IMAGE_NAME: classic-build
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME}"
+          tags="${image}:latest
+          ${image}:ubuntu-26.04
+          ${image}:sha-${GITHUB_SHA}"
+
+          if [[ "${GITHUB_REF_TYPE}" == tag ]]; then
+            if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Invalid image release tag: ${GITHUB_REF_NAME}" >&2
+              exit 1
+            fi
+            tags="${tags}
+          ${image}:${GITHUB_REF_NAME#v}"
+          fi
+
+          {
+            echo "image=${image}"
+            echo 'tags<<EOF'
+            echo "${tags}"
+            echo EOF
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
@@ -76,3 +102,37 @@ jobs:
           cache-to: |
             type=inline
             type=gha,mode=max,scope=linux-build-image,ignore-error=true
+
+      - name: Build and smoke Classic validation target
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: linux/Dockerfile
+          target: classic-validation
+          outputs: type=cacheonly
+          cache-from: |
+            type=registry,ref=ghcr.io/atrinik/classic-build:ubuntu-26.04
+            type=gha,scope=classic-build-image
+          cache-to: type=gha,mode=max,scope=classic-build-image,ignore-error=true
+
+      - name: Build and publish Classic image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: linux/Dockerfile
+          target: classic-final
+          platforms: linux/amd64
+          pull: true
+          push: true
+          tags: ${{ steps.classic-metadata.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          sbom: true
+          provenance: mode=max
+          cache-from: |
+            type=registry,ref=ghcr.io/atrinik/classic-build:ubuntu-26.04
+            type=gha,scope=classic-build-image
+          cache-to: |
+            type=inline
+            type=gha,mode=max,scope=classic-build-image,ignore-error=true

@@ -11,13 +11,15 @@ to game code do not rebuild the toolchains.
 Published images:
 
 - `ghcr.io/atrinik/linux-build:ubuntu-26.04`
+- `ghcr.io/atrinik/classic-build:ubuntu-26.04`
 - `ghcr.io/atrinik/windows-build:mxe`
 
 Every successful image publication updates `latest`, its rolling platform tag,
 and a `sha-<commit>` tag. Publishing from an image-repository tag matching
 `vX.Y.Z` also publishes the corresponding `X.Y.Z` image tag. Release automation
-publishes both Linux and Windows images for every version so consumers can pin
-a matched toolchain release.
+publishes the broad Linux development image, the slim Classic Check image, and
+the Windows cross-build image for every version so consumers can pin a matched
+toolchain release.
 
 ## Publishing
 
@@ -28,12 +30,13 @@ version. Every other conventional type advances at least the patch version, so
 every squash merge creates a tag. Each new tag dispatches both image
 publishers.
 
-Either publisher can also be started manually from the Actions page for a
+Either publisher workflow can also be started manually from the Actions page for a
 reviewed rebuild or recovery of an existing ref. Manual dispatch does not
 create a Git tag or semantic release. Semantic-release alone creates new
-`vX.Y.Z` tags; do not create or push a release tag manually. When recovering a
-versioned release, dispatch both publishers against the same existing tag so
-the Linux and Windows image versions remain matched.
+`vX.Y.Z` tags; do not create or push a release tag manually. The Linux
+publisher produces both `linux-build` and `classic-build`. When recovering a
+versioned release, dispatch the Linux and Windows publishers against the same
+existing tag so all three image versions remain matched.
 
 ## Local validation
 
@@ -42,6 +45,12 @@ docker build --check --file linux/Dockerfile .
 docker build --check --file windows/Dockerfile .
 
 docker build --file linux/Dockerfile --tag atrinik-linux-build .
+docker build --file linux/Dockerfile \
+  --target classic-validation \
+  --tag atrinik-classic-validation .
+docker build --file linux/Dockerfile \
+  --target classic-final \
+  --tag atrinik-classic-build .
 docker build --file windows/Dockerfile \
   --build-arg MXE_BUILD_JOBS="$(nproc)" \
   --tag atrinik-windows-build .
@@ -58,6 +67,9 @@ docker run --rm atrinik-linux-build protoc-gen-go --version
 docker run --rm atrinik-linux-build protoc-gen-prost --version
 docker run --rm atrinik-linux-build node --version
 docker run --rm atrinik-linux-build pnpm --version
+docker run --rm atrinik-classic-build gcc --version
+docker run --rm atrinik-classic-build cmake --version
+docker run --rm atrinik-classic-build ccache --version
 docker run --rm atrinik-linux-build \
   atrinik-sdl3-mixer-probe \
   /usr/local/share/atrinik/audio/opus-probe.opus
@@ -67,6 +79,55 @@ docker run --rm atrinik-windows-build \
   x86_64-w64-mingw32.shared-gcc --version
 docker run --rm --user vscode atrinik-windows-build ssh -V
 ```
+
+The `classic-final` target is a separate, amd64-only CI contract rather than a
+trimmed development image. It starts from the same digest-pinned Ubuntu 26.04
+base, bootstraps exact locked CA and TLS runtime packages, and resolves all
+packages from the timestamp in
+[`classic-toolchain.json`](classic-toolchain.json). Direct
+package versions are locked in
+[`classic-packages.lock`](classic-packages.lock). The image contains GCC,
+CMake/Ninja, Python/gcovr, Check, ccache, and the union of native dependencies
+needed by the Classic client and server. SDL3_mixer and its codec closure retain
+the checksum-pinned source and nested SPDX inventory used by the development
+image.
+
+Classic runs as the unprivileged `ubuntu` user by default. `/cache/ccache` is a
+mode-1777 mount contract so CI can run with its own numeric UID and persist the
+directory without granting root. Consumers must still select ccache explicitly
+with `-DCMAKE_C_COMPILER_LAUNCHER=ccache`; `CCACHE_DIR` alone does not activate
+compiler caching. The image smoke target proves a repeated compilation hits the
+cache, validates every locked direct package and tool version, checks the native
+`pkg-config` surface, decodes the bundled Opus fixture, and inspects the image
+plus nested dependency inventory as SPDX 2.3. Pull-request validation then runs
+representative client and server configure-build-test-coverage commands against
+the exact Classic revision recorded in the inventory as a non-root runner UID.
+
+Every Classic publication updates `latest`, `ubuntu-26.04`, and
+`sha-<commit>`. A semantic-release tag also publishes the matching `X.Y.Z` tag,
+with BuildKit provenance and an attached SBOM. Consuming workflows should pin
+the digest, never a rolling tag. To update that pin:
+
+1. Advance `base.apt_snapshot`, refresh the exact direct versions in
+   `classic-packages.lock`, and update the tool versions and pinned Classic
+   validation commit in `classic-toolchain.json`.
+2. Build `classic-validation` and `classic-final`, run the repository checks,
+   and compare compressed image size plus client/server timings with the prior
+   digest. A clean runner provides the cold pull; pulling the same digest again
+   provides the warm-cache measurement.
+3. Merge through semantic-release, wait for both publisher workflows, and copy
+   the `ghcr.io/atrinik/classic-build@sha256:...` manifest digest from the
+   versioned release into the consuming review branch. Include that digest in
+   the consumer's ccache invalidation key.
+4. Run the consumer's cold and warm jobs, record pull/startup/build timings and
+   ccache statistics, and only then remove its superseded apt or prefix-cache
+   setup.
+
+The package snapshot is deliberately fail-closed: changing the snapshot or a
+locked version requires a reviewed inventory update. The initial CA/TLS
+bootstrap uses the live Ubuntu archive because the minimal base cannot validate
+the HTTPS snapshot service, but every bootstrap package and dependency is
+version-locked before snapshot access.
 
 The Linux image includes the pinned replacement toolchains recorded in
 [`toolchains.json`](toolchains.json): Go, Rust/rustup, Protobuf/protoc, Buf,
@@ -102,11 +163,11 @@ exact Windows import contract. The matching
 [`audio-toolchain.spdx.json`](audio-toolchain.spdx.json) records SDL3_mixer and
 all three statically linked codec packages in SPDX 2.3 form, because a scanner
 cannot infer static source dependencies from the resulting shared library.
-Both images carry the inventory and SBOM under
+All three images carry the inventory and SBOM under
 `/usr/local/share/atrinik/`; Syft's nested-SBOM cataloger incorporates those
 packages in whole-image SBOM output.
 
-Both builds compile the same no-device decoder probe. Linux validation runs it
+All three builds compile the same no-device decoder probe. Linux validation runs it
 during the image build, enumerates the required `WAV`, `STBVORBIS`, `DRMP3`,
 and `OPUS` decoders, rejects MIDI and module decoders, fully decodes the
 bundled Opus fixture, and rejects empty PCM. The
@@ -135,7 +196,9 @@ is more important than preserving an optimization.
 Pull requests build each image whose inputs changed. Linux validation also
 runs actionlint over the repository workflows in a dedicated validation stage;
 Windows validation checks that the MXE compiler and CMake wrapper are directly
-discoverable through the image's default `PATH`.
+discoverable through the image's default `PATH`. Classic validation builds its
+smoke/SBOM target, loads the slim final target, and runs the pinned Classic
+client and server checks as a non-root user.
 
 ## License
 

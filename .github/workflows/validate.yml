@@ -16,6 +16,7 @@ jobs:
     name: Select changed images
     runs-on: ubuntu-26.04
     outputs:
+      classic: ${{ steps.changes.outputs.classic }}
       linux: ${{ steps.changes.outputs.linux }}
       windows: ${{ steps.changes.outputs.windows }}
     steps:
@@ -30,16 +31,29 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          classic=false
           linux=false
           windows=false
           while IFS= read -r path; do
             case "${path}" in
             .dockerignore | .github/actionlint.yaml | \
+                .github/workflows/publish-linux.yml | \
                 .github/workflows/validate.yml | linux/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
                 toolchains.json | tools/audio/* | \
                 tools/build-sdl3-mixer.sh | tools/validate-toolchains.sh)
               linux=true
+              ;;
+            esac
+            case "${path}" in
+            .dockerignore | .github/workflows/publish-linux.yml | \
+                .github/workflows/validate.yml | linux/* | \
+                audio-toolchain.json | audio-toolchain.spdx.json | \
+                classic-packages.lock | classic-toolchain.json | \
+                tools/audio/* | tools/build-sdl3-mixer.sh | \
+                tools/validate-classic-check.sh | \
+                tools/validate-classic-image.sh)
+              classic=true
               ;;
             esac
             case "${path}" in
@@ -52,6 +66,7 @@ jobs:
             esac
           done < <(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
           {
+            echo "classic=${classic}"
             echo "linux=${linux}"
             echo "windows=${windows}"
           } >> "${GITHUB_OUTPUT}"
@@ -106,10 +121,73 @@ jobs:
             type=gha,scope=windows-build-image
           cache-to: type=gha,mode=max,scope=windows-build-image,ignore-error=true
 
+  classic:
+    name: Classic CI image
+    needs: changes
+    if: needs.changes.outputs.classic == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out image sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Read pinned Classic validation revision
+        id: consumer
+        run: echo "commit=$(jq -r '.consumer_validation.commit' classic-toolchain.json)" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Build and smoke Classic validation target
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: linux/Dockerfile
+          target: classic-validation
+          outputs: type=cacheonly
+          cache-from: |
+            type=registry,ref=ghcr.io/atrinik/classic-build:ubuntu-26.04
+            type=gha,scope=classic-build-image
+          cache-to: type=gha,mode=max,scope=classic-build-image,ignore-error=true
+
+      - name: Load slim Classic image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: linux/Dockerfile
+          target: classic-final
+          load: true
+          tags: atrinik-classic-build:validation
+          cache-from: |
+            type=registry,ref=ghcr.io/atrinik/classic-build:ubuntu-26.04
+            type=gha,scope=classic-build-image
+
+      - name: Check out pinned Classic sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: atrinik/classic
+          ref: ${{ steps.consumer.outputs.commit }}
+          path: classic
+
+      - name: Run Classic client and server checks as the runner user
+        run: |
+          install -d -m 0777 "${RUNNER_TEMP}/classic-ccache"
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env CCACHE_DIR=/cache/ccache \
+            --env HOME=/tmp/classic-home \
+            --volume "${GITHUB_WORKSPACE}:/image-source:ro" \
+            --volume "${GITHUB_WORKSPACE}/classic:/workspace" \
+            --volume "${RUNNER_TEMP}/classic-ccache:/cache/ccache" \
+            --workdir /workspace \
+            atrinik-classic-build:validation \
+            /image-source/tools/validate-classic-check.sh /workspace
+
   required:
     name: Required checks
     needs:
       - changes
+      - classic
       - linux
       - windows
     if: always()
@@ -118,6 +196,7 @@ jobs:
       - name: Require successful applicable validations
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
+          CLASSIC_RESULT: ${{ needs.classic.result }}
           LINUX_RESULT: ${{ needs.linux.result }}
           WINDOWS_RESULT: ${{ needs.windows.result }}
         run: |
@@ -126,7 +205,7 @@ jobs:
             exit 1
           fi
 
-          for result in "${LINUX_RESULT}" "${WINDOWS_RESULT}"; do
+          for result in "${CLASSIC_RESULT}" "${LINUX_RESULT}" "${WINDOWS_RESULT}"; do
             if [[ "${result}" != success && "${result}" != skipped ]]; then
               echo "Image validation concluded ${result}." >&2
               exit 1
