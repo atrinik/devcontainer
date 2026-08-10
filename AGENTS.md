@@ -15,8 +15,20 @@
 - Treat Dockerfile inputs, `.dockerignore`, cache scopes, build arguments,
   published tags, and workflow path filters as one contract. If a relevant file
   changes, the required aggregate validation must still run.
-- Every semantic release publishes the Linux image plus the general and
-  task-focused Windows images with their supported tags. Keep the
+- `classic-final` is the slim Classic Check target. Keep its Ubuntu snapshot,
+  direct package lock, tool inventory, non-root ccache mount, Classic validation
+  revision, smoke/SBOM checks, and published tags synchronized. Do not make it
+  inherit the broad replacement/development toolchain.
+- Keep a stable numeric runner UID when restoring a Classic ccache directory;
+  the mode-1777 mount root supports non-root initialization but does not make
+  ccache's owner-writable nested directories reusable across different UIDs.
+- A Linux `candidate_only` dispatch is the pre-merge Classic review path. It
+  must publish only `classic-build:candidate-sha-<commit>` after validation and
+  must never move a rolling, platform, or version tag.
+- Every semantic release publishes the broad Linux, slim Linux Classic,
+  general Windows, and task-focused Windows Classic images with their
+  supported tags. The Linux publisher owns `linux-build` and `classic-build`;
+  the Windows publisher owns both `windows-build` variants. Keep the
   `classic-check` target branched from the expensive shared MXE foundation
   before general-image Python/worldmaker additions, preserve the general
   Windows image as the default Dockerfile result, validate immutable SHA
@@ -24,8 +36,10 @@
   alias promotion by rerunning the failed job from the same workflow run. Do
   not create manual release tags as a substitute for semantic-release.
 - Validate Dockerfiles with `docker build --check`. Build and smoke-test each
-  affected image; note that a cold Windows/MXE build is expensive and may rely
-  on CI cache for final verification.
+  affected image, including `classic-validation` before `classic-final` and the
+  Windows `classic-check` target plus native bundle; note that a cold
+  Windows/MXE build is expensive and may rely on CI cache for final
+  verification.
 - Workflow changes also require actionlint and Atrinik GitHub-governance review
   for permissions, pinned actions, check names, and ruleset compatibility.
   Never expose private-package permissions or images to `pull_request` code;
