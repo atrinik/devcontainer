@@ -256,8 +256,9 @@ RUN actionlint \
         /workspace/audio-toolchain.spdx.json \
         /usr/local/share/atrinik/audio-toolchain.spdx.json \
     && syft dir:/ --override-default-catalogers sbom-cataloger -o json \
-        | jq -e '([.artifacts[] | [.name, .version]] | sort) == \
-            ([ ["SDL3_mixer", "3.2.4"], ["libogg", "1.3.5"], \
-               ["libopus", "1.4"], ["libopusfile", "0.12"] ] | sort)'
+        | jq -e --slurpfile inventory /workspace/audio-toolchain.json \
+            '([.artifacts[] | [.name, .version]] | sort) == \
+             (($inventory[0].dependencies + [$inventory[0].sdl_mixer]) \
+              | map([.name, .version]) | sort)'
 
 FROM toolchain AS final

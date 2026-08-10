@@ -78,16 +78,44 @@ jq -e --slurpfile inventory "${audio_expected}" '
   |
   .spdxVersion == "SPDX-2.3"
   and .dataLicense == "CC0-1.0"
+  and .SPDXID == "SPDXRef-DOCUMENT"
   and ([.packages[].name] ==
     ["SDL3_mixer", "libogg", "libopus", "libopusfile"])
+  and ([.packages[].SPDXID] | unique | length) == 4
   and all(.packages[];
     . as $package
+    | .filesAnalyzed == false
+      and (.checksums | length) == 1
+      and .checksums[0].algorithm == "SHA256"
+      and .licenseConcluded == .licenseDeclared
     | any($expected[];
       .name == $package.name
         and .version == $package.versionInfo
         and .source.url == $package.downloadLocation
         and .source.sha256 == $package.checksums[0].checksumValue
         and .license == $package.licenseDeclared))
+  and .relationships == [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-SDL3-mixer"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-SDL3-mixer",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-libogg"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-SDL3-mixer",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-libopus"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-SDL3-mixer",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-libopusfile"
+    }
+  ]
 ' "${audio_sbom_expected}" >/dev/null
 
 if [[ -n ${audio_sbom_installed} ]]; then
