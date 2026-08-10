@@ -12,12 +12,24 @@ Published images:
 
 - `ghcr.io/atrinik/linux-build:ubuntu-26.04`
 - `ghcr.io/atrinik/windows-build:mxe`
+- `ghcr.io/atrinik/windows-build:classic-check-mxe`
 
-Every successful image publication updates `latest`, its rolling platform tag,
-and a `sha-<commit>` tag. Publishing from an image-repository tag matching
-`vX.Y.Z` also publishes the corresponding `X.Y.Z` image tag. Release automation
-publishes both Linux and Windows images for every version so consumers can pin
-a matched toolchain release.
+Every image publication creates an immutable `sha-<commit>` candidate. The
+Windows publisher also creates a `classic-check-sha-<commit>` candidate in the
+existing private `windows-build` package, preserving its governed Classic
+Actions read access. It smokes that exact published digest and executes its six
+staged tests on Windows before promoting `latest`, `mxe`, `classic-check`, and
+`classic-check-mxe`. Publishing from an image-repository tag matching `vX.Y.Z`
+also promotes the corresponding `X.Y.Z` and `classic-check-X.Y.Z` aliases.
+Release automation publishes all three image variants for every version so
+consumers can pin a matched, verified toolchain release.
+
+GHCR cannot atomically move aliases for two different manifests. The Windows
+promotion job therefore moves the Classic aliases first and the general aliases
+last, after both immutable candidates and native tests pass. If the final
+registry operation fails, rerun the failed promotion job in that same workflow
+run. The job idempotently reapplies both alias sets from the preserved,
+verified digest outputs; do not create a replacement release tag.
 
 ## Publishing
 
@@ -45,6 +57,10 @@ docker build --file linux/Dockerfile --tag atrinik-linux-build .
 docker build --file windows/Dockerfile \
   --build-arg MXE_BUILD_JOBS="$(nproc)" \
   --tag atrinik-windows-build .
+docker build --file windows/Dockerfile \
+  --target classic-check \
+  --build-arg MXE_BUILD_JOBS="$(nproc)" \
+  --tag atrinik-windows-check .
 
 docker run --rm atrinik-linux-build clang --version
 docker run --rm atrinik-linux-build gh --version
@@ -66,6 +82,8 @@ docker run --rm atrinik-linux-build \
 docker run --rm atrinik-windows-build \
   x86_64-w64-mingw32.shared-gcc --version
 docker run --rm --user vscode atrinik-windows-build ssh -V
+docker run --rm --user vscode atrinik-windows-check \
+  x86_64-w64-mingw32.shared-gcc --version
 ```
 
 The Linux image includes the pinned replacement toolchains recorded in
@@ -123,19 +141,49 @@ then use `ssh-add -l` in the opened container to confirm that its identities are
 available. The images intentionally do not copy or mount the host's private key
 files. SSH host configuration and `known_hosts` remain container-local.
 
-The Windows image compiles MXE and its dependency stack and can take a long
-time on a genuinely cold build. Pull-request validation restores both the
-published rolling image's inline BuildKit cache and the image-specific GitHub
-Actions cache. It exports cache-only results instead of loading the completed
-images into the runner's Docker daemon. Release builds publish inline cache
-metadata for cross-ref reuse and also retain the max-mode Actions cache;
-Actions-cache export failures are non-fatal because publishing a usable image
-is more important than preserving an optimization.
+The general Windows image compiles MXE and its dependency stack and can take a
+long time on a genuinely cold build. Its `classic-check` target starts again
+from the pinned base and copies only the completed MXE compiler/sysroot,
+ccache, client DLL closure, and host-side tools used by
+Classic Check. It intentionally excludes MXE source/build caches, the embedded
+Windows Python SDK/runtime, and native Linux worldmaker dependencies required
+only by server packaging. The exact included and excluded contract is recorded
+in [`windows/classic-check-toolchain.json`](windows/classic-check-toolchain.json),
+while the audio inventory and SPDX document are present unchanged in both
+images.
+
+Pull-request validation is deliberately private-package-free so fork-controlled
+code never receives a GHCR read token or the private baseline image. It uses
+image-specific GitHub Actions caches, exports the general image cache-only, and
+loads the Classic Check target for its full smoke, cross-build, and native
+Windows execution. A separate same-repository branch-push/dispatch workflow
+authenticates to GHCR, restores the published inline cache, repeats the exact
+candidate smoke and native tests, and publishes the size/pull measurements.
+Release builds first publish immutable general and Classic SHA candidates with
+inline cache metadata, smoke the exact Classic repository digest, and execute
+its staged bundle on `windows-2025`. Only then does a separate promotion job
+move the rolling and version aliases, with the general aliases promoted last.
+Max-mode Actions caches are also retained for both targets; Actions-cache export
+failures are non-fatal because publishing usable images is more important than
+preserving an optimization.
+
+The performance check compares the currently pinned Classic image with the
+immutable candidate digest on a GitHub-hosted Ubuntu runner. Compressed sizes
+come from a local OCI registry. Four counterbalanced cold/warm pull trials per
+image alternate order evenly and each use a fresh Docker-in-Docker daemon
+against that registry to remove GHCR network variance and daemon-layer reuse;
+every trial averages five container starts. The artifact records raw samples,
+checkout/head/base source coordinates, manifest digests, runner metadata, and
+medians. The pinned image's first and warm GHCR pulls are also recorded, and
+the JSON plus Markdown evidence is retained as the
+`classic-check-image-measurements` workflow artifact for 30 days.
 
 Pull requests build each image whose inputs changed. Linux validation also
-runs actionlint over the repository workflows in a dedicated validation stage;
-Windows validation checks that the MXE compiler and CMake wrapper are directly
-discoverable through the image's default `PATH`.
+runs actionlint over the repository workflows in a dedicated validation stage.
+Windows validation checks that ccache, the MXE compiler, and the CMake wrapper
+are directly discoverable through the image's default `PATH`, cross-builds and
+stages every native test in the pinned Classic Check contract without network
+access, and executes the complete bundle on `windows-2025`.
 
 ## License
 

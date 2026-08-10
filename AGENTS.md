@@ -15,13 +15,21 @@
 - Treat Dockerfile inputs, `.dockerignore`, cache scopes, build arguments,
   published tags, and workflow path filters as one contract. If a relevant file
   changes, the required aggregate validation must still run.
-- Every semantic release publishes both images and their supported tags. Do not
-  create manual release tags as a substitute for semantic-release.
+- Every semantic release publishes the Linux image plus the general and
+  task-focused Windows images with their supported tags. Keep the
+  `classic-check` target branched from the expensive shared MXE foundation
+  before general-image Python/worldmaker additions, preserve the general
+  Windows image as the default Dockerfile result, validate immutable SHA
+  candidates before promoting rolling/version aliases, and recover partial
+  alias promotion by rerunning the failed job from the same workflow run. Do
+  not create manual release tags as a substitute for semantic-release.
 - Validate Dockerfiles with `docker build --check`. Build and smoke-test each
   affected image; note that a cold Windows/MXE build is expensive and may rely
   on CI cache for final verification.
 - Workflow changes also require actionlint and Atrinik GitHub-governance review
   for permissions, pinned actions, check names, and ruleset compatibility.
+  Never expose private-package permissions or images to `pull_request` code;
+  authenticated measurements belong to the same-repository push/dispatch path.
 - Commits and pull-request titles use Conventional Commits. Preserve unrelated
   work and finish with `git diff --check`.
 - Update this `AGENTS.md` in the same change when major rework alters image
