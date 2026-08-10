@@ -36,6 +36,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libclang-rt-dev \
         libcurl4-openssl-dev \
         libgd-dev \
+        libidn2-dev \
         libminiupnpc-dev \
         libreadline-dev \
         libsdl3-dev \
@@ -238,6 +239,7 @@ RUN clang --version \
     && llvm-config --version \
     && syft version \
     && trivy --version \
+    && pkg-config --exists libidn2 \
     && pkg-config --exists vulkan \
     && command -v vulkaninfo \
     && command -v Xvfb \
