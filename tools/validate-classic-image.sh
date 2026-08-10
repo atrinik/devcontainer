@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-if [[ $# -ne 4 ]]; then
-  echo "usage: $0 PACKAGE_LOCK EXPECTED_INVENTORY INSTALLED_INVENTORY AUDIO_INVENTORY" >&2
+if [[ $# -ne 5 ]]; then
+  echo "usage: $0 PACKAGE_LOCK EXPECTED_INVENTORY INSTALLED_INVENTORY AUDIO_INVENTORY DOCKERFILE" >&2
   exit 2
 fi
 
@@ -11,6 +11,7 @@ package_lock=$1
 expected=$2
 installed=$3
 audio_inventory=$4
+dockerfile=$5
 
 cmp --silent "${expected}" "${installed}"
 
@@ -27,6 +28,19 @@ jq -e '
   and .consumer_validation.repository == "atrinik/classic"
   and (.consumer_validation.commit | test("^[0-9a-f]{40}$"))
 ' "${expected}" >/dev/null
+
+expected_image=$(jq -r '.base.image' "${expected}")
+expected_digest=$(jq -r '.base.digest' "${expected}")
+expected_snapshot=$(jq -r '.base.apt_snapshot' "${expected}")
+grep -Fqx "FROM ${expected_image}@${expected_digest} AS classic-ci" "${dockerfile}"
+test "${UBUNTU_SNAPSHOT}" = "${expected_snapshot}"
+grep -Fq "https://snapshot.ubuntu.com/ubuntu/${expected_snapshot}/" \
+  /etc/apt/sources.list.d/ubuntu.sources
+if grep -Eq 'https?://(archive|security)\.ubuntu\.com/ubuntu/' \
+  /etc/apt/sources.list.d/ubuntu.sources; then
+  echo "mutable Ubuntu source remains configured" >&2
+  exit 1
+fi
 
 while IFS='=' read -r package version; do
   if [[ -z ${package} || -z ${version} ]]; then

@@ -23,6 +23,9 @@
   The Linux publisher owns both `linux-build` and `classic-build`; the Windows
   publisher owns `windows-build`. Do not create manual release tags as a
   substitute for semantic-release.
+- A Linux `candidate_only` dispatch is the pre-merge Classic review path. It
+  must publish only `classic-build:candidate-sha-<commit>` after validation and
+  must never move a rolling, platform, or version tag.
 - Validate Dockerfiles with `docker build --check`. Build and smoke-test each
   affected image, including `classic-validation` before `classic-final`; note
   that a cold Windows/MXE build is expensive and may rely on CI cache for final

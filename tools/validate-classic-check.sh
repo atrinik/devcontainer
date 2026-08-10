@@ -35,5 +35,15 @@ for component in server client; do
   popd >/dev/null
 done
 
+cacheable_calls=$(ccache --print-stats | awk -F '\t' '
+  $1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" \
+      || $1 == "cache_miss" { calls += $2 }
+  END { print calls + 0 }
+')
+if [[ ${cacheable_calls} -lt 1 ]]; then
+  echo "Classic builds did not invoke ccache" >&2
+  exit 1
+fi
+
 ccache --show-config
 ccache --show-stats

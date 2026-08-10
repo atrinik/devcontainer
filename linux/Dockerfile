@@ -270,28 +270,29 @@ RUN actionlint \
 # validate the HTTPS snapshot service.
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS classic-ci
 
-ARG UBUNTU_SNAPSHOT=20260810T000000Z
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN rm -f /etc/apt/apt.conf.d/docker-clean
+ENV DEBIAN_FRONTEND=noninteractive \
+    UBUNTU_SNAPSHOT=20260810T000000Z
 
 COPY classic-packages.lock /tmp/classic-packages.lock
-RUN apt-get update \
+# APT still verifies the signed Release metadata and package hashes. Only TLS
+# peer verification is temporarily unavailable in the minimal base.
+RUN sed -i \
+        -e "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
+        -e "s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
+        /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get -o Acquire::https::Verify-Peer=false update \
     && awk -F= '$1 == "ca-certificates" \
             || $1 == "libssl3t64" \
             || $1 == "openssl" \
             || $1 == "openssl-provider-legacy" { print }' \
         /tmp/classic-packages.lock \
-        | xargs -r apt-get install -y --no-install-recommends \
+        | xargs -r apt-get -o Acquire::https::Verify-Peer=false \
+            install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
-    && sed -i \
-        -e "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
-        -e "s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
-        /etc/apt/sources.list.d/ubuntu.sources \
     && apt-get update \
     && xargs -r apt-get install -y --no-install-recommends \
         < /tmp/classic-packages.lock \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
 
 # Classic requires the same checksum-pinned SDL3_mixer contract as the broad
 # Linux image. Its codec dependencies are statically linked into the shared
@@ -344,6 +345,7 @@ RUN curl --fail --location --silent --show-error \
 COPY classic-packages.lock /workspace/classic-packages.lock
 COPY classic-toolchain.json /workspace/classic-toolchain.json
 COPY audio-toolchain.json /workspace/audio-toolchain.json
+COPY linux/Dockerfile /workspace/linux/Dockerfile
 COPY tools/validate-classic-image.sh /workspace/tools/validate-classic-image.sh
 
 USER ubuntu
@@ -351,17 +353,19 @@ RUN /workspace/tools/validate-classic-image.sh \
         /workspace/classic-packages.lock \
         /workspace/classic-toolchain.json \
         /usr/local/share/atrinik/classic-toolchain.json \
-        /workspace/audio-toolchain.json
+        /workspace/audio-toolchain.json \
+        /workspace/linux/Dockerfile
 
 USER root
-RUN syft dir:/ -o spdx-json \
+RUN syft dir:/ --select-catalogers +sbom-cataloger -o spdx-json \
         | jq -e '.spdxVersion == "SPDX-2.3" \
             and ([.packages[].name] | index("ccache") != null) \
             and ([.packages[].name] | index("cmake") != null) \
-            and ([.packages[].name] | index("gcc") != null)' \
-    && syft dir:/ --override-default-catalogers sbom-cataloger -o spdx-json \
-        | jq -e '.spdxVersion == "SPDX-2.3" \
-            and ([.packages[].name] | index("SDL3_mixer") != null)'
+            and ([.packages[].name] | index("gcc") != null) \
+            and ([.packages[].name] | index("SDL3_mixer") != null) \
+            and ([.packages[].name] | index("libogg") != null) \
+            and ([.packages[].name] | index("libopus") != null) \
+            and ([.packages[].name] | index("libopusfile") != null)'
 
 FROM classic-ci AS classic-final
 

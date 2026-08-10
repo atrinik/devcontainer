@@ -196,8 +196,11 @@ jobs:
       - name: Require successful applicable validations
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
+          CLASSIC_SELECTED: ${{ needs.changes.outputs.classic }}
           CLASSIC_RESULT: ${{ needs.classic.result }}
+          LINUX_SELECTED: ${{ needs.changes.outputs.linux }}
           LINUX_RESULT: ${{ needs.linux.result }}
+          WINDOWS_SELECTED: ${{ needs.changes.outputs.windows }}
           WINDOWS_RESULT: ${{ needs.windows.result }}
         run: |
           if [[ "${CHANGES_RESULT}" != success ]]; then
@@ -205,9 +208,17 @@ jobs:
             exit 1
           fi
 
-          for result in "${CLASSIC_RESULT}" "${LINUX_RESULT}" "${WINDOWS_RESULT}"; do
-            if [[ "${result}" != success && "${result}" != skipped ]]; then
-              echo "Image validation concluded ${result}." >&2
+          for image in CLASSIC LINUX WINDOWS; do
+            selected_variable="${image}_SELECTED"
+            result_variable="${image}_RESULT"
+            selected=${!selected_variable}
+            result=${!result_variable}
+            if [[ "${selected}" == true && "${result}" != success ]]; then
+              echo "${image} validation was selected but concluded ${result}." >&2
+              exit 1
+            fi
+            if [[ "${selected}" == false && "${result}" != skipped ]]; then
+              echo "${image} validation was not selected but concluded ${result}." >&2
               exit 1
             fi
           done

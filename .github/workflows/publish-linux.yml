@@ -5,6 +5,12 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      candidate_only:
+        description: Publish only a commit-addressed Classic review candidate
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -54,11 +60,16 @@ jobs:
           IMAGE_NAME: classic-build
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME}"
-          tags="${image}:latest
-          ${image}:ubuntu-26.04
-          ${image}:sha-${GITHUB_SHA}"
+          if [[ "${{ inputs.candidate_only }}" == true ]]; then
+            tags="${image}:candidate-sha-${GITHUB_SHA}"
+          else
+            tags="${image}:latest
+            ${image}:ubuntu-26.04
+            ${image}:sha-${GITHUB_SHA}"
+          fi
 
-          if [[ "${GITHUB_REF_TYPE}" == tag ]]; then
+          if [[ "${{ inputs.candidate_only }}" != true \
+              && "${GITHUB_REF_TYPE}" == tag ]]; then
             if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "Invalid image release tag: ${GITHUB_REF_NAME}" >&2
               exit 1
@@ -84,7 +95,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Prove both Linux-owned image contracts before moving any release tag.
+      - name: Build and smoke Classic validation target
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: linux/Dockerfile
+          target: classic-validation
+          outputs: type=cacheonly
+          cache-from: |
+            type=registry,ref=ghcr.io/atrinik/classic-build:ubuntu-26.04
+            type=gha,scope=classic-build-image
+          cache-to: type=gha,mode=max,scope=classic-build-image,ignore-error=true
+
       - name: Build and publish Linux image
+        if: ${{ !inputs.candidate_only }}
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
@@ -102,18 +127,6 @@ jobs:
           cache-to: |
             type=inline
             type=gha,mode=max,scope=linux-build-image,ignore-error=true
-
-      - name: Build and smoke Classic validation target
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
-        with:
-          context: .
-          file: linux/Dockerfile
-          target: classic-validation
-          outputs: type=cacheonly
-          cache-from: |
-            type=registry,ref=ghcr.io/atrinik/classic-build:ubuntu-26.04
-            type=gha,scope=classic-build-image
-          cache-to: type=gha,mode=max,scope=classic-build-image,ignore-error=true
 
       - name: Build and publish Classic image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7

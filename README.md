@@ -30,13 +30,16 @@ version. Every other conventional type advances at least the patch version, so
 every squash merge creates a tag. Each new tag dispatches both image
 publishers.
 
-Either publisher workflow can also be started manually from the Actions page for a
-reviewed rebuild or recovery of an existing ref. Manual dispatch does not
+Either publisher workflow can also be started manually from the Actions page
+for a reviewed rebuild or recovery of an existing ref. Manual dispatch does not
 create a Git tag or semantic release. Semantic-release alone creates new
 `vX.Y.Z` tags; do not create or push a release tag manually. The Linux
-publisher produces both `linux-build` and `classic-build`. When recovering a
-versioned release, dispatch the Linux and Windows publishers against the same
-existing tag so all three image versions remain matched.
+publisher produces both `linux-build` and `classic-build`. Its
+`candidate_only` input skips the broad image and publishes Classic only as
+`candidate-sha-<commit>` without moving any stable or version tag. When
+recovering a versioned release, leave that input disabled and dispatch the
+Linux and Windows publishers against the same existing tag so all three image
+versions remain matched.
 
 ## Local validation
 
@@ -99,8 +102,11 @@ with `-DCMAKE_C_COMPILER_LAUNCHER=ccache`; `CCACHE_DIR` alone does not activate
 compiler caching. The image smoke target proves a repeated compilation hits the
 cache, validates every locked direct package and tool version, checks the native
 `pkg-config` surface, decodes the bundled Opus fixture, and inspects the image
-plus nested dependency inventory as SPDX 2.3. Pull-request validation then runs
-representative client and server configure-build-test-coverage commands against
+plus nested dependency inventory in one SPDX 2.3 scan. The attached BuildKit
+SBOM inventories discoverable image packages; the bundled
+`/usr/local/share/atrinik/audio-toolchain.spdx.json` is the authoritative source
+inventory for statically linked SDL3_mixer and codecs. Pull-request validation
+then runs representative client and server configure-build-test-coverage commands against
 the exact Classic revision recorded in the inventory as a non-root runner UID.
 
 Every Classic publication updates `latest`, `ubuntu-26.04`, and
@@ -108,26 +114,33 @@ Every Classic publication updates `latest`, `ubuntu-26.04`, and
 with BuildKit provenance and an attached SBOM. Consuming workflows should pin
 the digest, never a rolling tag. To update that pin:
 
-1. Advance `base.apt_snapshot`, refresh the exact direct versions in
-   `classic-packages.lock`, and update the tool versions and pinned Classic
-   validation commit in `classic-toolchain.json`.
+1. Update the matching Ubuntu base digest and snapshot value in both
+   `linux/Dockerfile` and `classic-toolchain.json`, refresh the exact direct
+   versions in `classic-packages.lock`, and update the tool versions and pinned
+   Classic validation commit in `classic-toolchain.json`.
 2. Build `classic-validation` and `classic-final`, run the repository checks,
-   and compare compressed image size plus client/server timings with the prior
-   digest. A clean runner provides the cold pull; pulling the same digest again
-   provides the warm-cache measurement.
-3. Merge through semantic-release, wait for both publisher workflows, and copy
-   the `ghcr.io/atrinik/classic-build@sha256:...` manifest digest from the
-   versioned release into the consuming review branch. Include that digest in
-   the consumer's ccache invalidation key.
-4. Run the consumer's cold and warm jobs, record pull/startup/build timings and
-   ccache statistics, and only then remove its superseded apt or prefix-cache
-   setup.
+   and compare compressed image size plus local client/server timings with the
+   prior digest.
+3. Before merge, dispatch `Publish Linux build image` on the reviewed head with
+   `candidate_only` enabled. Resolve the immutable digest from
+   `ghcr.io/atrinik/classic-build:candidate-sha-<commit>` and put that digest in
+   the consuming review branch, including it in the ccache invalidation key.
+4. On clean equivalent runners, time the first digest pull plus container
+   startup, remove only the local pulled copy, and repeat for the warm registry
+   cache. Run the apt-based and image-based client/server jobs, record total and
+   setup/build/test timings plus ccache statistics, and attach the comparison
+   to both reviews.
+5. After the evidence passes review, merge through semantic-release and wait
+   for both publisher workflows. Confirm the versioned Classic digest matches
+   the reviewed image content before updating the consumer from its candidate
+   reference; only then remove superseded apt or prefix-cache setup.
 
 The package snapshot is deliberately fail-closed: changing the snapshot or a
 locked version requires a reviewed inventory update. The initial CA/TLS
-bootstrap uses the live Ubuntu archive because the minimal base cannot validate
-the HTTPS snapshot service, but every bootstrap package and dependency is
-version-locked before snapshot access.
+bootstrap already uses the signed snapshot metadata and package hashes; only
+TLS peer verification is temporarily disabled because the minimal base has no
+CA bundle. After installing the exact locked TLS closure, a verified HTTPS
+snapshot update must pass before any remaining package is installed.
 
 The Linux image includes the pinned replacement toolchains recorded in
 [`toolchains.json`](toolchains.json): Go, Rust/rustup, Protobuf/protoc, Buf,
