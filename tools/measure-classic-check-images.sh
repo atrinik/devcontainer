@@ -10,24 +10,35 @@ fi
 baseline_image=$1
 candidate_image=$2
 output_directory=$3
-for image in "${baseline_image}" "${candidate_image}"; do
-  if [[ ! ${image} =~ @sha256:[0-9a-f]{64}$ ]]; then
-    echo "measurement image is not immutable: ${image}" >&2
-    exit 2
-  fi
-done
+if [[ ! ${baseline_image} =~ @sha256:[0-9a-f]{64}$ ]]; then
+  echo "baseline image is not an immutable repository digest: ${baseline_image}" >&2
+  exit 2
+fi
+if [[ ! ${candidate_image} =~ ^sha256:[0-9a-f]{64}$ &&
+    ! ${candidate_image} =~ @sha256:[0-9a-f]{64}$ ]]; then
+  echo "candidate image is not an immutable image ID or repository digest: ${candidate_image}" >&2
+  exit 2
+fi
 registry_image=registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
 dind_image=docker:27.5.1-dind@sha256:aa3df78ecf320f5fafdce71c659f1629e96e9de0968305fe1de670e0ca9176ce
 suffix=${GITHUB_RUN_ID:-$$}-${GITHUB_RUN_ATTEMPT:-1}
 registry_name=classic-check-registry-${suffix}
-registry_port=5000
+network_name=classic-check-measurement-${suffix}
+baseline_repository=baseline-${suffix}
+candidate_repository=candidate-${suffix}
+registry_port=
+baseline_local_tag=
+candidate_local_tag=
 measurement_trials=3
 containers=("${registry_name}")
 
 cleanup() {
   docker rm --force "${containers[@]}" >/dev/null 2>&1 || true
-  docker image rm localhost:${registry_port}/baseline:latest \
-    localhost:${registry_port}/candidate:latest >/dev/null 2>&1 || true
+  if [[ -n ${baseline_local_tag} && -n ${candidate_local_tag} ]]; then
+    docker image rm "${baseline_local_tag}" "${candidate_local_tag}" \
+      >/dev/null 2>&1 || true
+  fi
+  docker network rm "${network_name}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -40,8 +51,16 @@ remote_start=$(date +%s%N)
 docker pull "${baseline_image}"
 remote_baseline_warm_ms=$((($(date +%s%N) - remote_start) / 1000000))
 
+docker network create "${network_name}" >/dev/null
 docker run --detach --rm --name "${registry_name}" \
-  --publish "${registry_port}:5000" "${registry_image}" >/dev/null
+  --network "${network_name}" --publish 127.0.0.1::5000 \
+  "${registry_image}" >/dev/null
+registry_address=$(docker port "${registry_name}" 5000/tcp)
+registry_port=${registry_address##*:}
+if [[ ! ${registry_port} =~ ^[0-9]+$ ]]; then
+  echo "cannot resolve temporary registry port: ${registry_address}" >&2
+  exit 1
+fi
 for _ in {1..30}; do
   if curl --fail --silent "http://localhost:${registry_port}/v2/" >/dev/null; then
     break
@@ -50,10 +69,12 @@ for _ in {1..30}; do
 done
 curl --fail --silent "http://localhost:${registry_port}/v2/" >/dev/null
 
-docker tag "${baseline_image}" localhost:${registry_port}/baseline:latest
-docker tag "${candidate_image}" localhost:${registry_port}/candidate:latest
-docker push localhost:${registry_port}/baseline:latest >/dev/null
-docker push localhost:${registry_port}/candidate:latest >/dev/null
+baseline_local_tag=localhost:${registry_port}/${baseline_repository}:measurement
+candidate_local_tag=localhost:${registry_port}/${candidate_repository}:measurement
+docker tag "${baseline_image}" "${baseline_local_tag}"
+docker tag "${candidate_image}" "${candidate_local_tag}"
+docker push "${baseline_local_tag}" >/dev/null
+docker push "${candidate_local_tag}" >/dev/null
 
 manifest_metadata() {
   local repository=$1
@@ -84,7 +105,7 @@ def manifest(reference: str) -> tuple[dict[str, object], str]:
         return json.load(response), digest
 
 
-value, digest = manifest("latest")
+value, digest = manifest("measurement")
 if "manifests" in value:
     descriptor = next(
         item
@@ -100,15 +121,15 @@ PY
 }
 
 read -r baseline_compressed_bytes baseline_registry_digest \
-  < <(manifest_metadata baseline)
+  < <(manifest_metadata "${baseline_repository}")
 read -r candidate_compressed_bytes candidate_registry_digest \
-  < <(manifest_metadata candidate)
+  < <(manifest_metadata "${candidate_repository}")
 
 start_daemon() {
   local name=$1
   docker run --detach --privileged --name "${name}" \
-    --add-host registry.local:host-gateway \
-    "${dind_image}" --insecure-registry registry.local:${registry_port} \
+    --network "${network_name}" \
+    "${dind_image}" --insecure-registry "${registry_name}:5000" \
     --tls=false >/dev/null
   containers+=("${name}")
   for _ in {1..60}; do
@@ -125,7 +146,7 @@ measure_image() {
   local name=$1
   local repository=$2
   local digest=$3
-  local image=registry.local:${registry_port}/${repository}@${digest}
+  local image=${registry_name}:5000/${repository}@${digest}
   local start cold_ms warm_ms startup_total_ms uncompressed_bytes
 
   start_daemon "${name}"
@@ -164,10 +185,10 @@ measure_trial() {
   local trial=$2
   local repository digest daemon
   if [[ ${label} == baseline ]]; then
-    repository=baseline
+    repository=${baseline_repository}
     digest=${baseline_registry_digest}
   else
-    repository=candidate
+    repository=${candidate_repository}
     digest=${candidate_registry_digest}
   fi
   daemon=classic-check-${label}-${suffix}-${trial}
@@ -215,6 +236,7 @@ export baseline_cold_samples_csv baseline_warm_samples_csv \
 export measurement_source_sha=${MEASUREMENT_SOURCE_SHA:-${GITHUB_SHA:-unknown}} \
   measurement_head_sha=${MEASUREMENT_HEAD_SHA:-unknown} \
   measurement_base_sha=${MEASUREMENT_BASE_SHA:-unknown} \
+  measurement_build_digest=${MEASUREMENT_BUILD_DIGEST:-unknown} \
   measurement_run_id=${GITHUB_RUN_ID:-local} \
   measurement_run_attempt=${GITHUB_RUN_ATTEMPT:-1}
 if [[ ${GITHUB_ACTIONS:-false} == true ]]; then
@@ -267,6 +289,7 @@ baseline = image_result("baseline")
 baseline["ghcr_first_pull_ms"] = integer("remote_baseline_first_ms")
 baseline["ghcr_warm_pull_ms"] = integer("remote_baseline_warm_ms")
 candidate = image_result("candidate")
+candidate["buildx_manifest_digest"] = os.environ["measurement_build_digest"]
 result = {
     "schema_version": 1,
     "method": {

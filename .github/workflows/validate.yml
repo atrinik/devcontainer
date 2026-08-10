@@ -159,6 +159,7 @@ jobs:
         id: candidate
         env:
           CANDIDATE_DIGEST: ${{ steps.classic-image.outputs.digest }}
+          CANDIDATE_IMAGE_ID: ${{ steps.classic-image.outputs.imageid }}
         run: |
           if [[ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]]; then
             echo "Checked-out revision does not match GITHUB_SHA" >&2
@@ -168,9 +169,15 @@ jobs:
             echo "Invalid candidate digest: ${CANDIDATE_DIGEST}" >&2
             exit 1
           fi
-          candidate_image="atrinik-windows-check@${CANDIDATE_DIGEST}"
-          docker image inspect "${candidate_image}" >/dev/null
-          echo "image=${candidate_image}" >> "${GITHUB_OUTPUT}"
+          if [[ ! "${CANDIDATE_IMAGE_ID}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Invalid candidate image ID: ${CANDIDATE_IMAGE_ID}" >&2
+            exit 1
+          fi
+          docker image inspect "${CANDIDATE_IMAGE_ID}" >/dev/null
+          {
+            echo "image=${CANDIDATE_IMAGE_ID}"
+            echo "build_digest=${CANDIDATE_DIGEST}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Cross-build and stage the complete Classic Check bundle
         env:
@@ -181,6 +188,7 @@ jobs:
         env:
           CANDIDATE_IMAGE: ${{ steps.candidate.outputs.image }}
           MEASUREMENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MEASUREMENT_BUILD_DIGEST: ${{ steps.candidate.outputs.build_digest }}
           MEASUREMENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           MEASUREMENT_SOURCE_SHA: ${{ github.sha }}
         run: |
@@ -227,27 +235,22 @@ jobs:
         run: |
           $bundle = (Resolve-Path "build/native-windows-tests").Path
           $env:PATH = "${bundle};${env:PATH}"
-
-          & (Join-Path $bundle "libatrinik-path.exe")
-          if ($LASTEXITCODE -ne 0) { throw "libatrinik-path.exe failed: ${LASTEXITCODE}" }
-
-          $positive = Join-Path $bundle "fixtures/rendezvous-invite-v1.json"
-          $negative = Join-Path $bundle "fixtures/rendezvous-invite-v1-negative.json"
-          & (Join-Path $bundle "libatrinik-rendezvous.exe") $positive $negative
-          if ($LASTEXITCODE -ne 0) { throw "libatrinik-rendezvous.exe failed: ${LASTEXITCODE}" }
-
-          $publisher = Join-Path $bundle "fixtures/metaserver-publisher-v1.json"
-          & (Join-Path $bundle "libatrinik-metaserver-publisher.exe") $publisher
-          if ($LASTEXITCODE -ne 0) { throw "libatrinik-metaserver-publisher.exe failed: ${LASTEXITCODE}" }
-
-          & (Join-Path $bundle "libatrinik-metaserver-url.exe")
-          if ($LASTEXITCODE -ne 0) { throw "libatrinik-metaserver-url.exe failed: ${LASTEXITCODE}" }
-
-          & (Join-Path $bundle "libatrinik-stun.exe")
-          if ($LASTEXITCODE -ne 0) { throw "libatrinik-stun.exe failed: ${LASTEXITCODE}" }
-
-          & (Join-Path $bundle "client-rich-presence-tests.exe")
-          if ($LASTEXITCODE -ne 0) { throw "client-rich-presence-tests.exe failed: ${LASTEXITCODE}" }
+          $inventoryPath = Join-Path $bundle "classic-check-toolchain.json"
+          $tests = (Get-Content -Raw $inventoryPath | ConvertFrom-Json).verification.native_tests
+          if ($tests.Count -ne 6) { throw "Expected six declared native tests" }
+          foreach ($test in $tests) {
+            $executable = Join-Path $bundle $test.executable
+            $arguments = @($test.arguments | ForEach-Object {
+              if ([IO.Path]::IsPathRooted($_) -or $_ -like "../*" -or $_ -like "..\\*") {
+                throw "Unsafe native-test argument: $_"
+              }
+              Join-Path $bundle $_
+            })
+            & $executable @arguments
+            if ($LASTEXITCODE -ne 0) {
+              throw "$($test.executable) failed: ${LASTEXITCODE}"
+            }
+          }
 
   required:
     name: Required checks

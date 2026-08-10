@@ -28,6 +28,25 @@ if ! git -C "${classic_checkout}" diff --quiet || \
   echo "CLASSIC_CHECKOUT has tracked changes" >&2
   exit 1
 fi
+consumer_workflow=$(jq -er '.consumer.workflow' \
+  "${image_checkout}/windows/classic-check-toolchain.json")
+if [[ ! -f ${classic_checkout}/${consumer_workflow} ]]; then
+  echo "Declared Classic workflow is missing: ${consumer_workflow}" >&2
+  exit 1
+fi
+mapfile -t consumer_jobs < <(jq -er '.consumer.jobs[]' \
+  "${image_checkout}/windows/classic-check-toolchain.json")
+if [[ ${#consumer_jobs[@]} -ne 2 ]]; then
+  echo "Classic inventory must declare exactly two workflow jobs" >&2
+  exit 1
+fi
+for consumer_job in "${consumer_jobs[@]}"; do
+  if ! grep -F -- "name: ${consumer_job}" \
+      "${classic_checkout}/${consumer_workflow}" >/dev/null; then
+    echo "Declared Classic workflow job is missing: ${consumer_job}" >&2
+    exit 1
+  fi
+done
 
 python3 "${classic_checkout}/client/tools/dependencies.py" sync
 umask 077
@@ -72,11 +91,12 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
       -DBUILD_TESTING=ON \
       -DCMAKE_BUILD_TYPE=Release \
       -DATRINIK_PROTOCOL_SOURCE_DIR=/workspace/protocol
+    mapfile -t native_targets < <(python3 -c \
+      "import json,sys; value=json.load(open(sys.argv[1])); print(*(item[\"build_target\"] for item in value[\"verification\"][\"native_tests\"] if item[\"build_target\"] is not None), sep=chr(10))" \
+      /image-source/windows/classic-check-toolchain.json)
+    test "${#native_targets[@]}" -eq 5
     cmake --build libatrinik/build/windows-tests \
-      --target libatrinik-path libatrinik-rendezvous \
-        libatrinik-metaserver-publisher libatrinik-metaserver-url \
-        libatrinik-stun \
-      --parallel "$(nproc)"
+      --target "${native_targets[@]}" --parallel "$(nproc)"
 
     cd client
     bash tools/build-windows-package.sh build/windows-pr-package
@@ -90,17 +110,18 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
 
     stage=libatrinik/build/windows-test-bundle
     cmake -E remove_directory "${stage}"
+    mapfile -t native_sources < <(python3 -c \
+      "import json,sys; value=json.load(open(sys.argv[1])); print(*(item[\"source\"] for item in value[\"verification\"][\"native_tests\"]), sep=chr(10))" \
+      /image-source/windows/classic-check-toolchain.json)
+    test "${#native_sources[@]}" -eq 6
     python3 tools/ci/stage_windows_runtime.py \
       --objdump x86_64-w64-mingw32.shared-objdump \
       --runtime-dir "${MXE_RUNTIME_DIR}" \
       --output-dir "${stage}" \
-      libatrinik/build/windows-tests/libatrinik-path.exe \
-      libatrinik/build/windows-tests/libatrinik-rendezvous.exe \
-      libatrinik/build/windows-tests/libatrinik-metaserver-publisher.exe \
-      libatrinik/build/windows-tests/libatrinik-metaserver-url.exe \
-      libatrinik/build/windows-tests/libatrinik-stun.exe \
-      client/build/windows-release/client-rich-presence-tests.exe
+      "${native_sources[@]}"
     cmake -E copy_directory libatrinik/tests/fixtures "${stage}/fixtures"
+    cmake -E copy /image-source/windows/classic-check-toolchain.json \
+      "${stage}/classic-check-toolchain.json"
     ccache --show-stats
   '
 

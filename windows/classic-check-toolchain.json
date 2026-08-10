@@ -96,6 +96,51 @@
     "probe": "/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/atrinik-sdl3-mixer-probe.exe",
     "import_contract_source": "audio-toolchain.json#windows"
   },
+  "verification": {
+    "native_tests": [
+      {
+        "executable": "libatrinik-path.exe",
+        "build_target": "libatrinik-path",
+        "source": "libatrinik/build/windows-tests/libatrinik-path.exe",
+        "arguments": []
+      },
+      {
+        "executable": "libatrinik-rendezvous.exe",
+        "build_target": "libatrinik-rendezvous",
+        "source": "libatrinik/build/windows-tests/libatrinik-rendezvous.exe",
+        "arguments": [
+          "fixtures/rendezvous-invite-v1.json",
+          "fixtures/rendezvous-invite-v1-negative.json"
+        ]
+      },
+      {
+        "executable": "libatrinik-metaserver-publisher.exe",
+        "build_target": "libatrinik-metaserver-publisher",
+        "source": "libatrinik/build/windows-tests/libatrinik-metaserver-publisher.exe",
+        "arguments": [
+          "fixtures/metaserver-publisher-v1.json"
+        ]
+      },
+      {
+        "executable": "libatrinik-metaserver-url.exe",
+        "build_target": "libatrinik-metaserver-url",
+        "source": "libatrinik/build/windows-tests/libatrinik-metaserver-url.exe",
+        "arguments": []
+      },
+      {
+        "executable": "libatrinik-stun.exe",
+        "build_target": "libatrinik-stun",
+        "source": "libatrinik/build/windows-tests/libatrinik-stun.exe",
+        "arguments": []
+      },
+      {
+        "executable": "client-rich-presence-tests.exe",
+        "build_target": null,
+        "source": "client/build/windows-release/client-rich-presence-tests.exe",
+        "arguments": []
+      }
+    ]
+  },
   "excluded": {
     "paths": [
       "/opt/mxe/.git",
