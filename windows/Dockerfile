@@ -24,7 +24,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         git \
         gperf \
         intltool \
-        jq \
         libc6-dev-i386 \
         libclang-dev \
         libgdk-pixbuf-2.0-dev \
@@ -101,6 +100,15 @@ RUN make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
         sdl3_ttf
 RUN test "$(/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/curl-config --ssl-backends)" \
         = "OpenSSL"
+
+# Install the audio manifest reader after the expensive MXE foundation so this
+# small dependency does not invalidate the established cross-toolchain cache.
+USER root
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends jq
+USER vscode
 
 # MXE does not yet package SDL3_mixer. Cross-build the checksum-pinned release
 # with static libogg, libopus, and libopusfile inputs. This keeps the shared
