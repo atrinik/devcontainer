@@ -4,7 +4,7 @@
   "target": "classic-check",
   "consumer": {
     "repository": "atrinik/classic",
-    "validation_commit": "2d3ecad2117733b1262f5195c0dd414fef4b45f3",
+    "validation_commit": "f2fe4786a7e61214230b1a18d8b64449c4d042f6",
     "workflow": ".github/workflows/check.yml",
     "jobs": [
       "Build native Windows tests",
