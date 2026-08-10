@@ -202,6 +202,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && apt-get install -y --no-install-recommends \
         libcurl4-openssl-dev \
         libgd-dev \
+        libidn2-dev \
         libminiupnpc-dev \
         python3-dev \
         zlib1g-dev
@@ -225,4 +226,5 @@ RUN command -v x86_64-w64-mingw32.shared-gcc \
     && test -f "${MXE_RUNTIME_DIR}/SDL3_mixer.dll" \
     && test -f "${MXE_RUNTIME_DIR}/atrinik-sdl3-mixer-probe.exe" \
     && test -f "${MXE_RUNTIME_DIR}/SDL3_ttf.dll" \
+    && pkg-config --exists libidn2 \
     && ssh -V
