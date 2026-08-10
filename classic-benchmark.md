@@ -13,7 +13,7 @@ job and the candidate image digest.
 - Devcontainer branch: `feat/classic-ci-image` (final head recorded in PR #28)
 - Pinned Classic source: `2d3ecad2117733b1262f5195c0dd414fef4b45f3`
 - Broad local comparison image: `sha256:c39ab7366fe92ef80e4c5d8b7bf9306a4d9df37d436d0da0efc3cff953c40b74`
-- Slim local candidate image: `sha256:cf760df2b9ba0f825ffa568735d13e87580913edc4083931f0d5da70a780d609`
+- Slim local candidate image: `sha256:4e498aa55ada8bed181c3cd88153871588f92d855e92f476391b1e6c1c2c8c50`
 
 The broad image is a local size/startup proxy, not the acceptance-test
 apt-based consumer baseline.
@@ -22,16 +22,16 @@ apt-based consumer baseline.
 
 | Measurement | Broad image | Slim candidate | Result |
 | --- | ---: | ---: | ---: |
-| Docker content size | 1,215,965,963 B | 401,297,171 B | 67.0% smaller |
-| sampled `docker image save \| gzip -1` | 1,207,055,637 B | 398,194,006 B | 67.0% smaller |
-| five-run warm container startup mean | 0.912 s | 0.871 s | effectively unchanged |
+| Docker content size | 1,215,965,963 B | 401,296,878 B | 67.0% smaller |
+| sampled `docker image save \| gzip -1` | 1,207,055,637 B | 398,180,724 B | 67.0% smaller |
+| five-run warm container startup mean | 0.985 s | 0.948 s | effectively unchanged |
 
 The candidate ran the pinned server's 36 tests and client's 31 tests with
 coverage as numeric UID/GID 1000. A clean repeated build restored all 330
 server and 190 client compiler outputs as direct ccache hits.
 
-Raw startup samples in seconds were `0.928, 0.843, 0.865, 0.898, 1.027` for
-the broad image and `0.823, 0.816, 0.917, 0.883, 0.916` for the slim image.
+Raw startup samples in seconds were `1.165, 0.921, 0.925, 0.952, 0.960` for
+the broad image and `0.995, 0.850, 1.005, 0.933, 0.959` for the slim image.
 The gzip figures are transfer-size proxies sampled from Docker's serialized
 archive; repeated serialization can differ slightly and is not a content
 digest.

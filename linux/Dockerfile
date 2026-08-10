@@ -270,13 +270,16 @@ RUN actionlint \
 # validate the HTTPS snapshot service.
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS classic-ci
 
+ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive \
     UBUNTU_SNAPSHOT=20260810T000000Z
 
 COPY classic-packages.lock /tmp/classic-packages.lock
 # APT still verifies the signed Release metadata and package hashes. Only TLS
 # peer verification is temporarily unavailable in the minimal base.
-RUN sed -i \
+RUN test "${TARGETARCH}" = amd64 \
+    && test "$(dpkg --print-architecture)" = amd64 \
+    && sed -i \
         -e "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
         -e "s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
         /etc/apt/sources.list.d/ubuntu.sources \

@@ -49,9 +49,11 @@ docker build --check --file windows/Dockerfile .
 
 docker build --file linux/Dockerfile --tag atrinik-linux-build .
 docker build --file linux/Dockerfile \
+  --platform linux/amd64 \
   --target classic-validation \
   --tag atrinik-classic-validation .
 docker build --file linux/Dockerfile \
+  --platform linux/amd64 \
   --target classic-final \
   --tag atrinik-classic-build .
 docker build --file windows/Dockerfile \

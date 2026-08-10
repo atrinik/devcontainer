@@ -102,6 +102,7 @@ jobs:
           context: .
           file: linux/Dockerfile
           target: classic-validation
+          platforms: linux/amd64
           outputs: type=cacheonly
           cache-from: |
             type=registry,ref=ghcr.io/atrinik/classic-build:ubuntu-26.04

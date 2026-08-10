@@ -29,6 +29,7 @@ jq -e '
   and (.consumer_validation.commit | test("^[0-9a-f]{40}$"))
 ' "${expected}" >/dev/null
 
+test "linux/$(dpkg --print-architecture)" = "$(jq -r '.platform' "${expected}")"
 expected_image=$(jq -r '.base.image' "${expected}")
 expected_digest=$(jq -r '.base.digest' "${expected}")
 expected_snapshot=$(jq -r '.base.apt_snapshot' "${expected}")
