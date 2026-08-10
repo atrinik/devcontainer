@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schema_version": 1,
+  "sdl_mixer": {
+    "name": "SDL3_mixer",
+    "version": "3.2.4",
+    "source": {
+      "url": "https://github.com/libsdl-org/SDL_mixer/releases/download/release-3.2.4/SDL3_mixer-3.2.4.tar.gz",
+      "sha256": "182a07c745375e113dc740d43964ff21b0be29f29f59876c4dbc4db3d32f6901"
+    },
+    "license": "Zlib",
+    "linkage": "shared",
+    "codec_linkage": "static",
+    "required_decoders": ["WAV", "STBVORBIS", "OPUS", "DRMP3"],
+    "forbidden_decoders": ["FLUIDSYNTH", "GME", "TIMIDITY", "XMP"]
+  },
+  "dependencies": [
+    {
+      "name": "libogg",
+      "version": "1.3.5",
+      "source": {
+        "repository": "libsdl-org/ogg",
+        "commit": "936fdd822a4e4fc963197b3eda931b89b52859a0",
+        "url": "https://codeload.github.com/libsdl-org/ogg/legacy.tar.gz/936fdd822a4e4fc963197b3eda931b89b52859a0",
+        "sha256": "4e2e1da271f4b7b9902f325a714e07d6412e9df7a0dbe43ca53257901c5d74ff"
+      },
+      "license": "BSD-3-Clause",
+      "linkage": "static"
+    },
+    {
+      "name": "libopus",
+      "version": "1.4",
+      "source": {
+        "repository": "libsdl-org/opus",
+        "commit": "ac9f053e1db9cc1c7608b74e029c25ded0254e3e",
+        "url": "https://codeload.github.com/libsdl-org/opus/legacy.tar.gz/ac9f053e1db9cc1c7608b74e029c25ded0254e3e",
+        "sha256": "3af32ef61579bc441883a63fce6b28bc9975df194d72b399415db67c61d5c25a"
+      },
+      "license": "BSD-3-Clause",
+      "linkage": "static"
+    },
+    {
+      "name": "libopusfile",
+      "version": "0.12",
+      "source": {
+        "repository": "libsdl-org/opusfile",
+        "commit": "9e5322c62de32d2b2ad88324b3ad311174cec41d",
+        "url": "https://codeload.github.com/libsdl-org/opusfile/legacy.tar.gz/9e5322c62de32d2b2ad88324b3ad311174cec41d",
+        "sha256": "ed9ea07e9e7e9f9b603e793ffac9551218c978cd5021c7d8f9a3a5dfece9a860"
+      },
+      "license": "BSD-3-Clause",
+      "linkage": "static"
+    }
+  ],
+  "fixture": {
+    "path": "tools/audio/opus-probe.opus",
+    "sha256": "453377167a869b790d68ad9dae496e0623f22709e1bea230f6a27c4f19feaa5c",
+    "license": "MIT",
+    "description": "Atrinik-authored 0.25-second 440 Hz mono tone at 48 kHz"
+  },
+  "windows": {
+    "codec_runtime_dlls": [],
+    "support_runtime_dlls": ["libssp-0.dll"],
+    "sdl_mixer_imports": [
+      "KERNEL32.dll",
+      "libssp-0.dll",
+      "msvcrt.dll",
+      "SDL3.dll"
+    ],
+    "support_runtime_imports": {
+      "libssp-0.dll": ["ADVAPI32.dll", "KERNEL32.dll", "msvcrt.dll"]
+    }
+  }
+}

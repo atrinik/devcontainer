@@ -36,12 +36,17 @@ jobs:
             case "${path}" in
             .dockerignore | .github/actionlint.yaml | \
                 .github/workflows/validate.yml | linux/* | \
-                toolchains.json | tools/validate-toolchains.sh)
+                audio-toolchain.json | audio-toolchain.spdx.json | \
+                toolchains.json | tools/audio/* | \
+                tools/build-sdl3-mixer.sh | tools/validate-toolchains.sh)
               linux=true
               ;;
             esac
             case "${path}" in
-            .dockerignore | .github/workflows/validate.yml | windows/*)
+            .dockerignore | .github/workflows/validate.yml | windows/* | \
+                audio-toolchain.json | audio-toolchain.spdx.json | \
+                tools/audio/* | \
+                tools/build-sdl3-mixer.sh | tools/verify-pe-imports.sh)
               windows=true
               ;;
             esac

@@ -58,6 +58,11 @@ docker run --rm atrinik-linux-build protoc-gen-go --version
 docker run --rm atrinik-linux-build protoc-gen-prost --version
 docker run --rm atrinik-linux-build node --version
 docker run --rm atrinik-linux-build pnpm --version
+docker run --rm atrinik-linux-build \
+  atrinik-sdl3-mixer-probe \
+  /usr/local/share/atrinik/audio/opus-probe.opus
+docker run --rm atrinik-linux-build \
+  syft dir:/ --override-default-catalogers sbom-cataloger -o table
 docker run --rm atrinik-windows-build \
   x86_64-w64-mingw32.shared-gcc --version
 docker run --rm --user vscode atrinik-windows-build ssh -V
@@ -69,19 +74,48 @@ Node.js, pnpm, Syft, and Trivy. It also includes GCC, Clang with compiler-rt,
 LLVM, clangd, clang-tidy, actionlint, the GitHub CLI, the OpenSSH client, and
 the standalone Dev Containers CLI. Standard `zip`/`unzip` archive tooling is
 present for deterministic cross-platform release assembly. SDL3, SDL3_image,
-SDL3_ttf, Vulkan
-diagnostics, and a pinned source build of SDL3_mixer support Rust client,
-editor, and renderer development. Mesa's software Vulkan implementation and
-Xvfb provide repeatable offscreen and SDL window validation without a physical
-GPU or display. Interactive windows still require display forwarding. Native Windows
-D3D12 validation runs on Windows runners rather than pretending the MXE image
-is a Windows runtime. The image's ccache directory
+SDL3_ttf, Vulkan diagnostics, and a pinned source build of SDL3_mixer support
+Rust client, editor, and renderer development. SDL3_mixer provides built-in
+WAV, stb_vorbis, and dr_mp3 decoders plus Opus through statically linked,
+checksum-pinned libogg, libopus, and libopusfile. MIDI and module decoders are
+intentionally unavailable. Mesa's software Vulkan implementation and Xvfb
+provide repeatable offscreen and SDL window validation without a physical GPU
+or display. Interactive windows still require display forwarding. Native
+Windows D3D12 validation runs on Windows runners rather than pretending the MXE
+image is a Windows runtime. The image's ccache directory
 defaults to writable container-local storage under `/tmp`; CI can override
 `CCACHE_DIR` with a persistent cache. The Windows image provides the same SDL3
-family through MXE and the official SDL3_mixer MinGW SDK. It also includes the
-OpenSSH client and exports MXE's compiler-driver directory in `PATH` for both
-interactive and non-interactive commands, including Debian login shells for
-both `root` and `vscode`.
+family and decoder contract through MXE and the same SDL3_mixer source build.
+The codec libraries are linked into `SDL3_mixer.dll`, so packaged clients need
+no `libogg`, `libopus`, or `libopusfile` DLLs. The exact additional runtime
+closure is the MXE-provided `libssp-0.dll`, retained for Opus stack-protector
+and fortified-source support; it imports only standard Windows libraries.
+Cross-object inspection enforces both import lists. The image also
+includes the OpenSSH client and exports MXE's compiler-driver directory in
+`PATH` for both interactive and non-interactive commands, including Debian
+login shells for both `root` and `vscode`.
+
+[`audio-toolchain.json`](audio-toolchain.json) is the machine-readable codec
+inventory. It records every version, immutable source revision or release URL,
+SHA-256 checksum, license, linkage choice, decoder, fixture checksum, and the
+exact Windows import contract. The matching
+[`audio-toolchain.spdx.json`](audio-toolchain.spdx.json) records SDL3_mixer and
+all three statically linked codec packages in SPDX 2.3 form, because a scanner
+cannot infer static source dependencies from the resulting shared library.
+Both images carry the inventory and SBOM under
+`/usr/local/share/atrinik/`; Syft's nested-SBOM cataloger incorporates those
+packages in whole-image SBOM output.
+
+Both builds compile the same no-device decoder probe. Linux validation runs it
+during the image build, enumerates the required `WAV`, `STBVORBIS`, `DRMP3`,
+and `OPUS` decoders, rejects MIDI and module decoders, fully decodes the
+bundled Opus fixture, and rejects empty PCM. The
+Windows image puts `atrinik-sdl3-mixer-probe.exe` and the fixture under the MXE
+prefix so a clean native Windows package test can copy and run the identical
+contract without installing codecs separately. The MXE build cannot execute a
+Windows binary, so its image validation instead compiles the probe and verifies
+the exact imports of the self-contained `SDL3_mixer.dll`; native execution
+belongs on a Windows runner.
 
 VS Code's Dev Containers extension automatically forwards a running host SSH
 agent into either container. Add private keys to the host agent with `ssh-add`,
