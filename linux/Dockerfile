@@ -245,19 +245,21 @@ RUN HOME="/home/${USERNAME}" runuser -u "${USERNAME}" -- \
         gh extension install github/gh-stack --pin "v${GH_STACK_VERSION}" \
     && echo "${GH_STACK_SHA256_AMD64}  /home/${USERNAME}/.local/share/gh/extensions/gh-stack/gh-stack" \
         | sha256sum -c - \
-    && grep -Fx 'owner: github' \
+    && runuser -u "${USERNAME}" -- grep -Fx 'owner: github' \
         "/home/${USERNAME}/.local/share/gh/extensions/gh-stack/manifest.yml" \
-    && grep -Fx 'name: gh-stack' \
+    && runuser -u "${USERNAME}" -- grep -Fx 'name: gh-stack' \
         "/home/${USERNAME}/.local/share/gh/extensions/gh-stack/manifest.yml" \
-    && grep -Fx "tag: v${GH_STACK_VERSION}" \
+    && runuser -u "${USERNAME}" -- grep -Fx "tag: v${GH_STACK_VERSION}" \
         "/home/${USERNAME}/.local/share/gh/extensions/gh-stack/manifest.yml" \
-    && grep -Fx 'ispinned: true' \
+    && runuser -u "${USERNAME}" -- grep -Fx 'ispinned: true' \
         "/home/${USERNAME}/.local/share/gh/extensions/gh-stack/manifest.yml" \
     && curl --fail --location --silent --show-error \
         "https://raw.githubusercontent.com/github/gh-stack/${GH_STACK_SOURCE_COMMIT}/LICENSE" \
         --output /usr/local/share/licenses/gh-stack.LICENSE \
     && echo "${GH_STACK_LICENSE_SHA256}  /usr/local/share/licenses/gh-stack.LICENSE" \
-        | sha256sum -c -
+        | sha256sum -c - \
+    && rm -rf "/home/${USERNAME}/.cache/gh" \
+        "/home/${USERNAME}/.local/state/gh"
 
 RUN clang --version \
     && test "$(go env GOVERSION)" = "go${GO_VERSION}" \
@@ -318,7 +320,29 @@ RUN actionlint \
         | jq -e --slurpfile inventory /workspace/audio-toolchain.json \
             '([.artifacts[] | [.name, .version]] | sort) == \
              (($inventory[0].dependencies + [$inventory[0].sdl_mixer]) \
-              | map([.name, .version]) | sort)'
+              | map([.name, .version]) | sort)' \
+    && syft dir:/ --select-catalogers +sbom-cataloger -o spdx-json \
+        | jq -e --slurpfile inventory /workspace/audio-toolchain.json ' \
+            .spdxVersion == "SPDX-2.3" \
+            and any( \
+              .packages[]; \
+              .name == "github.com/cli/cli/v2" \
+              and .versionInfo == "v2.97.0" \
+            ) \
+            and any( \
+              .packages[]; \
+              .name == "github.com/github/gh-stack" \
+              and (.versionInfo | startswith("v0.1.0")) \
+            ) \
+            and ( \
+              [.packages[] | [.name, .versionInfo]] \
+              | contains(( \
+                  $inventory[0].dependencies \
+                  + [$inventory[0].sdl_mixer] \
+                  | map([.name, .version]) \
+                )) \
+            ) \
+          '
 
 # Classic Check uses a separate task-focused target. It intentionally starts
 # from the pinned Ubuntu base instead of inheriting the replacement toolchain,
