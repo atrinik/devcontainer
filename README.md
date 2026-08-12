@@ -57,6 +57,11 @@ packages and all four variants remain matched.
 
 ## Local validation
 
+The isolated `gh extension list` smoke needs a non-empty `GH_TOKEN` environment
+value to suppress GitHub CLI's login prerequisite, but it does not contact the
+API to list the installed extension. A non-secret placeholder is sufficient and
+no credential is supplied to the image build or runtime container.
+
 ```sh
 docker build --check --file linux/Dockerfile .
 docker build --check --file windows/Dockerfile .
@@ -79,7 +84,17 @@ docker build --file windows/Dockerfile \
   --tag atrinik-windows-check .
 
 docker run --rm atrinik-linux-build clang --version
-docker run --rm atrinik-linux-build gh --version
+docker run --rm --user ubuntu --env HOME=/home/ubuntu \
+  atrinik-linux-build gh version
+docker run --rm --user ubuntu --env HOME=/home/ubuntu \
+  --env GH_TOKEN=unused atrinik-linux-build gh extension list
+docker run --rm --user ubuntu --env HOME=/home/ubuntu \
+  atrinik-linux-build gh stack --version
+docker run --rm --user ubuntu --env HOME=/home/ubuntu \
+  atrinik-linux-build gh stack --help
+docker run --rm --user ubuntu --env HOME=/home/ubuntu \
+  atrinik-linux-build sha256sum \
+  /home/ubuntu/.local/share/gh/extensions/gh-stack/gh-stack
 docker run --rm atrinik-linux-build actionlint --version
 docker run --rm atrinik-linux-build devcontainer --version
 docker run --rm atrinik-linux-build go version
@@ -193,6 +208,26 @@ CA bundle. After installing the exact locked TLS closure, a verified HTTPS
 snapshot update must pass before any remaining package is installed. Snapshot
 sources disable metadata expiry so the fixed timestamp remains rebuildable;
 APT still verifies its signed metadata and package hashes.
+
+The broad Linux image installs the official GitHub CLI 2.97.0 archive, pinned
+by its published SHA-256, as the sole `gh` executable. It also installs the
+official `github/gh-stack` extension v0.1.0 for the non-root `ubuntu` user with
+`gh extension install github/gh-stack --pin v0.1.0`. The image validates the
+extension's pinned manifest, ordinary `gh stack` dispatch, help output, and
+the attested `linux-amd64` binary SHA-256
+`358552dd7dce0a46ce153fe196270cec482b84f080947890aad4061a8d44bc0b`.
+Both projects are MIT licensed; their pinned license texts are installed under
+`/usr/local/share/licenses/`.
+
+The upstream release attestation ties `github/gh-stack`'s
+`.github/workflows/release.yml`, `refs/tags/v0.1.0`, and source commit
+`a1b4a3d4d0bcde9ec3a78ab99b2d63af121857a9` to that asset digest. Pull-request
+validation verifies those coordinates with the trusted runner's
+`gh attestation verify` after the image build. The repository token is never
+passed into the review-built container. No GitHub credential enters the
+Dockerfile, build arguments, image layers, or published image. Upgrades require
+reviewed version, checksum, source, license, and attestation changes; do not run
+`gh extension upgrade stack --force` as a runtime substitute.
 
 The Linux image includes the pinned replacement toolchains recorded in
 [`toolchains.json`](toolchains.json): Go, Rust/rustup, Protobuf/protoc, Buf,

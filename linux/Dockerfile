@@ -28,7 +28,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         flex \
         fzf \
         gdb \
-        gh \
         git \
         iproute2 \
         jq \
@@ -79,6 +78,13 @@ ARG ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b3
 ARG BUF_VERSION=1.72.0
 ARG BUF_SHA256=8720830e26a733da55bb89bcd3cb44849c0965fc0c44fb5d691cccdc64dca5af
 ARG DEVCONTAINER_CLI_VERSION=0.88.0
+ARG GH_VERSION=2.97.0
+ARG GH_SHA256=a2c9b8497e1f85b1ad0dfcb78b5a622e098801b8e461e459e88e1ee12f018112
+ARG GH_STACK_VERSION=0.1.0
+ARG GH_STACK_SHA256_AMD64=358552dd7dce0a46ce153fe196270cec482b84f080947890aad4061a8d44bc0b
+ARG GH_STACK_SOURCE_COMMIT=a1b4a3d4d0bcde9ec3a78ab99b2d63af121857a9
+ARG GH_STACK_LICENSE_SHA256=2510b446bc1f0cf9702453075d20cd88631e20e5642658edb7325d9c1eb534f7
+ARG GIT_VERSION=2.53.0
 ARG GO_VERSION=1.26.5
 ARG GO_SHA256=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
 ARG NODE_VERSION=24.18.1
@@ -155,6 +161,25 @@ RUN curl --fail --location --silent --show-error \
     && tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy \
     && rm -f /tmp/syft.tar.gz /tmp/trivy.tar.gz
 
+# Install one checksum-pinned GitHub CLI from its immutable v2.97.0 release.
+# The archive carries cli/cli's MIT license; Ubuntu's distro package is omitted
+# above so SBOM and executable ownership remain unambiguous.
+RUN curl --fail --location --silent --show-error \
+        "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+        --output /tmp/gh.tar.gz \
+    && echo "${GH_SHA256}  /tmp/gh.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/gh.tar.gz -C /tmp \
+    && install -m 0755 \
+        "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh \
+    && install -D -m 0644 \
+        "/tmp/gh_${GH_VERSION}_linux_amd64/LICENSE" \
+        /usr/local/share/licenses/gh/LICENSE \
+    && rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_amd64" \
+    && test "$(command -v gh)" = /usr/local/bin/gh \
+    && test ! -e /usr/bin/gh \
+    && test "$(gh version | sed -n '1s/^gh version \([^ ]*\) .*/\1/p')" \
+        = "${GH_VERSION}"
+
 # Ubuntu does not currently package SDL3_mixer. Build the checksum-pinned
 # release with static libogg, libopus, and libopusfile inputs so OPUS, WAV,
 # and built-in Vorbis remain available without host codec libraries.
@@ -212,6 +237,30 @@ RUN install -d -o "${USERNAME}" -g "${USERNAME}" "/home/${USERNAME}/.codex" \
         > "/etc/sudoers.d/${USERNAME}" \
     && chmod 0440 "/etc/sudoers.d/${USERNAME}"
 
+# gh-stack v0.1.0 is a non-immutable release tag, so retain the supported pin
+# while independently enforcing its attested linux-amd64 asset digest. The
+# source commit is the verified release-workflow signer/source digest for
+# github/gh-stack/.github/workflows/release.yml at refs/tags/v0.1.0.
+RUN HOME="/home/${USERNAME}" runuser -u "${USERNAME}" -- \
+        gh extension install github/gh-stack --pin "v${GH_STACK_VERSION}" \
+    && echo "${GH_STACK_SHA256_AMD64}  /home/${USERNAME}/.local/share/gh/extensions/gh-stack/gh-stack" \
+        | sha256sum -c - \
+    && runuser -u "${USERNAME}" -- grep -Fx 'owner: github' \
+        "/home/${USERNAME}/.local/share/gh/extensions/gh-stack/manifest.yml" \
+    && runuser -u "${USERNAME}" -- grep -Fx 'name: gh-stack' \
+        "/home/${USERNAME}/.local/share/gh/extensions/gh-stack/manifest.yml" \
+    && runuser -u "${USERNAME}" -- grep -Fx "tag: v${GH_STACK_VERSION}" \
+        "/home/${USERNAME}/.local/share/gh/extensions/gh-stack/manifest.yml" \
+    && runuser -u "${USERNAME}" -- grep -Fx 'ispinned: true' \
+        "/home/${USERNAME}/.local/share/gh/extensions/gh-stack/manifest.yml" \
+    && curl --fail --location --silent --show-error \
+        "https://raw.githubusercontent.com/github/gh-stack/${GH_STACK_SOURCE_COMMIT}/LICENSE" \
+        --output /usr/local/share/licenses/gh-stack.LICENSE \
+    && echo "${GH_STACK_LICENSE_SHA256}  /usr/local/share/licenses/gh-stack.LICENSE" \
+        | sha256sum -c - \
+    && rm -rf "/home/${USERNAME}/.cache/gh" \
+        "/home/${USERNAME}/.local/state/gh"
+
 RUN clang --version \
     && test "$(go env GOVERSION)" = "go${GO_VERSION}" \
     && test "$(rustc --version | cut -d' ' -f2)" = "${RUST_VERSION}" \
@@ -222,7 +271,17 @@ RUN clang --version \
     && test "$(protoc-gen-go --version)" \
         = "protoc-gen-go v${PROTOC_GEN_GO_VERSION}" \
     && test "$(protoc-gen-prost --version)" = "${PROTOC_GEN_PROST_VERSION}" \
-    && gh --version \
+    && test "$(runuser -u "${USERNAME}" -- env HOME="/home/${USERNAME}" \
+        gh version | sed -n '1s/^gh version \([^ ]*\) .*/\1/p')" \
+        = "${GH_VERSION}" \
+    && test "$(runuser -u "${USERNAME}" -- env HOME="/home/${USERNAME}" \
+        git version)" = "git version ${GIT_VERSION}" \
+    && test "$(runuser -u "${USERNAME}" -- env HOME="/home/${USERNAME}" \
+        gh stack --version)" = "gh stack version ${GH_STACK_VERSION}" \
+    && runuser -u "${USERNAME}" -- env HOME="/home/${USERNAME}" \
+        gh stack --help >/dev/null \
+    && echo "${GH_STACK_SHA256_AMD64}  /home/${USERNAME}/.local/share/gh/extensions/gh-stack/gh-stack" \
+        | runuser -u "${USERNAME}" -- sha256sum -c - \
     && llvm-config --version \
     && syft version \
     && trivy --version \
@@ -261,7 +320,29 @@ RUN actionlint \
         | jq -e --slurpfile inventory /workspace/audio-toolchain.json \
             '([.artifacts[] | [.name, .version]] | sort) == \
              (($inventory[0].dependencies + [$inventory[0].sdl_mixer]) \
-              | map([.name, .version]) | sort)'
+              | map([.name, .version]) | sort)' \
+    && syft dir:/ --select-catalogers +sbom-cataloger -o spdx-json \
+        | jq -e --slurpfile inventory /workspace/audio-toolchain.json ' \
+            .spdxVersion == "SPDX-2.3" \
+            and any( \
+              .packages[]; \
+              .name == "github.com/cli/cli/v2" \
+              and .versionInfo == "v2.97.0" \
+            ) \
+            and any( \
+              .packages[]; \
+              .name == "github.com/github/gh-stack" \
+              and (.versionInfo | startswith("v0.1.0")) \
+            ) \
+            and ( \
+              [.packages[] | [.name, .versionInfo]] \
+              | contains(( \
+                  $inventory[0].dependencies \
+                  + [$inventory[0].sdl_mixer] \
+                  | map([.name, .version]) \
+                )) \
+            ) \
+          '
 
 # Classic Check uses a separate task-focused target. It intentionally starts
 # from the pinned Ubuntu base instead of inheriting the replacement toolchain,
