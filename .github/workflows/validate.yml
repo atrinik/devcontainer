@@ -4,6 +4,7 @@ on:
   pull_request:
 
 permissions:
+  attestations: read
   contents: read
 
 concurrency:
@@ -105,9 +106,54 @@ jobs:
           context: .
           file: linux/Dockerfile
           target: validation
-          outputs: type=cacheonly
+          load: true
+          tags: atrinik-linux-validation:ci
           cache-from: type=gha,scope=linux-build-image
           cache-to: type=gha,mode=max,scope=linux-build-image,ignore-error=true
+
+      - name: Verify non-root gh-stack contract
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          docker run --rm \
+            --user ubuntu \
+            --env HOME=/home/ubuntu \
+            --env GH_TOKEN \
+            atrinik-linux-validation:ci \
+            sh -eu -c '
+              test "$(gh version | sed -n "1s/^gh version \([^ ]*\) .*/\1/p")" = 2.97.0
+              test "$(git version)" = "git version 2.53.0"
+              test "$(gh extension list)" = "gh stack$(printf "\t")github/gh-stack$(printf "\t")v0.1.0"
+              test "$(gh stack --version)" = "gh stack version 0.1.0"
+              gh stack --help >/dev/null
+              echo "358552dd7dce0a46ce153fe196270cec482b84f080947890aad4061a8d44bc0b  /home/ubuntu/.local/share/gh/extensions/gh-stack/gh-stack" | sha256sum -c -
+            '
+
+      - name: Verify gh-stack release attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          docker run --rm \
+            --user ubuntu \
+            --env HOME=/home/ubuntu \
+            --env GH_TOKEN \
+            atrinik-linux-validation:ci \
+            gh attestation verify \
+              /home/ubuntu/.local/share/gh/extensions/gh-stack/gh-stack \
+              --repo github/gh-stack \
+              --signer-workflow github/gh-stack/.github/workflows/release.yml \
+              --source-ref refs/tags/v0.1.0 \
+              --source-digest a1b4a3d4d0bcde9ec3a78ab99b2d63af121857a9 \
+              --signer-digest a1b4a3d4d0bcde9ec3a78ab99b2d63af121857a9 \
+              --format json \
+            | jq -e '
+                any(
+                  .[].verificationResult.statement.subject[];
+                  .name == "linux-amd64"
+                  and .digest.sha256 ==
+                    "358552dd7dce0a46ce153fe196270cec482b84f080947890aad4061a8d44bc0b"
+                )
+              '
 
   windows:
     name: Windows cross-build images
