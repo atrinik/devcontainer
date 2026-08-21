@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 
-FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS toolchain
+FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b AS toolchain
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -349,7 +349,7 @@ RUN actionlint \
 # and resolves packages from a fixed Ubuntu archive snapshot. Its exact CA and
 # TLS runtime packages are bootstrapped first because the minimal base cannot
 # validate the HTTPS snapshot service.
-FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS classic-ci
+FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b AS classic-ci
 
 ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive \
