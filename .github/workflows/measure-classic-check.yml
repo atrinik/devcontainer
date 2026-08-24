@@ -21,8 +21,6 @@ on:
       - tools/verify_classic_check_dependencies.py
       - tools/verify-pe-imports.sh
       - windows/**
-  workflow_dispatch:
-
 permissions:
   contents: read
 
