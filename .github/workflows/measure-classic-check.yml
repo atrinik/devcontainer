@@ -77,6 +77,7 @@ jobs:
           repository: atrinik/classic
           ref: ${{ steps.classic.outputs.ref }}
           path: build/classic
+          persist-credentials: false
 
       - name: Verify pinned Classic dependency releases
         env:
