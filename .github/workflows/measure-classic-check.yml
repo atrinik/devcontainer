@@ -15,8 +15,10 @@ on:
       - tools/build-sdl3-mixer.sh
       - tools/measure-classic-check-images.sh
       - tools/smoke-classic-check.sh
+      - tools/tests/**
       - tools/validate-toolchains.sh
       - tools/verify-classic-check-package.py
+      - tools/verify_classic_check_dependencies.py
       - tools/verify-pe-imports.sh
       - windows/**
   workflow_dispatch:
@@ -75,6 +77,13 @@ jobs:
           repository: atrinik/classic
           ref: ${{ steps.classic.outputs.ref }}
           path: build/classic
+
+      - name: Verify pinned Classic dependency releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/verify_classic_check_dependencies.py \
+            build/classic windows/classic-check-toolchain.json
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4

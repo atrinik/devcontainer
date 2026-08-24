@@ -133,12 +133,17 @@ if [[ -n ${classic_check_expected} ]]; then
   and .["$schema"] == "https://json-schema.org/draft/2020-12/schema"
   and .schema_version == 1
   and .target == "classic-check"
-  and (.consumer | keys == ["jobs", "repository", "validation_commit", "workflow"])
+  and (.consumer | keys == [
+    "jobs", "lock_files", "repository", "validation_commit", "workflow"
+  ])
   and .consumer.repository == "atrinik/classic"
   and (.consumer.validation_commit | test("^[0-9a-f]{40}$"))
   and .consumer.workflow == ".github/workflows/check.yml"
   and .consumer.jobs == [
     "Build native Windows tests", "Native Windows security tests"
+  ]
+  and .consumer.lock_files == [
+    "client/dependencies.lock.json", "server/dependencies.lock.json"
   ]
   and .base == {
     "image": "mcr.microsoft.com/devcontainers/base:bookworm",

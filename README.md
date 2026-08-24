@@ -139,6 +139,18 @@ docker run --rm \
   /image-source/tools/validate-classic-check.sh /workspace
 ```
 
+Before building or publishing a Classic Check image, verify the immutable
+consumer coordinates and every release asset declared by its client and server
+locks. The command uses the authenticated GitHub CLI for read-only release
+metadata and fails before any candidate image is published when a tag, commit,
+asset URL, or SHA-256 digest is missing or mismatched:
+
+```sh
+GH_TOKEN="${GH_TOKEN:?Set a read-only GitHub token}" \
+  python3 tools/verify_classic_check_dependencies.py \
+    /absolute/path/to/atrinik-classic windows/classic-check-toolchain.json
+```
+
 The `classic-final` target is a separate, amd64-only CI contract rather than a
 trimmed development image. It starts from the same digest-pinned Ubuntu 26.04
 base, bootstraps exact locked CA and TLS runtime packages, and resolves all

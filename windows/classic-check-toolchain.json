@@ -9,6 +9,10 @@
     "jobs": [
       "Build native Windows tests",
       "Native Windows security tests"
+    ],
+    "lock_files": [
+      "client/dependencies.lock.json",
+      "server/dependencies.lock.json"
     ]
   },
   "base": {
