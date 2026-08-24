@@ -248,7 +248,10 @@ def run_json(arguments: list[str]) -> object:
         raise VerificationError("GitHub API response exceeds the bounded output limit")
     if result.returncode:
         message = result.stderr.decode("utf-8", errors="replace").strip()
-        raise VerificationError(f"GitHub API request failed: {message or 'unknown error'}")
+        endpoint = arguments[-1] if arguments else "unknown endpoint"
+        raise VerificationError(
+            f"GitHub API request failed for {endpoint}: {message or 'unknown error'}"
+        )
     try:
         return json.loads(result.stdout, object_pairs_hook=reject_duplicate_keys)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -346,7 +349,10 @@ def verify_release(
 ) -> None:
     repository = str(dependency["repository"])
     tag = str(dependency["tag"])
-    release = api.release(repository, tag)
+    try:
+        release = api.release(repository, tag)
+    except VerificationError as error:
+        raise VerificationError(f"{context}: release lookup failed: {error}") from error
     if (
         release.get("tag_name") != tag
         or release.get("draft") is not False
@@ -372,7 +378,10 @@ def verify_release(
         or asset.get("digest") != f"sha256:{dependency['sha256']}"
     ):
         raise VerificationError(f"{context}: release asset URL, state, size, or digest mismatches lock")
-    actual_commit = api.tag_commit(repository, tag)
+    try:
+        actual_commit = api.tag_commit(repository, tag)
+    except VerificationError as error:
+        raise VerificationError(f"{context}: tag lookup failed: {error}") from error
     if actual_commit != dependency["commit"]:
         raise VerificationError(f"{context}: release tag resolves to an unexpected commit")
 
