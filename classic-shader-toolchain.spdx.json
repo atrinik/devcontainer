@@ -1,0 +1,57 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "Atrinik Classic GPU shader toolchain",
+  "documentNamespace": "https://github.com/atrinik/devcontainer/sbom/classic-shader-toolchain/9c3c8e2cefdd8194b193bb8ed2fdff4d5527e382",
+  "creationInfo": {
+    "created": "2026-08-30T00:00:00Z",
+    "creators": ["Tool: Atrinik devcontainer shader-toolchain inventory"]
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-DirectXShaderCompiler",
+      "name": "DirectXShaderCompiler",
+      "versionInfo": "v1.9.2607",
+      "downloadLocation": "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2607/linux_dxc_2026_07_29.x86_x64.tar.gz",
+      "filesAnalyzed": false,
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "55665c87824051ed4774ff3280a79ccbbb7d39243b9736ca5e98222134112d54"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-SPIRV-Cross",
+      "name": "SPIRV-Cross",
+      "versionInfo": "9c3c8e2cefdd8194b193bb8ed2fdff4d5527e382",
+      "downloadLocation": "https://codeload.github.com/KhronosGroup/SPIRV-Cross/tar.gz/9c3c8e2cefdd8194b193bb8ed2fdff4d5527e382",
+      "filesAnalyzed": false,
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "78939435d588998e5174a7865ddd36b6d9d7cd05eafac42d42ef537ea770b40a"
+        }
+      ],
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "NOASSERTION"
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-DirectXShaderCompiler"
+    },
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-SPIRV-Cross"
+    }
+  ]
+}

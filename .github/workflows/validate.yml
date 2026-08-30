@@ -51,11 +51,15 @@ jobs:
                 .github/workflows/validate.yml | linux/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
                 classic-packages.lock | classic-toolchain.json | \
+                classic-shader-toolchain.json | \
+                classic-shader-toolchain.spdx.json | \
                 tools/audio/* | tools/build-sdl3-mixer.sh | \
                 tools/require-image-checks.sh | \
                 tools/test-require-image-checks.sh | \
                 tools/validate-classic-check.sh | \
-                tools/validate-classic-image.sh)
+                tools/validate-classic-image.sh | \
+                tools/install_classic_shader_toolchain.py | \
+                tools/tests/test_install_classic_shader_toolchain.py)
               classic=true
               ;;
             esac
@@ -90,6 +94,9 @@ jobs:
 
       - name: Test Classic dependency preflight
         run: python3 -m unittest tools/tests/test_verify_classic_check_dependencies.py
+
+      - name: Test Classic shader toolchain installer
+        run: python3 -m unittest tools/tests/test_install_classic_shader_toolchain.py
 
   linux:
     name: Linux image

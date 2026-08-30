@@ -17,8 +17,14 @@
   changes, the required aggregate validation must still run.
 - `classic-final` is the slim Classic Check target. Keep its Ubuntu snapshot,
   direct package lock, tool inventory, non-root ccache mount, Classic validation
-  revision, smoke/SBOM checks, and published tags synchronized. Do not make it
-  inherit the broad replacement/development toolchain.
+  revision, shader-toolchain inventory, GPU runtime, smoke/SBOM checks, and
+  published tags synchronized. Do not make it inherit the broad
+  replacement/development toolchain.
+- The public Classic image's shader contract is defined by
+  `classic-shader-toolchain.json`: retain the exact DXC/SPIRV-Cross archive and
+  source checksums, upstream licenses, and `/usr/local/bin` tool paths. Its
+  pinned Lavapipe/Xvfb packages provide the equivalent public environment for
+  fork-safe GPU coverage; consumers still pin a released image digest.
 - Keep a stable numeric runner UID when restoring a Classic ccache directory;
   the mode-1777 mount root supports non-root initialization but does not make
   ccache's owner-writable nested directories reusable across different UIDs.

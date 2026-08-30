@@ -405,11 +405,36 @@ RUN test "$(sha256sum /usr/local/share/atrinik/audio/opus-probe.opus \
         /usr/local/share/atrinik/audio/opus-probe.opus \
     && rm /tmp/sdl3-mixer-probe.c
 
+# Classic's GPU shader pipeline uses a qualified DXC release and a source
+# snapshot of SPIRV-Cross. Build the latter from its locked archive and retain
+# every upstream license beside the installed tools. The same final image also
+# carries the pinned Lavapipe/Xvfb runtime below for fork-safe GPU coverage.
+COPY classic-shader-toolchain.json /tmp/classic-shader-toolchain.json
+COPY tools/install_classic_shader_toolchain.py \
+    /tmp/install_classic_shader_toolchain.py
+RUN python3 /tmp/install_classic_shader_toolchain.py \
+        --manifest /tmp/classic-shader-toolchain.json \
+        --cache /tmp/classic-shader-downloads \
+        --prefix /usr/local \
+        --jobs "$(nproc)" \
+    && ldconfig \
+    && test -x /usr/local/bin/dxc \
+    && test -x /usr/local/bin/spirv-cross \
+    && dxc --version >/dev/null \
+    && spirv-cross --help >/dev/null 2>&1 \
+    && rm -rf /tmp/classic-shader-downloads \
+        /tmp/classic-shader-toolchain.json \
+        /tmp/install_classic_shader_toolchain.py
+
 ENV CCACHE_DIR=/cache/ccache
 RUN install -d -m 1777 "${CCACHE_DIR}"
 
 COPY classic-toolchain.json /usr/local/share/atrinik/classic-toolchain.json
 COPY classic-packages.lock /usr/local/share/atrinik/classic-packages.lock
+COPY classic-shader-toolchain.json \
+    /usr/local/share/atrinik/classic-shader-toolchain.json
+COPY classic-shader-toolchain.spdx.json \
+    /usr/local/share/atrinik/classic-shader-toolchain.spdx.json
 COPY audio-toolchain.json /usr/local/share/atrinik/audio-toolchain.json
 COPY audio-toolchain.spdx.json /usr/local/share/atrinik/audio-toolchain.spdx.json
 
@@ -430,6 +455,8 @@ RUN curl --fail --location --silent --show-error \
 
 COPY classic-packages.lock /workspace/classic-packages.lock
 COPY classic-toolchain.json /workspace/classic-toolchain.json
+COPY classic-shader-toolchain.json /workspace/classic-shader-toolchain.json
+COPY classic-shader-toolchain.spdx.json /workspace/classic-shader-toolchain.spdx.json
 COPY audio-toolchain.json /workspace/audio-toolchain.json
 COPY linux/Dockerfile /workspace/linux/Dockerfile
 COPY tools/validate-classic-image.sh /workspace/tools/validate-classic-image.sh
@@ -440,7 +467,11 @@ RUN /workspace/tools/validate-classic-image.sh \
         /workspace/classic-toolchain.json \
         /usr/local/share/atrinik/classic-toolchain.json \
         /workspace/audio-toolchain.json \
-        /workspace/linux/Dockerfile
+        /workspace/linux/Dockerfile \
+        /workspace/classic-shader-toolchain.json \
+        /usr/local/share/atrinik/classic-shader-toolchain.json \
+        /workspace/classic-shader-toolchain.spdx.json \
+        /usr/local/share/atrinik/classic-shader-toolchain.spdx.json
 
 USER root
 RUN syft dir:/ --select-catalogers +sbom-cataloger -o spdx-json \
