@@ -108,6 +108,11 @@ docker run --rm atrinik-linux-build pnpm --version
 docker run --rm atrinik-classic-build gcc --version
 docker run --rm atrinik-classic-build cmake --version
 docker run --rm atrinik-classic-build ccache --version
+docker run --rm atrinik-classic-build dxc --version
+docker run --rm atrinik-classic-build spirv-cross --help
+docker run --rm atrinik-classic-build \
+  sh -c 'test -f /usr/share/vulkan/icd.d/lvp_icd.json && \
+    VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json vulkaninfo --summary'
 docker run --rm atrinik-linux-build \
   atrinik-sdl3-mixer-probe \
   /usr/local/share/atrinik/audio/opus-probe.opus
@@ -163,6 +168,17 @@ needed by the Classic client and server. SDL3_mixer and its codec closure retain
 the checksum-pinned source and nested SPDX inventory used by the development
 image.
 
+The same public `classic-build` image now carries the qualified DXC release and
+SPIRV-Cross source snapshot described by
+[`classic-shader-toolchain.json`](classic-shader-toolchain.json). Their
+checksum-verified executables are available as `dxc` and `spirv-cross`, with
+the upstream license files under `/usr/local/share/licenses`. The direct
+Lavapipe, Vulkan, and Xvfb runtime packages are locked in
+[`classic-packages.lock`](classic-packages.lock), so a released immutable
+Classic digest can serve both the shader-producing build and fork-safe GPU
+coverage jobs. The Classic consumer must update its separate workflow to pin
+that released digest; this image change does not rewrite consumer source.
+
 Classic runs as the unprivileged `ubuntu` user by default. `/cache/ccache` is a
 mode-1777 mount contract so CI can run with its own numeric UID and persist the
 directory without granting root. Consumers must still select ccache explicitly
@@ -188,8 +204,9 @@ the digest, never a rolling tag. To update that pin:
 
 1. Update the matching Ubuntu base digest and snapshot value in both
    `linux/Dockerfile` and `classic-toolchain.json`, refresh the exact direct
-   versions in `classic-packages.lock`, and update the tool versions and pinned
-   Classic validation commit in `classic-toolchain.json`.
+   versions in `classic-packages.lock`, and update the tool versions, shader
+   coordinates in `classic-shader-toolchain.json`, and pinned Classic
+   validation commit in `classic-toolchain.json`.
 2. Build `classic-validation` and `classic-final`, run the repository checks,
    and compare compressed image size plus local client/server timings with the
    prior digest.
