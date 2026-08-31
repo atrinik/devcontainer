@@ -14,6 +14,8 @@ COPY classic-vulkan-packages.lock /tmp/classic-vulkan-packages.lock
 # signed snapshot, then repeat the update with normal HTTPS verification.
 RUN test "${TARGETARCH}" = amd64 \
     && test "$(dpkg --print-architecture)" = amd64 \
+    && printf '%s\n' 'Acquire::Retries "5";' \
+        > /etc/apt/apt.conf.d/80-snapshot-retries \
     && sed -i \
         -e "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
         -e "s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
@@ -35,6 +37,7 @@ RUN test "${TARGETARCH}" = amd64 \
     && while IFS='=' read -r package version; do \
         test "$(dpkg-query --show --showformat='${Version}' "${package}")" = "${version}"; \
        done < /tmp/classic-vulkan-packages.lock \
+    && rm -f /etc/apt/apt.conf.d/80-snapshot-retries \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
 
 COPY classic-vulkan-toolchain.json /tmp/classic-vulkan-toolchain.json
@@ -71,6 +74,9 @@ RUN sed -i \
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    printf '%s\n' 'Acquire::Retries "5";' \
+        > /etc/apt/apt.conf.d/80-snapshot-retries \
+    && \
     apt-get -o Acquire::https::Verify-Peer=false update \
     && apt-get -o Acquire::https::Verify-Peer=false install -y --no-install-recommends \
         ca-certificates \
@@ -143,7 +149,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         xz-utils \
         zip \
         zlib1g=1:1.3.dfsg+really1.3.1-1ubuntu3 \
-        zlib1g-dev=1:1.3.dfsg+really1.3.1-1ubuntu3
+        zlib1g-dev=1:1.3.dfsg+really1.3.1-1ubuntu3 \
+    && rm -f /etc/apt/apt.conf.d/80-snapshot-retries
 
 COPY --from=mesa-dozen \
     /usr/lib/x86_64-linux-gnu/libvulkan_dzn.so \
@@ -466,6 +473,8 @@ COPY classic-packages.lock /tmp/classic-packages.lock
 # peer verification is temporarily unavailable in the minimal base.
 RUN test "${TARGETARCH}" = amd64 \
     && test "$(dpkg --print-architecture)" = amd64 \
+    && printf '%s\n' 'Acquire::Retries "5";' \
+        > /etc/apt/apt.conf.d/80-snapshot-retries \
     && sed -i \
         -e "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
         -e "s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
@@ -484,6 +493,7 @@ RUN test "${TARGETARCH}" = amd64 \
     && apt-get update \
     && xargs -r apt-get install -y --no-install-recommends \
         < /tmp/classic-packages.lock \
+    && rm -f /etc/apt/apt.conf.d/80-snapshot-retries \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
 
 COPY --from=mesa-dozen \
