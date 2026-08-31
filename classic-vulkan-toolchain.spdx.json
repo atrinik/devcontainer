@@ -1,0 +1,36 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "Atrinik Classic WSLg Vulkan Dozen runtime",
+  "documentNamespace": "https://github.com/atrinik/devcontainer/sbom/classic-vulkan-toolchain/60e95b787857afbc9a00b693b91c0d9c8923a430",
+  "creationInfo": {
+    "created": "2026-08-31T00:00:00Z",
+    "creators": ["Tool: Atrinik devcontainer vulkan-toolchain inventory"]
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-Mesa",
+      "name": "Mesa",
+      "versionInfo": "26.0.8",
+      "downloadLocation": "https://archive.mesa3d.org/mesa-26.0.8.tar.xz",
+      "filesAnalyzed": false,
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "caf1c0061a68e88dfa74967a7e780c0e85d65b6c4e334cd69095a5dc54ad78bc"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION"
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-Mesa"
+    }
+  ]
+}

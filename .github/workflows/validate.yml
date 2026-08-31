@@ -38,11 +38,16 @@ jobs:
             .dockerignore | .github/actionlint.yaml | \
                 .github/workflows/* | linux/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
+                classic-vulkan-toolchain.json | \
+                classic-vulkan-toolchain.spdx.json | \
+                classic-vulkan-packages.lock | \
                 toolchains.json | tools/audio/* | \
                 tools/build-sdl3-mixer.sh | \
+                tools/install_classic_vulkan_toolchain.py | \
                 tools/require-image-checks.sh | \
                 tools/test-require-image-checks.sh | \
-                tools/validate-toolchains.sh)
+                tools/validate-toolchains.sh | \
+                tools/validate-vulkan-toolchain.sh)
               linux=true
               ;;
             esac
@@ -53,13 +58,19 @@ jobs:
                 classic-packages.lock | classic-toolchain.json | \
                 classic-shader-toolchain.json | \
                 classic-shader-toolchain.spdx.json | \
+                classic-vulkan-toolchain.json | \
+                classic-vulkan-toolchain.spdx.json | \
+                classic-vulkan-packages.lock | \
                 tools/audio/* | tools/build-sdl3-mixer.sh | \
                 tools/require-image-checks.sh | \
                 tools/test-require-image-checks.sh | \
                 tools/validate-classic-check.sh | \
                 tools/validate-classic-image.sh | \
                 tools/install_classic_shader_toolchain.py | \
-                tools/tests/test_install_classic_shader_toolchain.py)
+                tools/tests/test_install_classic_shader_toolchain.py | \
+                tools/install_classic_vulkan_toolchain.py | \
+                tools/validate-vulkan-toolchain.sh | \
+                tools/tests/test_install_classic_vulkan_toolchain.py)
               classic=true
               ;;
             esac
@@ -97,6 +108,9 @@ jobs:
 
       - name: Test Classic shader toolchain installer
         run: python3 -m unittest tools/tests/test_install_classic_shader_toolchain.py
+
+      - name: Test Classic Vulkan toolchain installer
+        run: python3 -m unittest tools/tests/test_install_classic_vulkan_toolchain.py
 
   linux:
     name: Linux image
