@@ -12,8 +12,23 @@ ENV DEBIAN_FRONTEND=noninteractive \
 COPY classic-vulkan-packages.lock /tmp/classic-vulkan-packages.lock
 # The minimal base has no CA bundle. Bootstrap the exact TLS closure over the
 # signed snapshot, then repeat the update with normal HTTPS verification.
+# Snapshot package downloads can still fail after per-request retries. Repeat
+# the transaction so successfully fetched archives can be reused.
 RUN test "${TARGETARCH}" = amd64 \
     && test "$(dpkg --print-architecture)" = amd64 \
+    && retry_command() { \
+        attempt=1; \
+        while test "${attempt}" -le 2; do \
+            if "$@"; then \
+                return 0; \
+            fi; \
+            if test "${attempt}" -eq 2; then \
+                return 1; \
+            fi; \
+            attempt=$((attempt + 1)); \
+            sleep 5; \
+        done; \
+    } \
     && printf '%s\n' 'Acquire::Retries "5";' \
         > /etc/apt/apt.conf.d/80-snapshot-retries \
     && sed -i \
@@ -22,18 +37,23 @@ RUN test "${TARGETARCH}" = amd64 \
         /etc/apt/sources.list.d/ubuntu.sources \
     && sed -i '/^Signed-By:/a Check-Valid-Until: no' \
         /etc/apt/sources.list.d/ubuntu.sources \
-    && apt-get -o Acquire::https::Verify-Peer=false update \
+    && retry_command apt-get -o Acquire::https::Verify-Peer=false update \
     && awk -F= '$1 == "ca-certificates" \
             || $1 == "libssl3t64" \
             || $1 == "openssl" \
             || $1 == "openssl-provider-legacy" { print }' \
         /tmp/classic-vulkan-packages.lock \
-        | xargs -r apt-get -o Acquire::https::Verify-Peer=false \
+        > /tmp/classic-vulkan-bootstrap.lock \
+    && retry_command sh -c \
+        'xargs -r apt-get -o Acquire::https::Verify-Peer=false \
             install -y --no-install-recommends \
+            < /tmp/classic-vulkan-bootstrap.lock' \
+    && rm -f /tmp/classic-vulkan-bootstrap.lock \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get update \
-    && xargs -r apt-get install -y --no-install-recommends \
-        < /tmp/classic-vulkan-packages.lock \
+    && retry_command apt-get update \
+    && retry_command sh -c \
+        'xargs -r apt-get install -y --no-install-recommends \
+            < /tmp/classic-vulkan-packages.lock' \
     && while IFS='=' read -r package version; do \
         test "$(dpkg-query --show --showformat='${Version}' "${package}")" = "${version}"; \
        done < /tmp/classic-vulkan-packages.lock \
@@ -72,19 +92,35 @@ RUN sed -i \
     && sed -i '/^Signed-By:/a Check-Valid-Until: no' \
         /etc/apt/sources.list.d/ubuntu.sources
 
+# Snapshot package downloads can still fail after per-request retries. Repeat
+# the transaction so successfully fetched archives can be reused.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    retry_command() { \
+        attempt=1; \
+        while test "${attempt}" -le 2; do \
+            if "$@"; then \
+                return 0; \
+            fi; \
+            if test "${attempt}" -eq 2; then \
+                return 1; \
+            fi; \
+            attempt=$((attempt + 1)); \
+            sleep 5; \
+        done; \
+    } \
+    && \
     printf '%s\n' 'Acquire::Retries "5";' \
         > /etc/apt/apt.conf.d/80-snapshot-retries \
     && \
-    apt-get -o Acquire::https::Verify-Peer=false update \
-    && apt-get -o Acquire::https::Verify-Peer=false install -y --no-install-recommends \
+    retry_command apt-get -o Acquire::https::Verify-Peer=false update \
+    && retry_command apt-get -o Acquire::https::Verify-Peer=false install -y --no-install-recommends \
         ca-certificates \
         libssl3t64 \
         openssl \
         openssl-provider-legacy \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
+    && retry_command apt-get update \
+    && retry_command apt-get install -y --no-install-recommends \
         alsa-utils \
         build-essential \
         ca-certificates \
@@ -471,8 +507,23 @@ ENV DEBIAN_FRONTEND=noninteractive \
 COPY classic-packages.lock /tmp/classic-packages.lock
 # APT still verifies the signed Release metadata and package hashes. Only TLS
 # peer verification is temporarily unavailable in the minimal base.
+# Snapshot package downloads can still fail after per-request retries. Repeat
+# the transaction so successfully fetched archives can be reused.
 RUN test "${TARGETARCH}" = amd64 \
     && test "$(dpkg --print-architecture)" = amd64 \
+    && retry_command() { \
+        attempt=1; \
+        while test "${attempt}" -le 2; do \
+            if "$@"; then \
+                return 0; \
+            fi; \
+            if test "${attempt}" -eq 2; then \
+                return 1; \
+            fi; \
+            attempt=$((attempt + 1)); \
+            sleep 5; \
+        done; \
+    } \
     && printf '%s\n' 'Acquire::Retries "5";' \
         > /etc/apt/apt.conf.d/80-snapshot-retries \
     && sed -i \
@@ -481,18 +532,23 @@ RUN test "${TARGETARCH}" = amd64 \
         /etc/apt/sources.list.d/ubuntu.sources \
     && sed -i '/^Signed-By:/a Check-Valid-Until: no' \
         /etc/apt/sources.list.d/ubuntu.sources \
-    && apt-get -o Acquire::https::Verify-Peer=false update \
+    && retry_command apt-get -o Acquire::https::Verify-Peer=false update \
     && awk -F= '$1 == "ca-certificates" \
             || $1 == "libssl3t64" \
             || $1 == "openssl" \
             || $1 == "openssl-provider-legacy" { print }' \
         /tmp/classic-packages.lock \
-        | xargs -r apt-get -o Acquire::https::Verify-Peer=false \
+        > /tmp/classic-bootstrap.lock \
+    && retry_command sh -c \
+        'xargs -r apt-get -o Acquire::https::Verify-Peer=false \
             install -y --no-install-recommends \
+            < /tmp/classic-bootstrap.lock' \
+    && rm -f /tmp/classic-bootstrap.lock \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get update \
-    && xargs -r apt-get install -y --no-install-recommends \
-        < /tmp/classic-packages.lock \
+    && retry_command apt-get update \
+    && retry_command sh -c \
+        'xargs -r apt-get install -y --no-install-recommends \
+            < /tmp/classic-packages.lock' \
     && rm -f /etc/apt/apt.conf.d/80-snapshot-retries \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
 
