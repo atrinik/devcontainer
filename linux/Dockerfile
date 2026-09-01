@@ -1,15 +1,126 @@
 # syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 
+# The public Linux and Classic images share one checksum-pinned Mesa Dozen
+# build. Only the resulting ICD and driver are copied into either runtime
+# image; the source and build toolchain remain in this disposable stage.
+FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS mesa-dozen
+
+ARG TARGETARCH
+ENV DEBIAN_FRONTEND=noninteractive \
+    UBUNTU_SNAPSHOT=20260810T000000Z
+
+COPY classic-vulkan-packages.lock /tmp/classic-vulkan-packages.lock
+# The minimal base has no CA bundle. Bootstrap the exact TLS closure over the
+# signed snapshot, then repeat the update with normal HTTPS verification.
+# Snapshot package downloads can still fail after per-request retries. Repeat
+# the transaction so successfully fetched archives can be reused.
+RUN test "${TARGETARCH}" = amd64 \
+    && test "$(dpkg --print-architecture)" = amd64 \
+    && retry_command() { \
+        attempt=1; \
+        while test "${attempt}" -le 2; do \
+            if "$@"; then \
+                return 0; \
+            fi; \
+            if test "${attempt}" -eq 2; then \
+                return 1; \
+            fi; \
+            attempt=$((attempt + 1)); \
+            sleep 5; \
+        done; \
+    } \
+    && printf '%s\n' 'Acquire::Retries "5";' \
+        > /etc/apt/apt.conf.d/80-snapshot-retries \
+    && sed -i \
+        -e "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
+        -e "s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
+        /etc/apt/sources.list.d/ubuntu.sources \
+    && sed -i '/^Signed-By:/a Check-Valid-Until: no' \
+        /etc/apt/sources.list.d/ubuntu.sources \
+    && retry_command apt-get -o Acquire::https::Verify-Peer=false update \
+    && awk -F= '$1 == "ca-certificates" \
+            || $1 == "libssl3t64" \
+            || $1 == "openssl" \
+            || $1 == "openssl-provider-legacy" { print }' \
+        /tmp/classic-vulkan-packages.lock \
+        > /tmp/classic-vulkan-bootstrap.lock \
+    && retry_command sh -c \
+        'xargs -r apt-get -o Acquire::https::Verify-Peer=false \
+            install -y --no-install-recommends \
+            < /tmp/classic-vulkan-bootstrap.lock' \
+    && rm -f /tmp/classic-vulkan-bootstrap.lock \
+    && rm -rf /var/lib/apt/lists/* \
+    && retry_command apt-get update \
+    && retry_command sh -c \
+        'xargs -r apt-get install -y --no-install-recommends \
+            < /tmp/classic-vulkan-packages.lock' \
+    && while IFS='=' read -r package version; do \
+        test "$(dpkg-query --show --showformat='${Version}' "${package}")" = "${version}"; \
+       done < /tmp/classic-vulkan-packages.lock \
+    && rm -f /etc/apt/apt.conf.d/80-snapshot-retries \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
+
+COPY classic-vulkan-toolchain.json /tmp/classic-vulkan-toolchain.json
+COPY tools/install_classic_vulkan_toolchain.py \
+    /tmp/install_classic_vulkan_toolchain.py
+RUN python3 /tmp/install_classic_vulkan_toolchain.py \
+        --manifest /tmp/classic-vulkan-toolchain.json \
+        --cache /tmp/classic-vulkan-downloads \
+        --prefix /usr \
+        --jobs "$(nproc)" \
+    && ldconfig \
+    && test -f /usr/lib/x86_64-linux-gnu/libvulkan_dzn.so \
+    && test -f /usr/share/vulkan/icd.d/dzn_icd.x86_64.json \
+    && rm -rf /tmp/classic-vulkan-downloads \
+        /tmp/classic-vulkan-toolchain.json \
+        /tmp/install_classic_vulkan_toolchain.py
+
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS toolchain
 
-ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive \
+    UBUNTU_SNAPSHOT=20260810T000000Z
 
 RUN rm -f /etc/apt/apt.conf.d/docker-clean
 
+# Keep the public Linux image's exact Vulkan runtime closure on the same signed
+# Ubuntu snapshot as the Classic image. The minimal base needs the same
+# temporary TLS bootstrap before normal HTTPS verification can resume.
+RUN sed -i \
+        -e "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
+        -e "s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
+        /etc/apt/sources.list.d/ubuntu.sources \
+    && sed -i '/^Signed-By:/a Check-Valid-Until: no' \
+        /etc/apt/sources.list.d/ubuntu.sources
+
+# Snapshot package downloads can still fail after per-request retries. Repeat
+# the transaction so successfully fetched archives can be reused.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    apt-get update \
-    && apt-get install -y --no-install-recommends \
+    retry_command() { \
+        attempt=1; \
+        while test "${attempt}" -le 2; do \
+            if "$@"; then \
+                return 0; \
+            fi; \
+            if test "${attempt}" -eq 2; then \
+                return 1; \
+            fi; \
+            attempt=$((attempt + 1)); \
+            sleep 5; \
+        done; \
+    } \
+    && \
+    printf '%s\n' 'Acquire::Retries "5";' \
+        > /etc/apt/apt.conf.d/80-snapshot-retries \
+    && \
+    retry_command apt-get -o Acquire::https::Verify-Peer=false update \
+    && retry_command apt-get -o Acquire::https::Verify-Peer=false install -y --no-install-recommends \
+        ca-certificates \
+        libssl3t64 \
+        openssl \
+        openssl-provider-legacy \
+    && retry_command apt-get update \
+    && retry_command apt-get install -y --no-install-recommends \
         alsa-utils \
         build-essential \
         ca-certificates \
@@ -34,6 +145,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libasound2-plugins \
         libclang-rt-dev \
         libcurl4-openssl-dev \
+        libdrm2=2.4.131-1 \
         libgd-dev \
         libidn2-dev \
         libminiupnpc-dev \
@@ -43,11 +155,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libsdl3-ttf-dev \
         libssl-dev \
         libsubunit-dev \
-        libvulkan-dev \
+        libudev1=259.5-0ubuntu3.3 \
+        libvulkan-dev=1.4.341.0-1 \
+        libvulkan1=1.4.341.0-1 \
+        libwayland-client0=1.24.0-2 \
         libxml2-dev \
         libxml2-utils \
         llvm \
-        mesa-vulkan-drivers \
+        mesa-vulkan-drivers=26.0.3-1ubuntu1 \
         ninja-build \
         openssh-client \
         patch \
@@ -64,12 +179,22 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         tree \
         unzip \
         valgrind \
-        vulkan-tools \
+        vulkan-tools=1.4.341.0+dfsg1-1 \
         xauth \
         xvfb \
         xz-utils \
         zip \
-        zlib1g-dev
+        zlib1g=1:1.3.dfsg+really1.3.1-1ubuntu3 \
+        zlib1g-dev=1:1.3.dfsg+really1.3.1-1ubuntu3 \
+    && rm -f /etc/apt/apt.conf.d/80-snapshot-retries
+
+COPY --from=mesa-dozen \
+    /usr/lib/x86_64-linux-gnu/libvulkan_dzn.so \
+    /usr/lib/x86_64-linux-gnu/libvulkan_dzn.so
+COPY --from=mesa-dozen \
+    /usr/share/vulkan/icd.d/dzn_icd.x86_64.json \
+    /usr/share/vulkan/icd.d/dzn_icd.x86_64.json
+RUN ldconfig
 
 # Declare independently updatable downloaded tools after the distribution
 # layer so a language/security tool bump can reuse the expensive native SDK.
@@ -297,6 +422,12 @@ RUN clang --version \
 COPY toolchains.json /usr/local/share/atrinik/toolchains.json
 COPY audio-toolchain.json /usr/local/share/atrinik/audio-toolchain.json
 COPY audio-toolchain.spdx.json /usr/local/share/atrinik/audio-toolchain.spdx.json
+COPY classic-vulkan-toolchain.json \
+    /usr/local/share/atrinik/classic-vulkan-toolchain.json
+COPY classic-vulkan-toolchain.spdx.json \
+    /usr/local/share/atrinik/classic-vulkan-toolchain.spdx.json
+COPY classic-vulkan-packages.lock \
+    /usr/local/share/atrinik/classic-vulkan-packages.lock
 
 FROM toolchain AS validation
 
@@ -305,7 +436,11 @@ COPY .github/workflows /workspace/.github/workflows
 COPY toolchains.json /workspace/toolchains.json
 COPY audio-toolchain.json /workspace/audio-toolchain.json
 COPY audio-toolchain.spdx.json /workspace/audio-toolchain.spdx.json
+COPY classic-vulkan-toolchain.json /workspace/classic-vulkan-toolchain.json
+COPY classic-vulkan-toolchain.spdx.json /workspace/classic-vulkan-toolchain.spdx.json
 COPY tools/validate-toolchains.sh /workspace/tools/validate-toolchains.sh
+COPY tools/validate-vulkan-toolchain.sh \
+    /workspace/tools/validate-vulkan-toolchain.sh
 
 RUN actionlint \
     -config-file /workspace/.github/actionlint.yaml \
@@ -316,11 +451,20 @@ RUN actionlint \
         /usr/local/share/atrinik/audio-toolchain.json \
         /workspace/audio-toolchain.spdx.json \
         /usr/local/share/atrinik/audio-toolchain.spdx.json \
+    && /workspace/tools/validate-vulkan-toolchain.sh \
+        /workspace/classic-vulkan-toolchain.json \
+        /usr/local/share/atrinik/classic-vulkan-toolchain.json \
+        /workspace/classic-vulkan-toolchain.spdx.json \
+        /usr/local/share/atrinik/classic-vulkan-toolchain.spdx.json \
     && syft dir:/ --override-default-catalogers sbom-cataloger -o json \
-        | jq -e --slurpfile inventory /workspace/audio-toolchain.json \
+        | jq -e \
+            --slurpfile inventory /workspace/audio-toolchain.json \
+            --slurpfile vulkan /workspace/classic-vulkan-toolchain.json \
             '([.artifacts[] | [.name, .version]] | sort) == \
              (($inventory[0].dependencies + [$inventory[0].sdl_mixer]) \
-              | map([.name, .version]) | sort)' \
+              | map([.name, .version]) \
+              | . + [["Mesa", $vulkan[0].source.version]] \
+              | sort)' \
     && syft dir:/ --select-catalogers +sbom-cataloger -o spdx-json \
         | jq -e --slurpfile inventory /workspace/audio-toolchain.json ' \
             .spdxVersion == "SPDX-2.3" \
@@ -333,6 +477,11 @@ RUN actionlint \
               .packages[]; \
               .name == "github.com/github/gh-stack" \
               and (.versionInfo | startswith("v0.1.0")) \
+            ) \
+            and any( \
+              .packages[]; \
+              .name == "Mesa" \
+              and .versionInfo == "26.0.8" \
             ) \
             and ( \
               [.packages[] | [.name, .versionInfo]] \
@@ -358,27 +507,58 @@ ENV DEBIAN_FRONTEND=noninteractive \
 COPY classic-packages.lock /tmp/classic-packages.lock
 # APT still verifies the signed Release metadata and package hashes. Only TLS
 # peer verification is temporarily unavailable in the minimal base.
+# Snapshot package downloads can still fail after per-request retries. Repeat
+# the transaction so successfully fetched archives can be reused.
 RUN test "${TARGETARCH}" = amd64 \
     && test "$(dpkg --print-architecture)" = amd64 \
+    && retry_command() { \
+        attempt=1; \
+        while test "${attempt}" -le 2; do \
+            if "$@"; then \
+                return 0; \
+            fi; \
+            if test "${attempt}" -eq 2; then \
+                return 1; \
+            fi; \
+            attempt=$((attempt + 1)); \
+            sleep 5; \
+        done; \
+    } \
+    && printf '%s\n' 'Acquire::Retries "5";' \
+        > /etc/apt/apt.conf.d/80-snapshot-retries \
     && sed -i \
         -e "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
         -e "s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
         /etc/apt/sources.list.d/ubuntu.sources \
     && sed -i '/^Signed-By:/a Check-Valid-Until: no' \
         /etc/apt/sources.list.d/ubuntu.sources \
-    && apt-get -o Acquire::https::Verify-Peer=false update \
+    && retry_command apt-get -o Acquire::https::Verify-Peer=false update \
     && awk -F= '$1 == "ca-certificates" \
             || $1 == "libssl3t64" \
             || $1 == "openssl" \
             || $1 == "openssl-provider-legacy" { print }' \
         /tmp/classic-packages.lock \
-        | xargs -r apt-get -o Acquire::https::Verify-Peer=false \
+        > /tmp/classic-bootstrap.lock \
+    && retry_command sh -c \
+        'xargs -r apt-get -o Acquire::https::Verify-Peer=false \
             install -y --no-install-recommends \
+            < /tmp/classic-bootstrap.lock' \
+    && rm -f /tmp/classic-bootstrap.lock \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get update \
-    && xargs -r apt-get install -y --no-install-recommends \
-        < /tmp/classic-packages.lock \
+    && retry_command apt-get update \
+    && retry_command sh -c \
+        'xargs -r apt-get install -y --no-install-recommends \
+            < /tmp/classic-packages.lock' \
+    && rm -f /etc/apt/apt.conf.d/80-snapshot-retries \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
+
+COPY --from=mesa-dozen \
+    /usr/lib/x86_64-linux-gnu/libvulkan_dzn.so \
+    /usr/lib/x86_64-linux-gnu/libvulkan_dzn.so
+COPY --from=mesa-dozen \
+    /usr/share/vulkan/icd.d/dzn_icd.x86_64.json \
+    /usr/share/vulkan/icd.d/dzn_icd.x86_64.json
+RUN ldconfig
 
 # Classic requires the same checksum-pinned SDL3_mixer contract as the broad
 # Linux image. Its codec dependencies are statically linked into the shared
@@ -435,6 +615,12 @@ COPY classic-shader-toolchain.json \
     /usr/local/share/atrinik/classic-shader-toolchain.json
 COPY classic-shader-toolchain.spdx.json \
     /usr/local/share/atrinik/classic-shader-toolchain.spdx.json
+COPY classic-vulkan-toolchain.json \
+    /usr/local/share/atrinik/classic-vulkan-toolchain.json
+COPY classic-vulkan-toolchain.spdx.json \
+    /usr/local/share/atrinik/classic-vulkan-toolchain.spdx.json
+COPY classic-vulkan-packages.lock \
+    /usr/local/share/atrinik/classic-vulkan-packages.lock
 COPY audio-toolchain.json /usr/local/share/atrinik/audio-toolchain.json
 COPY audio-toolchain.spdx.json /usr/local/share/atrinik/audio-toolchain.spdx.json
 
@@ -457,9 +643,13 @@ COPY classic-packages.lock /workspace/classic-packages.lock
 COPY classic-toolchain.json /workspace/classic-toolchain.json
 COPY classic-shader-toolchain.json /workspace/classic-shader-toolchain.json
 COPY classic-shader-toolchain.spdx.json /workspace/classic-shader-toolchain.spdx.json
+COPY classic-vulkan-toolchain.json /workspace/classic-vulkan-toolchain.json
+COPY classic-vulkan-toolchain.spdx.json /workspace/classic-vulkan-toolchain.spdx.json
 COPY audio-toolchain.json /workspace/audio-toolchain.json
 COPY linux/Dockerfile /workspace/linux/Dockerfile
 COPY tools/validate-classic-image.sh /workspace/tools/validate-classic-image.sh
+COPY tools/validate-vulkan-toolchain.sh \
+    /workspace/tools/validate-vulkan-toolchain.sh
 
 USER ubuntu
 RUN /workspace/tools/validate-classic-image.sh \
@@ -471,7 +661,13 @@ RUN /workspace/tools/validate-classic-image.sh \
         /workspace/classic-shader-toolchain.json \
         /usr/local/share/atrinik/classic-shader-toolchain.json \
         /workspace/classic-shader-toolchain.spdx.json \
-        /usr/local/share/atrinik/classic-shader-toolchain.spdx.json
+        /usr/local/share/atrinik/classic-shader-toolchain.spdx.json \
+    && /workspace/tools/validate-vulkan-toolchain.sh \
+        /workspace/classic-vulkan-toolchain.json \
+        /usr/local/share/atrinik/classic-vulkan-toolchain.json \
+        /workspace/classic-vulkan-toolchain.spdx.json \
+        /usr/local/share/atrinik/classic-vulkan-toolchain.spdx.json \
+        /workspace/classic-packages.lock
 
 USER root
 RUN syft dir:/ --select-catalogers +sbom-cataloger -o spdx-json \
@@ -482,7 +678,8 @@ RUN syft dir:/ --select-catalogers +sbom-cataloger -o spdx-json \
             and ([.packages[].name] | index("SDL3_mixer") != null) \
             and ([.packages[].name] | index("libogg") != null) \
             and ([.packages[].name] | index("libopus") != null) \
-            and ([.packages[].name] | index("libopusfile") != null)'
+            and ([.packages[].name] | index("libopusfile") != null) \
+            and ([.packages[].name] | index("Mesa") != null)'
 
 FROM classic-ci AS classic-final
 

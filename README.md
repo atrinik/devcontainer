@@ -112,7 +112,9 @@ docker run --rm atrinik-classic-build dxc --version
 docker run --rm atrinik-classic-build spirv-cross --help
 docker run --rm atrinik-classic-build \
   sh -c 'test -f /usr/share/vulkan/icd.d/lvp_icd.json && \
-    VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json vulkaninfo --summary'
+    test -f /usr/share/vulkan/icd.d/dzn_icd.x86_64.json && \
+    VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json \
+      xvfb-run -a vulkaninfo --summary'
 docker run --rm atrinik-linux-build \
   atrinik-sdl3-mixer-probe \
   /usr/local/share/atrinik/audio/opus-probe.opus
@@ -179,6 +181,40 @@ Classic digest can serve both the shader-producing build and fork-safe GPU
 coverage jobs. The Classic consumer must update its separate workflow to pin
 that released digest; this image change does not rewrite consumer source.
 
+The public Linux and Classic images also carry the Mesa Dozen Vulkan runtime
+described by [`classic-vulkan-toolchain.json`](classic-vulkan-toolchain.json).
+Mesa 26.0.8 is built once from its checksum-pinned source archive with only
+the Wayland/D3D12 Vulkan path enabled; the build-only package closure is
+recorded in [`classic-vulkan-packages.lock`](classic-vulkan-packages.lock) and
+the source provenance in
+[`classic-vulkan-toolchain.spdx.json`](classic-vulkan-toolchain.spdx.json).
+Only those two custom-built artifacts—`/usr/lib/x86_64-linux-gnu/libvulkan_dzn.so`
+and `/usr/share/vulkan/icd.d/dzn_icd.x86_64.json`—enter the runtime images
+from the Mesa build stage. CI continues to select Lavapipe explicitly through
+Xvfb. A WSLg consumer can
+select Dozen after providing `/dev/dxg`, `/usr/lib/wsl`, and the WSLg runtime
+mounts plus its adapter name:
+
+```sh
+docker run --rm --gpus=all \
+  --device=/dev/dxg \
+  --volume /usr/lib/wsl:/usr/lib/wsl:ro \
+  --volume /mnt/wslg:/mnt/wslg:ro \
+  --env DISPLAY= \
+  --env WAYLAND_DISPLAY=wayland-0 \
+  --env XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir \
+  --env LD_LIBRARY_PATH=/usr/lib/wsl/lib \
+  --env GALLIUM_DRIVER=d3d12 \
+  --env MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA \
+  --env VK_DRIVER_FILES=/usr/share/vulkan/icd.d/dzn_icd.x86_64.json \
+  atrinik-classic-build vulkaninfo --summary
+```
+
+The adapter name is deliberately consumer-supplied; non-WSLg CI never selects
+an NVIDIA device. The image validator runs the existing Lavapipe/Xvfb probe
+and runs the Dozen probe only when all WSLg mounts/libraries and the consumer
+adapter variable are present.
+
 Classic runs as the unprivileged `ubuntu` user by default. `/cache/ccache` is a
 mode-1777 mount contract so CI can run with its own numeric UID and persist the
 directory without granting root. Consumers must still select ccache explicitly
@@ -205,8 +241,9 @@ the digest, never a rolling tag. To update that pin:
 1. Update the matching Ubuntu base digest and snapshot value in both
    `linux/Dockerfile` and `classic-toolchain.json`, refresh the exact direct
    versions in `classic-packages.lock`, and update the tool versions, shader
-   coordinates in `classic-shader-toolchain.json`, and pinned Classic
-   validation commit in `classic-toolchain.json`.
+   coordinates in `classic-shader-toolchain.json`, Mesa Dozen source
+   coordinates in `classic-vulkan-toolchain.json`, the Vulkan build lock, and
+   pinned Classic validation commit in `classic-toolchain.json`.
 2. Build `classic-validation` and `classic-final`, run the repository checks,
    and compare compressed image size plus local client/server timings with the
    prior digest.
