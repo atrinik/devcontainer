@@ -20,6 +20,10 @@
   revision, shader-toolchain inventory, GPU runtime, smoke/SBOM checks, and
   published tags synchronized. Do not make it inherit the broad
   replacement/development toolchain.
+- The broad Linux and `classic-final` images include the snapshot-pinned Git LFS
+  client. Keep the Linux tool manifests, Classic package lock, non-root version
+  checks, and isolated worktree/payload smoke synchronized when changing this
+  prerequisite.
 - The public Classic image's shader contract is defined by
   `classic-shader-toolchain.json`: retain the exact DXC/SPIRV-Cross archive and
   source checksums, upstream licenses, and `/usr/local/bin` tool paths. Its

@@ -180,6 +180,10 @@ while IFS='=' read -r package version; do
   test "$(dpkg-query --show --showformat='${Version}' "${package}")" = "${version}"
 done < "${package_lock}"
 
+test "$(git lfs version | sed -n '1s|^git-lfs/\([^ ]*\).*$|\1|p')" = \
+  "$(jq -r '.tools["git-lfs"]' "${expected}")"
+bash "$(dirname -- "${BASH_SOURCE[0]}")/smoke-git-lfs.sh"
+
 test "$(ccache --version | sed -n '1s/^ccache version //p')" = \
   "$(jq -r '.tools.ccache' "${expected}")"
 test "$(cmake --version | sed -n '1s/^cmake version //p')" = \

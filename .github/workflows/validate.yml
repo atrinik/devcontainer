@@ -45,6 +45,7 @@ jobs:
                 tools/build-sdl3-mixer.sh | \
                 tools/install_classic_vulkan_toolchain.py | \
                 tools/require-image-checks.sh | \
+                tools/smoke-git-lfs.sh | \
                 tools/test-require-image-checks.sh | \
                 tools/validate-toolchains.sh | \
                 tools/validate-vulkan-toolchain.sh)
@@ -63,6 +64,7 @@ jobs:
                 classic-vulkan-packages.lock | \
                 tools/audio/* | tools/build-sdl3-mixer.sh | \
                 tools/require-image-checks.sh | \
+                tools/smoke-git-lfs.sh | \
                 tools/test-require-image-checks.sh | \
                 tools/validate-classic-check.sh | \
                 tools/validate-classic-image.sh | \
