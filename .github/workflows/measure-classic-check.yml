@@ -15,6 +15,7 @@ on:
       - tools/build-sdl3-mixer.sh
       - tools/measure-classic-check-images.sh
       - tools/smoke-classic-check.sh
+      - tools/smoke-git-lfs.sh
       - tools/tests/**
       - tools/validate-toolchains.sh
       - tools/verify-classic-check-package.py

@@ -140,6 +140,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         fzf \
         gdb \
         git \
+        git-lfs \
         iproute2 \
         jq \
         libasound2-plugins \
@@ -210,6 +211,7 @@ ARG GH_STACK_SHA256_AMD64=358552dd7dce0a46ce153fe196270cec482b84f080947890aad406
 ARG GH_STACK_SOURCE_COMMIT=a1b4a3d4d0bcde9ec3a78ab99b2d63af121857a9
 ARG GH_STACK_LICENSE_SHA256=2510b446bc1f0cf9702453075d20cd88631e20e5642658edb7325d9c1eb534f7
 ARG GIT_VERSION=2.53.0
+ARG GIT_LFS_VERSION=3.7.1
 ARG GO_VERSION=1.26.5
 ARG GO_SHA256=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
 ARG NODE_VERSION=24.18.1
@@ -386,7 +388,9 @@ RUN HOME="/home/${USERNAME}" runuser -u "${USERNAME}" -- \
     && rm -rf "/home/${USERNAME}/.cache/gh" \
         "/home/${USERNAME}/.local/state/gh"
 
-RUN clang --version \
+COPY tools/smoke-git-lfs.sh /usr/local/bin/atrinik-git-lfs-smoke
+RUN chmod 0755 /usr/local/bin/atrinik-git-lfs-smoke \
+    && clang --version \
     && test "$(go env GOVERSION)" = "go${GO_VERSION}" \
     && test "$(rustc --version | cut -d' ' -f2)" = "${RUST_VERSION}" \
     && test "$(node --version)" = "v${NODE_VERSION}" \
@@ -401,6 +405,9 @@ RUN clang --version \
         = "${GH_VERSION}" \
     && test "$(runuser -u "${USERNAME}" -- env HOME="/home/${USERNAME}" \
         git version)" = "git version ${GIT_VERSION}" \
+    && test "$(runuser -u "${USERNAME}" -- env HOME="/home/${USERNAME}" \
+        git lfs version | sed -n '1s|^git-lfs/\([^ ]*\).*$|\1|p')" \
+        = "${GIT_LFS_VERSION}" \
     && test "$(runuser -u "${USERNAME}" -- env HOME="/home/${USERNAME}" \
         gh stack --version)" = "gh stack version ${GH_STACK_VERSION}" \
     && runuser -u "${USERNAME}" -- env HOME="/home/${USERNAME}" \
@@ -417,7 +424,9 @@ RUN clang --version \
     && command -v xvfb-run \
     && ssh -V \
     && zip -v >/dev/null \
-    && unzip -v >/dev/null
+    && unzip -v >/dev/null \
+    && runuser -u "${USERNAME}" -- env HOME="/home/${USERNAME}" \
+        bash /usr/local/bin/atrinik-git-lfs-smoke
 
 COPY toolchains.json /usr/local/share/atrinik/toolchains.json
 COPY audio-toolchain.json /usr/local/share/atrinik/audio-toolchain.json
@@ -439,6 +448,7 @@ COPY audio-toolchain.spdx.json /workspace/audio-toolchain.spdx.json
 COPY classic-vulkan-toolchain.json /workspace/classic-vulkan-toolchain.json
 COPY classic-vulkan-toolchain.spdx.json /workspace/classic-vulkan-toolchain.spdx.json
 COPY tools/validate-toolchains.sh /workspace/tools/validate-toolchains.sh
+COPY tools/smoke-git-lfs.sh /workspace/tools/smoke-git-lfs.sh
 COPY tools/validate-vulkan-toolchain.sh \
     /workspace/tools/validate-vulkan-toolchain.sh
 
@@ -552,6 +562,11 @@ RUN test "${TARGETARCH}" = amd64 \
     && rm -f /etc/apt/apt.conf.d/80-snapshot-retries \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
 
+COPY tools/smoke-git-lfs.sh /usr/local/bin/atrinik-git-lfs-smoke
+RUN chmod 0755 /usr/local/bin/atrinik-git-lfs-smoke \
+    && runuser -u ubuntu -- env HOME=/home/ubuntu \
+        bash /usr/local/bin/atrinik-git-lfs-smoke
+
 COPY --from=mesa-dozen \
     /usr/lib/x86_64-linux-gnu/libvulkan_dzn.so \
     /usr/lib/x86_64-linux-gnu/libvulkan_dzn.so
@@ -648,6 +663,7 @@ COPY classic-vulkan-toolchain.spdx.json /workspace/classic-vulkan-toolchain.spdx
 COPY audio-toolchain.json /workspace/audio-toolchain.json
 COPY linux/Dockerfile /workspace/linux/Dockerfile
 COPY tools/validate-classic-image.sh /workspace/tools/validate-classic-image.sh
+COPY tools/smoke-git-lfs.sh /workspace/tools/smoke-git-lfs.sh
 COPY tools/validate-vulkan-toolchain.sh \
     /workspace/tools/validate-vulkan-toolchain.sh
 

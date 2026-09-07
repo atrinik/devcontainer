@@ -9,6 +9,7 @@ g++=4:15.2.0-5ubuntu1
 gcc=4:15.2.0-5ubuntu1
 gcovr=7.2+really-2
 git=1:2.53.0-1ubuntu1
+git-lfs=3.7.1-1
 jq=1.8.1-4ubuntu2
 libcurl4-openssl-dev=8.18.0-1ubuntu2.3
 libdrm2=2.4.131-1

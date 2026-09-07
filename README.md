@@ -85,6 +85,10 @@ docker build --file windows/Dockerfile \
 
 docker run --rm atrinik-linux-build clang --version
 docker run --rm --user ubuntu --env HOME=/home/ubuntu \
+  atrinik-linux-build git lfs version
+docker run --rm --user ubuntu --env HOME=/home/ubuntu \
+  atrinik-linux-build atrinik-git-lfs-smoke
+docker run --rm --user ubuntu --env HOME=/home/ubuntu \
   atrinik-linux-build gh version
 docker run --rm --user ubuntu --env HOME=/home/ubuntu \
   --env GH_TOKEN=unused atrinik-linux-build gh extension list
@@ -107,6 +111,10 @@ docker run --rm atrinik-linux-build node --version
 docker run --rm atrinik-linux-build pnpm --version
 docker run --rm atrinik-classic-build gcc --version
 docker run --rm atrinik-classic-build cmake --version
+docker run --rm --user ubuntu --env HOME=/home/ubuntu \
+  atrinik-classic-build git lfs version
+docker run --rm --user ubuntu --env HOME=/home/ubuntu \
+  atrinik-classic-build atrinik-git-lfs-smoke
 docker run --rm atrinik-classic-build ccache --version
 docker run --rm atrinik-classic-build dxc --version
 docker run --rm atrinik-classic-build spirv-cross --help
