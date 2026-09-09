@@ -29,3 +29,8 @@ record = {"schema_version": 1,
           "tools": {name: digest(Path("/usr/local") / name) for name in ["bin/dxc", "lib/libdxcompiler.so", "lib/libdxil.so", "bin/spirv-cross"]}}
 assert record["output_manifest_sha256"] == record["expected_manifest_sha256"]
 Path("/cohort/generation.json").write_text(json.dumps(record, indent=2) + "\n")
+
+# The canonical manifest writer uses a private temporary file. Consumers may
+# run with a different non-root UID, so seal verified data with public reads.
+for path in [shader, *shader.rglob("*")]:
+    path.chmod(0o555 if path.is_dir() else 0o444)

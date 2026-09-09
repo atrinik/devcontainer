@@ -80,6 +80,9 @@ COPY --from=portable-shaders /cohort/generation.json /opt/atrinik-portable/shade
 COPY --from=portable-shaders /cohort/corresponding-source /opt/atrinik-portable/sources/classic-shaders
 # Build-time shader licenses/provenance accompany the generated cohort; no Ubuntu ELF.
 COPY --from=portable-shaders /usr/local/share/licenses /opt/atrinik-portable/notices/shader-tools
+# Download caches use private temporary files; published inputs must be readable
+# by arbitrary non-root consumer UIDs, without adding write permissions.
+RUN chmod -R a+rX /opt/atrinik-portable /usr/local/share/licenses
 USER ubuntu
 WORKDIR /home/ubuntu
 
