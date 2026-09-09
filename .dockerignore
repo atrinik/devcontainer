@@ -1,3 +1,9 @@
 .git
 **/.DS_Store
 **/*~
+
+# Consumer checkouts, generated evidence and bytecode are not image inputs.
+/build/
+**/.git
+**/__pycache__
+**/*.pyc

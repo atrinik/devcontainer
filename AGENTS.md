@@ -15,6 +15,13 @@
 - Treat Dockerfile inputs, `.dockerignore`, cache scopes, build arguments,
   published tags, and workflow path filters as one contract. If a relevant file
   changes, the required aggregate validation must still run.
+- `portable/Dockerfile` owns the separate `portable-final` Debian 12/glibc 2.36
+  Linux/amd64 build target and its sealed shader cohort. Keep its input/package,
+  CPU/ABI/provider, source/license, non-root consumer, required-check and
+  `classic-portable-build` publication contracts synchronized. Generate shaders
+  with the unchanged canonical tools in the build-only Ubuntu stage; copy only
+  canonical-manifest-verified data into Debian. The consumer rejects changed
+  source commits or shader inputs. Never repurpose this target as a coordinator.
 - `classic-final` is the slim Classic Check target. Keep its Ubuntu snapshot,
   direct package lock, tool inventory, non-root ccache mount, Classic validation
   revision, shader-toolchain inventory, GPU runtime, smoke/SBOM checks, and
@@ -40,7 +47,8 @@
   must never move a rolling, platform, or version tag.
 - Every semantic release publishes the broad Linux, slim Linux Classic,
   general Windows, and task-focused Windows Classic images with their
-  supported tags. The Linux publisher owns `linux-build` and `classic-build`;
+  supported tags. The Linux publisher owns `linux-build`, `classic-build`, and
+  `classic-portable-build`;
   the Windows publisher owns both `windows-build` variants. Keep the
   `classic-check` target branched from the expensive shared MXE foundation
   before general-image Python/worldmaker additions, preserve the general

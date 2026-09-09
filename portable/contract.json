@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "platform": "linux/amd64",
+  "target": "portable-final",
+  "image": "ghcr.io/atrinik/classic-portable-build",
+  "base": {
+    "image": "debian:bookworm-slim",
+    "digest": "sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867",
+    "apt_snapshot": "20260901T000000Z",
+    "glibc": "2.36"
+  },
+  "compiler": {
+    "c_standard": 17,
+    "cflags": "-O2 -march=x86-64 -mtune=generic",
+    "cxxflags": "-O2 -march=x86-64 -mtune=generic",
+    "cpu": "x86-64"
+  },
+  "prefix": "/usr/local",
+  "metadata_directory": "/opt/atrinik-portable",
+  "sources": [
+    {
+      "name": "openssl",
+      "version": "3.5.5",
+      "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.5/openssl-3.5.5.tar.gz",
+      "sha256": "b28c91532a8b65a1f983b4c28b7488174e4a01008e29ce8e69bd789f28bc2a89",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "sdl3",
+      "version": "3.4.2",
+      "url": "https://github.com/libsdl-org/SDL/releases/download/release-3.4.2/SDL3-3.4.2.tar.gz",
+      "sha256": "ef39a2e3f9a8a78296c40da701967dd1b0d0d6e267e483863ce70f8a03b4050c",
+      "license": "Zlib"
+    },
+    {
+      "name": "sdl3-image",
+      "version": "3.4.0",
+      "url": "https://github.com/libsdl-org/SDL_image/releases/download/release-3.4.0/SDL3_image-3.4.0.tar.gz",
+      "sha256": "2ceb75eab4235c2c7e93dafc3ef3268ad368ca5de40892bf8cffdd510f29d9d8",
+      "license": "Zlib"
+    },
+    {
+      "name": "sdl3-ttf",
+      "version": "3.2.2",
+      "url": "https://github.com/libsdl-org/SDL_ttf/releases/download/release-3.2.2/SDL3_ttf-3.2.2.tar.gz",
+      "sha256": "63547d58d0185c833213885b635a2c0548201cc8f301e6587c0be1a67e1e045d",
+      "license": "Zlib"
+    }
+  ],
+  "audio_manifest": "audio-toolchain.json",
+  "shader_manifest": "classic-shader-toolchain.json",
+  "consumer": {
+    "repository": "atrinik/classic",
+    "commit": "8b920dffa0f5c161e9310b334df1cf48fbf15a36",
+    "shader_directory": "/opt/atrinik-portable/shaders",
+    "cmake_argument": "ATRINIK_GPU_SHADER_DIRECTORY",
+    "input_verification": "exact-source-commit-and-shader-input-sha256",
+    "shader_generation_record": "/opt/atrinik-portable/shader-generation.json"
+  },
+  "pkg_config": {
+    "libcurl": "7.88.1",
+    "libidn2": "2.3.3",
+    "libxml-2.0": "2.9.14",
+    "openssl": "3.5.5",
+    "sdl3": "3.4.2",
+    "sdl3-image": "3.4.0",
+    "sdl3-mixer": "3.2.4",
+    "sdl3-ttf": "3.2.2",
+    "zlib": "1.2.13"
+  },
+  "runtime": {
+    "image_codecs": [
+      "ANI",
+      "BMP",
+      "GIF",
+      "JPEG",
+      "LBM",
+      "PCX",
+      "PNG",
+      "PNM",
+      "QOI",
+      "SVG",
+      "TGA",
+      "WEBP",
+      "XCF",
+      "XPM",
+      "XV"
+    ],
+    "audio_codecs": [
+      "WAV",
+      "STBVORBIS",
+      "OPUS",
+      "DRMP3"
+    ],
+    "providers": [
+      "/usr/local/lib/ossl-modules/legacy.so"
+    ],
+    "host_interfaces": [
+      "kernel",
+      "display-server",
+      "audio-server",
+      "graphics-driver"
+    ],
+    "graphics_loaders": [
+      "libEGL.so.1",
+      "libGL.so.1",
+      "libvulkan.so.1"
+    ],
+    "bundled_graphics_drivers": false,
+    "sdl_provider_linkage": "Direct DT_NEEDED linkage for available X11, Wayland, ALSA and PulseAudio client libraries; KMSDRM, libdecor, PipeWire, JACK, IBus, Fcitx and udev disabled. Graphics driver discovery remains external."
+  },
+  "redistribution": {
+    "source_archives": "/opt/atrinik-portable/sources",
+    "notices": "/opt/atrinik-portable/notices",
+    "debian_notices": "/usr/share/doc",
+    "debian_source_metadata": "/opt/atrinik-portable/debian-sources.json",
+    "obligations": "Preserve notices and source archives; provide corresponding Debian sources from the recorded snapshot and source versions. Keep shared LGPL libraries replaceable; retain build recipes and permit relinking. Host drivers are external.",
+    "runtime_corresponding_sources": "/opt/atrinik-portable/runtime-sources.json"
+  }
+}

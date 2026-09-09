@@ -15,6 +15,7 @@ jobs:
     name: Select changed images
     runs-on: ubuntu-26.04
     outputs:
+      portable: ${{ steps.changes.outputs.portable }}
       classic: ${{ steps.changes.outputs.classic }}
       linux: ${{ steps.changes.outputs.linux }}
       windows: ${{ steps.changes.outputs.windows }}
@@ -30,10 +31,21 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          portable=false
           classic=false
           linux=false
           windows=false
           while IFS= read -r path; do
+            case "${path}" in
+            .dockerignore | .github/actionlint.yaml | .github/workflows/* | \
+                portable/* | classic-packages.lock | \
+                classic-shader-toolchain.json | classic-shader-toolchain.spdx.json | \
+                audio-toolchain.json | audio-toolchain.spdx.json | tools/audio/* | \
+                tools/build-sdl3-mixer.sh | tools/install_classic_shader_toolchain.py | \
+                tools/require-image-checks.sh | tools/test-require-image-checks.sh)
+              portable=true
+              ;;
+            esac
             case "${path}" in
             .dockerignore | .github/actionlint.yaml | \
                 .github/workflows/* | linux/* | \
@@ -97,10 +109,14 @@ jobs:
             esac
           done < <(git diff --no-renames --name-only "${BASE_SHA}" "${HEAD_SHA}")
           {
+            echo "portable=${portable}"
             echo "classic=${classic}"
             echo "linux=${linux}"
             echo "windows=${windows}"
           } >> "${GITHUB_OUTPUT}"
+
+      - name: Test portable ABI checks
+        run: python3 -m unittest discover -s portable -p 'test_*.py'
 
       - name: Test required-check aggregation
         run: tools/test-require-image-checks.sh
@@ -407,10 +423,85 @@ jobs:
             atrinik-classic-build:validation \
             /image-source/tools/validate-classic-check.sh /workspace
 
+  portable:
+    name: Portable Classic image
+    needs: changes
+    if: needs.changes.outputs.portable == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - name: Check out image sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Read immutable portable consumer
+        id: consumer
+        run: echo "commit=$(jq -er '.consumer.commit' portable/contract.json)" >> "${GITHUB_OUTPUT}"
+
+      - name: Check out immutable Classic sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: atrinik/classic
+          ref: ${{ steps.consumer.outputs.commit }}
+          path: build/portable-classic
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Check portable Dockerfile
+        run: docker build --check --file portable/Dockerfile .
+
+      - name: Build and smoke baseline as non-root
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: portable/Dockerfile
+          target: portable-validation
+          platforms: linux/amd64
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=classic-portable-build-image
+          cache-to: type=gha,mode=max,scope=classic-portable-build-image,ignore-error=true
+
+      - name: Load portable image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: portable/Dockerfile
+          target: portable-final
+          platforms: linux/amd64
+          load: true
+          tags: atrinik-classic-portable:validation
+          cache-from: type=gha,scope=classic-portable-build-image
+
+      - name: Build and test real non-root Classic client on the baseline
+        run: |
+          install -d build/portable-reports
+          docker run --rm --network none \
+            --user "$(id -u):$(id -g)" --env HOME=/tmp/portable-home \
+            --volume "${GITHUB_WORKSPACE}/build/portable-classic:/classic:ro" \
+            --volume "${GITHUB_WORKSPACE}/build/portable-reports:/reports" \
+            atrinik-classic-portable:validation \
+            /opt/atrinik-portable/consumer.sh /classic /reports
+
+      - name: Retain portable consumer and ABI evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: classic-portable-consumer-evidence
+          path: build/portable-reports
+          if-no-files-found: error
+          retention-days: 7
+
   required:
     name: Required checks
     needs:
       - changes
+      - portable
       - classic
       - linux
       - windows
@@ -427,6 +518,8 @@ jobs:
 
       - name: Require successful applicable validations
         env:
+          PORTABLE_SELECTED: ${{ needs.changes.outputs.portable }}
+          PORTABLE_RESULT: ${{ needs.portable.result }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           CLASSIC_SELECTED: ${{ needs.changes.outputs.classic }}
           CLASSIC_RESULT: ${{ needs.classic.result }}
@@ -441,4 +534,5 @@ jobs:
             "${CLASSIC_SELECTED}" "${CLASSIC_RESULT}" \
             "${LINUX_SELECTED}" "${LINUX_RESULT}" \
             "${WINDOWS_SELECTED}" "${WINDOWS_RESULT}" \
-            "${WINDOWS_NATIVE_RESULT}"
+            "${WINDOWS_NATIVE_RESULT}" \
+            "${PORTABLE_SELECTED}" "${PORTABLE_RESULT}"

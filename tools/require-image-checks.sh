@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 8 ]]; then
-  echo "Usage: $0 CHANGES CLASSIC_SELECTED CLASSIC_RESULT LINUX_SELECTED LINUX_RESULT WINDOWS_SELECTED WINDOWS_RESULT WINDOWS_NATIVE_RESULT" >&2
+if [[ $# -ne 10 ]]; then
+  echo "Usage: $0 CHANGES CLASSIC_SELECTED CLASSIC_RESULT LINUX_SELECTED LINUX_RESULT WINDOWS_SELECTED WINDOWS_RESULT WINDOWS_NATIVE_RESULT PORTABLE_SELECTED PORTABLE_RESULT" >&2
   exit 2
 fi
 
@@ -14,6 +14,8 @@ linux_result=$5
 windows_selected=$6
 windows_result=$7
 windows_native_result=$8
+portable_selected=$9
+portable_result=${10}
 
 if [[ ${changes_result} != success ]]; then
   echo "Change selection concluded ${changes_result}." >&2
@@ -44,3 +46,5 @@ require_result LINUX "${linux_selected}" "${linux_result}"
 require_result WINDOWS "${windows_selected}" "${windows_result}"
 require_result "Native Windows" "${windows_selected}" \
   "${windows_native_result}"
+
+require_result PORTABLE "${portable_selected}" "${portable_result}"

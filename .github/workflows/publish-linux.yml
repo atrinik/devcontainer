@@ -109,6 +109,60 @@ jobs:
             type=gha,scope=classic-build-image
           cache-to: type=gha,mode=max,scope=classic-build-image,ignore-error=true
 
+      # The portable target has its own ABI and real consumer; validate it before aliases move.
+      - name: Read portable consumer revision
+        if: ${{ !inputs.candidate_only }}
+        id: portable-consumer
+        run: echo "commit=$(jq -er '.consumer.commit' portable/contract.json)" >> "${GITHUB_OUTPUT}"
+
+      - name: Check out portable Classic consumer
+        if: ${{ !inputs.candidate_only }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: atrinik/classic
+          ref: ${{ steps.portable-consumer.outputs.commit }}
+          path: build/portable-classic
+          persist-credentials: false
+
+      - name: Check portable Dockerfile
+        if: ${{ !inputs.candidate_only }}
+        run: docker build --check --file portable/Dockerfile .
+
+      - name: Validate portable baseline
+        if: ${{ !inputs.candidate_only }}
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: portable/Dockerfile
+          target: portable-validation
+          platforms: linux/amd64
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=classic-portable-build-image
+          cache-to: type=gha,mode=max,scope=classic-portable-build-image,ignore-error=true
+
+      - name: Load portable release candidate
+        if: ${{ !inputs.candidate_only }}
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: portable/Dockerfile
+          target: portable-final
+          platforms: linux/amd64
+          load: true
+          tags: atrinik-classic-portable:release-validation
+          cache-from: type=gha,scope=classic-portable-build-image
+
+      - name: Validate real portable consumer before publication
+        if: ${{ !inputs.candidate_only }}
+        run: |
+          install -d build/portable-reports
+          docker run --rm --network none \
+            --user "$(id -u):$(id -g)" --env HOME=/tmp/portable-home \
+            --volume "${GITHUB_WORKSPACE}/build/portable-classic:/classic:ro" \
+            --volume "${GITHUB_WORKSPACE}/build/portable-reports:/reports" \
+            atrinik-classic-portable:release-validation \
+            /opt/atrinik-portable/consumer.sh /classic /reports
+
       - name: Build and publish Linux image
         if: ${{ !inputs.candidate_only }}
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
@@ -150,3 +204,36 @@ jobs:
           cache-to: |
             type=inline
             type=gha,mode=max,scope=classic-build-image,ignore-error=true
+
+      - name: Publish immutable portable candidate
+        if: ${{ !inputs.candidate_only }}
+        id: portable-publish
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: portable/Dockerfile
+          target: portable-final
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/classic-portable-build:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=classic-portable-build-image
+
+      - name: Promote validated portable aliases
+        if: ${{ !inputs.candidate_only }}
+        env:
+          PORTABLE_DIGEST: ${{ steps.portable-publish.outputs.digest }}
+        run: |
+          [[ "${PORTABLE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/classic-portable-build"
+          tags=(--tag "${image}:latest" --tag "${image}:debian-12")
+          if [[ "${GITHUB_REF_TYPE}" == tag ]]; then
+            [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            tags+=(--tag "${image}:${GITHUB_REF_NAME#v}")
+          fi
+          docker buildx imagetools create "${tags[@]}" "${image}@${PORTABLE_DIGEST}"
+          printf '%s@%s\n' "${image}" "${PORTABLE_DIGEST}" >> "${GITHUB_STEP_SUMMARY}"
