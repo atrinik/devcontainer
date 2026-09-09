@@ -20,10 +20,12 @@ done < "${root}/shader-inputs.txt"
 "${root}/smoke.sh"
 work=$(mktemp -d)
 trap 'rm -rf -- "${work}"' EXIT
+# Resolve pinned providers through the baseline loader cache; omit transient
+# CMake build-tree RPATH padding, whose empty entries mean the current directory.
 cmake -S "${source}" -B "${work}/build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
   -DATRINIK_BUILD_CLIENT=ON -DATRINIK_BUILD_SERVER=OFF \
-  -DBUILD_TESTING=ON -DPACKAGE_TYPE=none \
+  -DBUILD_TESTING=ON -DPACKAGE_TYPE=none -DCMAKE_SKIP_RPATH=ON \
   -DATRINIK_GPU_SHADER_DIRECTORY="${root}/shaders" \
   '-DCMAKE_C_FLAGS=-march=x86-64 -mtune=generic'
 cmake --build "${work}/build" --parallel 2

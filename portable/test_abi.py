@@ -119,6 +119,17 @@ class Symbols(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "missing dlopen feature"):
                     abi.audit([Path("/usr/local/lib/libSDL3.so.0.4.2")])
 
+    def test_empty_loader_search_entry_is_rejected(self):
+        def read(*args):
+            if "-h" in args:
+                return "ELF64 little endian Advanced Micro Devices X86-64"
+            if "-d" in args:
+                return "(RUNPATH) Library runpath: [/usr/local/lib:]"
+            return ""
+        with patch.object(abi, "output", side_effect=read):
+            with self.assertRaisesRegex(ValueError, "unsupported loader search path"):
+                abi.elf(Path("/candidate"))
+
     def test_loader_missing_dependency_is_failure(self):
         info = dict(needed=[], paths=[], defined=set(), required=set(), required_providers={})
         with patch.object(abi, "elf", return_value=info), patch.object(abi.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "libmissing.so => not found", "")):
