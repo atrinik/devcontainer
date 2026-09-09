@@ -36,6 +36,26 @@ def symbols(text: str) -> tuple[set[str], set[str]]:
     return defined, required
 
 
+def symbol_providers(text: str, versions: dict[int, str]) -> dict[str, dict]:
+    result = {}
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) < 8 or not fields[0].rstrip(":").isdigit():
+            continue
+        if fields[4] != "GLOBAL" or fields[6] != "UND" or "@" not in fields[7]:
+            continue
+        match = re.search(r"\((\d+)\)$", line)
+        index = int(match[1]) if match else None
+        if index not in versions:
+            raise ValueError(f"missing ELF symbol version provider: {fields[7]}")
+        name = fields[7].replace("@@", "@")
+        binding = {"version_index": index, "provider": versions[index]}
+        if name in result and result[name] != binding:
+            raise ValueError(f"ambiguous ELF symbol version provider: {name}")
+        result[name] = binding
+    return result
+
+
 def section_bytes(path: Path, name: str) -> bytes:
     sections = output("readelf", "-SW", str(path))
     if not re.search(r"\]\s+" + re.escape(name) + r"\s", sections):
@@ -141,14 +161,21 @@ def elf(path: Path) -> dict:
         match = re.search(r"Name: (\S+)", line)
         if match and provider:
             version = match[1]
-            version_providers[version] = provider
+            index = re.search(r"Version: (\d+)", line)
+            if index:
+                number = int(index[1])
+                if number in version_providers and version_providers[number] != provider:
+                    raise ValueError(f"ambiguous ELF version index: {number}")
+                version_providers[number] = provider
             if version.startswith("GLIBC_") and version != "GLIBC_PRIVATE":
                 value = version.removeprefix("GLIBC_")
                 if value[0].isdigit() and tuple(map(int, value.split("."))) > (2, 36):
                     raise ValueError(f"newer glibc requirement: {path}: {version}")
-    defined, required = symbols(output("readelf", "--dyn-syms", "--wide", str(path)))
+    dynamic_symbols = output("readelf", "--dyn-syms", "--wide", str(path))
+    defined, required = symbols(dynamic_symbols)
+    required_providers = symbol_providers(dynamic_symbols, version_providers)
     return dict(needed=needed, paths=paths, defined=defined, required=required,
-                version_providers=version_providers, dlopen=loaders, gnu_property_present=bool(properties))
+                required_providers=required_providers, dlopen=loaders, gnu_property_present=bool(properties))
 
 
 def resolve(name: str, paths: list[Path]) -> Path:
@@ -196,8 +223,7 @@ def audit(roots: list[Path]) -> dict:
     for path, value in graph.items():
         for symbol in value["required"]:
             if "@" in symbol:
-                version = symbol.split("@", 1)[1]
-                provider = value["version_providers"].get(version)
+                provider = value["required_providers"].get(symbol, {}).get("provider")
                 resolved = value["providers"].get(provider)
                 if resolved is None or symbol not in graph[resolved]["defined"]:
                     raise ValueError(f"unmet versioned provider symbol: {path}: {symbol}: {provider}")
@@ -216,6 +242,7 @@ def audit(roots: list[Path]) -> dict:
                  "gnu_property_present": value.get("gnu_property_present", False),
                  "dlopen": value.get("dlopen", []),
                  "dlopen_providers": {feature: [str(p) for p in paths] for feature, paths in value["dlopen_providers"].items()},
+                 "required_providers": value["required_providers"],
                  "required_symbols": sorted(value["required"])}
                 for path, value in sorted(graph.items())]}
 
