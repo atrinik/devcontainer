@@ -123,6 +123,23 @@ def audit(roots: list[Path]) -> dict:
                 for path, value in sorted(graph.items())]}
 
 
+def default_roots(contract: dict) -> list[Path]:
+    roots = sorted({p.resolve() for p in Path("/usr/local/lib").glob("*.so*") if p.is_file()})
+    roots += [Path(p) for p in contract["runtime"]["providers"]]
+    roots += [resolve(name, []) for name in [*contract["runtime"]["application_libraries"], *contract["runtime"]["graphics_loaders"]]]
+    return sorted(set(roots))
+
+
+def require_consumer_coverage(consumer: dict, image: dict) -> None:
+    provided = {entry["path"]: entry["sha256"] for entry in image["objects"]}
+    consumer_roots = {str(Path(path).resolve()) for path in consumer["roots"]}
+    for entry in consumer["objects"]:
+        if entry["path"] in consumer_roots:
+            continue
+        if provided.get(entry["path"]) != entry["sha256"]:
+            raise ValueError(f"consumer dependency absent or changed in image source closure: {entry['path']}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
@@ -131,10 +148,11 @@ def main() -> None:
     contract = json.loads((ROOT / "contract.json").read_text())
     roots = list(args.elf)
     if not roots:
-        roots = sorted({p.resolve() for p in Path("/usr/local/lib").glob("*.so*") if p.is_file()})
-        roots += [Path(p) for p in contract["runtime"]["providers"]]
-        roots += [resolve(name, []) for name in contract["runtime"]["graphics_loaders"]]
-    args.output.write_text(json.dumps(audit(roots), indent=2) + "\n")
+        roots = default_roots(contract)
+    result = audit(roots)
+    if args.elf:
+        require_consumer_coverage(result, json.loads((ROOT / "runtime-abi.json").read_text()))
+    args.output.write_text(json.dumps(result, indent=2) + "\n")
 
 
 if __name__ == "__main__":

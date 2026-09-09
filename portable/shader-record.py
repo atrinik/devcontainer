@@ -2,6 +2,7 @@
 """Bind the generated shader data to the exact higher-ABI build-only inputs."""
 import hashlib
 import json
+import shutil
 from pathlib import Path
 import subprocess
 
@@ -10,8 +11,12 @@ shader = Path("/cohort/shaders")
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
-paths = subprocess.check_output(["git", "-C", str(source), "ls-files", "-z", "client/shaders", "client/tools/generate_gpu_shaders.sh", "client/tools/write_gpu_shader_manifest.py", "client/tools/embed_gpu_shaders.py"]).decode().split("\0")
+paths = subprocess.check_output(["git", "-C", str(source), "ls-files", "-z", "client/shaders", "client/tools/generate_gpu_shaders.sh", "client/tools/write_gpu_shader_manifest.py", "client/tools/embed_gpu_shaders.py", "LICENSE.md", "ATTRIBUTIONS.md", "PROVENANCE.md"]).decode().split("\0")
 inputs = {name: digest(source / name) for name in sorted(filter(None, paths))}
+for name in inputs:
+    target = Path("/cohort/corresponding-source") / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source / name, target)
 Path("/cohort/input-sha256.txt").write_text("".join(f"{value}  {source / name}\n" for name, value in inputs.items()))
 record = {"schema_version": 1,
           "source_commit": subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip(),

@@ -433,8 +433,10 @@ coordinates, source archives, notices, and shader-generation record under
 Debian packages provide the baseline transitive libraries. Compiler flags use
 `-march=x86-64 -mtune=generic`. Verification checks actual ELF dependency
 providers, versioned symbols, loader relocations and CPU notes, plus device-free
-image/font decoding, audio decoding and OpenSSL provider loading. Graphics
-loaders are application dependencies; host graphics drivers stay external.
+image/font decoding, audio decoding and OpenSSL provider loading. The
+Vulkan loader is an application dependency; host graphics drivers stay external.
+Unused OpenGL/OpenGL ES backends are disabled so Debian Mesa driver packages are
+not pulled into this Classic SDL_GPU build target.
 
 Automatic PR CI explicitly selects `Portable Classic image`, builds/checks the
 Dockerfile without registry credentials, runs non-root smoke, and compiles and

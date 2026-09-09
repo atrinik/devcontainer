@@ -2,6 +2,8 @@
 set -euo pipefail
 root=/opt/atrinik-portable
 test "$(id -u)" != 0
+test ! -d /usr/lib/x86_64-linux-gnu/dri
+test ! -d /usr/lib/dri
 test ! -e /usr/local/bin/dxc
 test ! -e /usr/local/lib/libdxcompiler.so
 test ! -e /usr/local/lib/libdxil.so

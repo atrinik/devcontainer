@@ -65,7 +65,7 @@ def main() -> None:
     notices = ROOT / "notices"
     notices.mkdir(exist_ok=True)
     options = {
-        "sdl3": ["-DSDL_DEPS_SHARED=OFF", "-DSDL_KMSDRM=OFF", "-DSDL_LIBDECOR=OFF", "-DSDL_TESTS=OFF", "-DSDL_TEST_LIBRARY=OFF", "-DSDL_STATIC=OFF",
+        "sdl3": ["-DSDL_OPENGL=OFF", "-DSDL_OPENGLES=OFF", "-DSDL_VULKAN=ON", "-DSDL_DEPS_SHARED=OFF", "-DSDL_KMSDRM=OFF", "-DSDL_LIBDECOR=OFF", "-DSDL_TESTS=OFF", "-DSDL_TEST_LIBRARY=OFF", "-DSDL_STATIC=OFF",
                  "-DSDL_ALSA_SHARED=OFF", "-DSDL_PULSEAUDIO_SHARED=OFF",
                  "-DSDL_X11_SHARED=OFF", "-DSDL_WAYLAND_SHARED=OFF",
                  "-DSDL_JACK=OFF", "-DSDL_PIPEWIRE=OFF", "-DSDL_IBUS=OFF",

@@ -4,12 +4,19 @@ FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914
 ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive
 COPY classic-packages.lock /tmp/classic-packages.lock
+# Match the canonical signed-APT CA bootstrap; restore TLS verification immediately.
 RUN test "${TARGETARCH}" = amd64 \
-    && sed -i -e 's|http://archive.ubuntu.com/ubuntu/|http://snapshot.ubuntu.com/ubuntu/20260810T000000Z/|' \
-        -e 's|http://security.ubuntu.com/ubuntu/|http://snapshot.ubuntu.com/ubuntu/20260810T000000Z/|' \
+    && sed -i -e 's|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260810T000000Z/|' \
+        -e 's|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260810T000000Z/|' \
         /etc/apt/sources.list.d/ubuntu.sources \
     && sed -i '/^Signed-By:/a Check-Valid-Until: no' /etc/apt/sources.list.d/ubuntu.sources \
-    && apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any -o Acquire::https::Verify-Peer=false update \
+    && awk -F= '$1 == "ca-certificates" || $1 == "libssl3t64" || $1 == "openssl" || $1 == "openssl-provider-legacy" { print }' \
+        /tmp/classic-packages.lock > /tmp/ca-bootstrap.lock \
+    && xargs apt-get -o Acquire::Retries=5 -o Acquire::https::Verify-Peer=false \
+        install -y --no-install-recommends < /tmp/ca-bootstrap.lock \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update \
     && xargs apt-get -o Acquire::Retries=5 install -y --no-install-recommends < /tmp/classic-packages.lock \
     && rm -rf /var/lib/apt/lists/*
 COPY classic-shader-toolchain.json /opt/shader-toolchain.json
@@ -51,11 +58,11 @@ RUN test "${TARGETARCH}" = amd64 \
       'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260901T000000Z bookworm-updates main' \
       'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260901T000000Z bookworm-security main' \
       > /etc/apt/sources.list \
-    && apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update \
     && xargs apt-get -o Acquire::Retries=5 install -y --no-install-recommends < /tmp/portable-packages.lock \
     && sed -i 's|http://snapshot.debian.org|https://snapshot.debian.org|g' /etc/apt/sources.list \
     && sed 's/^deb /deb-src /' /etc/apt/sources.list >> /etc/apt/sources.list.d/portable-source.list \
-    && apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update \
     && useradd --create-home --uid 1000 --shell /bin/bash ubuntu
 COPY portable /opt/atrinik-portable
 COPY audio-toolchain.json audio-toolchain.spdx.json classic-shader-toolchain.json classic-shader-toolchain.spdx.json /opt/atrinik-portable/
@@ -70,6 +77,7 @@ RUN python3 /opt/atrinik-portable/build.py \
 COPY --from=portable-shaders /cohort/shaders /opt/atrinik-portable/shaders
 COPY --from=portable-shaders /cohort/input-sha256.txt /opt/atrinik-portable/shader-inputs.txt
 COPY --from=portable-shaders /cohort/generation.json /opt/atrinik-portable/shader-generation.json
+COPY --from=portable-shaders /cohort/corresponding-source /opt/atrinik-portable/sources/classic-shaders
 # Build-time shader licenses/provenance accompany the generated cohort; no Ubuntu ELF.
 COPY --from=portable-shaders /usr/local/share/licenses /opt/atrinik-portable/notices/shader-tools
 USER ubuntu

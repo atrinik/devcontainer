@@ -5,13 +5,11 @@ import json
 from pathlib import Path
 import subprocess
 
-from abi import audit, resolve
+from abi import audit, default_roots
 
 root = Path(__file__).resolve().parent
 contract = json.loads((root / "contract.json").read_text())
-roots = sorted({p.resolve() for p in Path("/usr/local/lib").glob("*.so*") if p.is_file()})
-roots += [Path(p) for p in contract["runtime"]["providers"]]
-roots += [resolve(name, []) for name in contract["runtime"]["graphics_loaders"]]
+roots = default_roots(contract)
 closure = audit(roots)
 (root / "runtime-abi.json").write_text(json.dumps(closure, indent=2) + "\n")
 packages = {p["package"]: p for p in json.loads((root / "debian-sources.json").read_text())}

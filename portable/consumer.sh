@@ -13,7 +13,8 @@ test "$(git -C "${source}" rev-parse HEAD)" = "${expected}"
 test -z "$(git -C "${source}" status --porcelain --untracked-files=normal)"
 while read -r expected_hash input; do
   relative=${input#/cohort/source/}
-  [[ ${relative} == client/* && ${relative} != *..* ]]
+  [[ ${relative} != *..* && ${relative} != /* ]]
+  case "${relative}" in client/* | LICENSE.md | ATTRIBUTIONS.md | PROVENANCE.md) ;; *) exit 1 ;; esac
   printf '%s  %s\n' "${expected_hash}" "${source}/${relative}" | sha256sum -c -
 done < "${root}/shader-inputs.txt"
 "${root}/smoke.sh"

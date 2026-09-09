@@ -32,6 +32,20 @@ class Symbols(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unmet versioned provider symbol"):
                 abi.audit([first])
 
+    def test_consumer_dependency_must_have_corresponding_image_closure(self):
+        image = {"objects": [{"path": "/lib/libc.so.6", "sha256": "libc"}]}
+        consumer = {"roots": ["/client"], "objects": [
+            {"path": "/client", "sha256": "client"},
+            {"path": "/lib/libc.so.6", "sha256": "libc"},
+            {"path": "/lib/libcurl.so.4", "sha256": "curl"}]}
+        with self.assertRaisesRegex(ValueError, "absent or changed"):
+            abi.require_consumer_coverage(consumer, image)
+        image["objects"].append({"path": "/lib/libcurl.so.4", "sha256": "curl"})
+        abi.require_consumer_coverage(consumer, image)
+        image["objects"][-1]["sha256"] = "changed"
+        with self.assertRaisesRegex(ValueError, "absent or changed"):
+            abi.require_consumer_coverage(consumer, image)
+
     def test_newer_glibc_requirement_is_rejected(self):
         def read(*args):
             if "-h" in args:
