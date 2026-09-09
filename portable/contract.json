@@ -102,17 +102,29 @@
       "graphics-driver"
     ],
     "graphics_loaders": [
-      "libvulkan.so.1"
+      "libvulkan.so.1",
+      "libX11-xcb.so.1"
     ],
     "bundled_graphics_drivers": false,
-    "sdl_provider_linkage": "Direct DT_NEEDED linkage for available X11, Wayland, ALSA and PulseAudio client libraries; KMSDRM, libdecor, PipeWire, JACK, IBus, Fcitx and udev disabled. Graphics driver discovery remains external.",
+    "sdl_provider_linkage": "Direct DT_NEEDED linkage for X11, ALSA and PulseAudio; declared D-Bus and X11/Vulkan loaders included. Wayland, KMSDRM, libdecor, PipeWire, JACK, IBus, Fcitx and udev disabled. Graphics driver discovery remains external.",
     "application_libraries": [
       "libcurl.so.4",
       "libidn2.so.0",
       "libxml2.so.2",
-      "libz.so.1"
+      "libz.so.1",
+      "libdbus-1.so.3"
     ],
-    "graphics_backend": "SDL_GPU Vulkan; unused OpenGL/OpenGL ES backends disabled to avoid Debian Mesa-driver package dependencies"
+    "graphics_backend": "SDL_GPU Vulkan; unused OpenGL/OpenGL ES backends disabled to avoid Debian Mesa-driver package dependencies",
+    "unsupported_dlopen_features": [
+      {
+        "object": "/usr/local/lib/libSDL3.so.0.4.2",
+        "feature": "storage-steam",
+        "soname": [
+          "libsteam_api.so"
+        ],
+        "reason": "Classic does not use the SDL Steam user-storage API; Steam integration is unsupported and its proprietary provider is not included."
+      }
+    ]
   },
   "redistribution": {
     "source_archives": "/opt/atrinik-portable/sources",

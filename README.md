@@ -434,7 +434,12 @@ Debian packages provide the baseline transitive libraries. Compiler flags use
 `-march=x86-64 -mtune=generic`. Verification checks actual ELF dependency
 providers, versioned symbols, loader relocations and CPU notes, plus device-free
 image/font decoding, audio decoding and OpenSSL provider loading. The
-Vulkan loader is an application dependency; host graphics drivers stay external.
+Vulkan, X11-XCB and D-Bus loaders receive the same recursive ABI and source
+checks as linked dependencies. FDO dlopen notes are parsed independently of GNU
+CPU properties for compatibility with Debian 12 binutils. X11 is the supported
+display backend; host graphics drivers stay external. SDL Steam user storage is
+unsupported by this Classic target; its exact SDL feature/provider declaration
+is recorded as excluded in the contract.
 Unused OpenGL/OpenGL ES backends are disabled so Debian Mesa driver packages are
 not pulled into this Classic SDL_GPU build target.
 

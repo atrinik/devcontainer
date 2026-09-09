@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import subprocess
+import struct
 import unittest
 from unittest.mock import patch
 
@@ -49,7 +50,7 @@ class Symbols(unittest.TestCase):
     def test_newer_glibc_requirement_is_rejected(self):
         def read(*args):
             if "-h" in args:
-                return "ELF64 Advanced Micro Devices X86-64"
+                return "ELF64 little endian Advanced Micro Devices X86-64"
             if "--version-info" in args:
                 return "Version needs section\n File: libc.so.6\n Name: GLIBC_2.38\n"
             return ""
@@ -57,12 +58,36 @@ class Symbols(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "newer glibc requirement"):
                 abi.elf(Path("/candidate"))
 
-    def test_newer_cpu_note_is_rejected(self):
-        def read(*args):
-            return "ELF64 Advanced Micro Devices X86-64" if "-h" in args else "x86 ISA needed: x86-64-v3\n"
-        with patch.object(abi, "output", side_effect=read):
+    def test_cpu_notes_allow_baseline_and_absent_reject_newer_and_malformed(self):
+        def note(mask):
+            return struct.pack("<IIIIIIII", 4, 16, 5, 0x00554e47, 0xc0008002, 4, mask, 0)
+        abi.cpu_notes(b"")
+        abi.cpu_notes(note(1))
+        for mask in (2, 4, 8, 0x80000000):
             with self.assertRaisesRegex(ValueError, "newer CPU ISA"):
-                abi.elf(Path("/candidate"))
+                abi.cpu_notes(note(mask))
+        for data in (note(1)[:-1], b"short", struct.pack("<III", 99, 4, 5)):
+            with self.assertRaises(ValueError):
+                abi.cpu_notes(data)
+
+    def test_fdo_notes_validate_headers_json_and_alternative_providers(self):
+        import json
+        entry = {"feature": "x11-vulkan", "soname": ["libvulkan.so.1", "libvulkan.so"]}
+        desc = json.dumps([entry]).encode() + b"\0"
+        data = struct.pack("<III", 4, len(desc), 0x407c0c0a) + b"FDO\0" + desc
+        data += b"\0" * (-len(data) % 4)
+        self.assertEqual(abi.dlopen_notes(data), [entry])
+        for malformed in (data[:-1], data[:12] + b"BAD\0" + data[16:], data[:16] + b"!" + data[17:]):
+            with self.assertRaises((ValueError, UnicodeDecodeError)):
+                abi.dlopen_notes(malformed)
+
+    def test_missing_supported_dlopen_provider_and_changed_exclusion_fail(self):
+        for entry in ({"feature": "x11-vulkan", "soname": ["missing.so"]},
+                      {"feature": "storage-steam", "soname": ["changed.so"]}):
+            info = dict(needed=[], paths=[], defined=set(), required=set(), version_providers={}, dlopen=[entry])
+            with patch.object(abi, "elf", return_value=info), patch.object(abi, "resolve", side_effect=ValueError("missing")):
+                with self.assertRaisesRegex(ValueError, "missing dlopen feature"):
+                    abi.audit([Path("/usr/local/lib/libSDL3.so.0.4.2")])
 
     def test_loader_missing_dependency_is_failure(self):
         info = dict(needed=[], paths=[], defined=set(), required=set(), version_providers={})
