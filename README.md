@@ -409,3 +409,61 @@ the pinned Classic client and server checks as a non-root user.
 The repository's original build configuration and automation are MIT licensed;
 see [LICENSE](LICENSE). Software installed into the published images retains
 its own upstream license.
+
+## Portable Linux Classic baseline
+
+`portable/Dockerfile` provides `portable-final` for Linux/amd64. It builds the
+modern SDL3 family and OpenSSL 3.5 against a digest-pinned Debian 12/glibc 2.36
+base and signed package snapshot. The separate contract is
+[`portable/contract.json`](portable/contract.json). This target does not change
+the canonical Ubuntu coordinator, existing Classic Check, or Windows images.
+
+The canonical DXC payload needs newer glibc than Debian 12. A build-only Ubuntu
+stage uses the unchanged shader-toolchain lock to generate the pinned Classic
+cohort, compares it with the source's canonical manifest, and records input,
+tool, installer and output hashes. Only shader data and notices cross into
+Debian. Consumers must verify the exact source commit and every shader input,
+then pass `/opt/atrinik-portable/shaders` as `ATRINIK_GPU_SHADER_DIRECTORY`.
+Changed source inputs require a reviewed image update; the consumer check fails
+rather than silently regenerating with a different compiler.
+
+The image exposes its contract, actual tool/package versions, Debian source
+coordinates, source archives, notices, and shader-generation record under
+`/opt/atrinik-portable`. Shared application libraries live under `/usr/local`;
+Debian packages provide the baseline transitive libraries. Compiler flags use
+`-march=x86-64 -mtune=generic`. Verification checks actual ELF dependency
+providers, versioned symbols, loader relocations and CPU notes, plus device-free
+image/font decoding, audio decoding and OpenSSL provider loading. The
+Vulkan, X11-XCB and D-Bus loaders receive the same recursive ABI and source
+checks as linked dependencies. FDO dlopen notes are parsed independently of GNU
+CPU properties for compatibility with Debian 12 binutils. X11 is the supported
+display backend; host graphics drivers stay external. Native Wayland is not
+enabled. A Wayland desktop requires an XWayland display route, which remains
+subject to parent integration qualification. SDL Steam user storage is
+unsupported by this Classic target; its exact SDL feature/provider declaration
+is recorded as excluded in the contract.
+Unused OpenGL/OpenGL ES backends are disabled so Debian Mesa driver packages are
+not pulled into this Classic SDL_GPU build target.
+
+Automatic PR CI explicitly selects `Portable Classic image`, builds/checks the
+Dockerfile without registry credentials, runs non-root smoke, and compiles and
+tests the exact Classic consumer offline in the baseline image. `Required
+checks` fails for any selected missing, skipped, cancelled or failed portable
+job. The consumer artifact retains source, compiler, test and ELF evidence.
+These container checks do not qualify hardware gameplay, audible playback or
+relocation across the final Ubuntu/Debian distribution matrix.
+
+After an authorized maintainer merge and semantic release, the Linux publisher
+validates this target and consumer before release aliases move. It publishes
+`classic-portable-build:sha-COMMIT` with SBOM/provenance, then promotes that exact
+digest to `latest`, `debian-12` and the semantic version. Recover a partial
+promotion by rerunning the failed job from the same workflow run. The existing
+`candidate_only` dispatch retains its Classic-only behavior. A dispatch,
+registry push, merge or release is a separate publication action; PR CI performs
+none of them. Consumers select only the actual published immutable manifest
+digest and retain producer-run/source coordinates.
+
+Redistributors must retain the pinned source archives, notices, build recipes,
+and Debian source coordinates and satisfy the corresponding-source and LGPL
+replacement/relinking obligations in the contract. Authored game media remain
+`content@main`, resources and sound inputs owned by their respective repositories.
