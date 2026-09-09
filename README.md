@@ -437,7 +437,9 @@ image/font decoding, audio decoding and OpenSSL provider loading. The
 Vulkan, X11-XCB and D-Bus loaders receive the same recursive ABI and source
 checks as linked dependencies. FDO dlopen notes are parsed independently of GNU
 CPU properties for compatibility with Debian 12 binutils. X11 is the supported
-display backend; host graphics drivers stay external. SDL Steam user storage is
+display backend; host graphics drivers stay external. Native Wayland is not
+enabled. A Wayland desktop requires an XWayland display route, which remains
+subject to parent integration qualification. SDL Steam user storage is
 unsupported by this Classic target; its exact SDL feature/provider declaration
 is recorded as excluded in the contract.
 Unused OpenGL/OpenGL ES backends are disabled so Debian Mesa driver packages are
