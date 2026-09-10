@@ -51,7 +51,7 @@
   "shader_manifest": "classic-shader-toolchain.json",
   "consumer": {
     "repository": "atrinik/classic",
-    "commit": "8b920dffa0f5c161e9310b334df1cf48fbf15a36",
+    "commit": "4998131ad2ae4c9680685fd87e2d85de1dc15fd9",
     "shader_directory": "/opt/atrinik-portable/shaders",
     "cmake_argument": "ATRINIK_GPU_SHADER_DIRECTORY",
     "input_verification": "exact-source-commit-and-shader-input-sha256",
