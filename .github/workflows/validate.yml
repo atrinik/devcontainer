@@ -53,7 +53,7 @@ jobs:
                 classic-vulkan-toolchain.json | \
                 classic-vulkan-toolchain.spdx.json | \
                 classic-vulkan-packages.lock | \
-                toolchains.json | tools/audio/* | \
+                toolchains.json | tools/tests/test_classic_tls.py | tools/audio/* | \
                 tools/build-sdl3-mixer.sh | \
                 tools/install_classic_vulkan_toolchain.py | \
                 tools/require-image-checks.sh | \
@@ -82,6 +82,7 @@ jobs:
                 tools/validate-classic-image.sh | \
                 tools/install_classic_shader_toolchain.py | \
                 tools/tests/test_install_classic_shader_toolchain.py | \
+                tools/tests/test_classic_tls.py | \
                 tools/install_classic_vulkan_toolchain.py | \
                 tools/validate-vulkan-toolchain.sh | \
                 tools/tests/test_install_classic_vulkan_toolchain.py)
@@ -126,6 +127,9 @@ jobs:
 
       - name: Test Classic shader toolchain installer
         run: python3 -m unittest tools/tests/test_install_classic_shader_toolchain.py
+
+      - name: Test Classic TLS toolchain installer
+        run: python3 -m unittest tools/tests/test_classic_tls.py
 
       - name: Test Classic Vulkan toolchain installer
         run: python3 -m unittest tools/tests/test_install_classic_vulkan_toolchain.py

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "platform": "linux/amd64",
+  "prefix": "/opt/atrinik/tls",
+  "openssl": {
+    "version": "4.0.3",
+    "url": "https://github.com/openssl/openssl/releases/download/openssl-4.0.3/openssl-4.0.3.tar.gz",
+    "sha256": "325b5c806167c13b40b1ffeadfe0248197c00eccc4cf123ec1e28d2d2fd216d9",
+    "license": "Apache-2.0"
+  },
+  "curl": {
+    "version": "8.22.0",
+    "url": "https://curl.se/download/curl-8.22.0.tar.xz",
+    "sha256": "f7ef3ae8a22e521f289803fe93543eb64c329b58aa73a9e224dfd915a2a5f4f7",
+    "license": "curl"
+  },
+  "required_api": "SSL_get_peer_addr",
+  "providers": ["default", "legacy"],
+  "required_curl_protocols": ["http", "https"],
+  "required_curl_features": ["SSL", "IDN", "libz"]
+}

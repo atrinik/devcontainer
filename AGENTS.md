@@ -31,6 +31,13 @@
   client. Keep the Linux tool manifests, Classic package lock, non-root version
   checks, and isolated worktree/payload smoke synchronized when changing this
   prerequisite.
+- `linux/tls/manifest.json` owns Classic's private OpenSSL/libcurl cohort at
+  `/opt/atrinik/tls`, shared by broad and slim Linux images. Keep source pins,
+  notices, providers, explicit consumer discovery and runtime search paths
+  coherent; never replace distro TLS packages or globally override their
+  provider/loader configuration. Run its archive tests, upstream QUIC API suite
+  and non-root trusted/untrusted HTTPS/provider smoke. The separately sealed
+  portable producer and Windows MXE contracts remain independent.
 - The public Classic image's shader contract is defined by
   `classic-shader-toolchain.json`: retain the exact DXC/SPIRV-Cross archive and
   source checksums, upstream licenses, and `/usr/local/bin` tool paths. Its

@@ -75,6 +75,157 @@ RUN python3 /tmp/install_classic_vulkan_toolchain.py \
         /tmp/classic-vulkan-toolchain.json \
         /tmp/install_classic_vulkan_toolchain.py
 
+# Classic Check uses a separate task-focused target. It intentionally starts
+# from the pinned Ubuntu base instead of inheriting the replacement toolchain,
+# and resolves packages from a fixed Ubuntu archive snapshot. Its exact CA and
+# TLS runtime packages are bootstrapped first because the minimal base cannot
+# validate the HTTPS snapshot service.
+FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS classic-base
+
+ARG TARGETARCH
+ENV DEBIAN_FRONTEND=noninteractive \
+    UBUNTU_SNAPSHOT=20260810T000000Z
+
+COPY classic-packages.lock /tmp/classic-packages.lock
+# APT still verifies the signed Release metadata and package hashes. Only TLS
+# peer verification is temporarily unavailable in the minimal base.
+# Snapshot package downloads can still fail after per-request retries. Repeat
+# the transaction so successfully fetched archives can be reused.
+RUN test "${TARGETARCH}" = amd64 \
+    && test "$(dpkg --print-architecture)" = amd64 \
+    && retry_command() { \
+        attempt=1; \
+        while test "${attempt}" -le 2; do \
+            if "$@"; then \
+                return 0; \
+            fi; \
+            if test "${attempt}" -eq 2; then \
+                return 1; \
+            fi; \
+            attempt=$((attempt + 1)); \
+            sleep 5; \
+        done; \
+    } \
+    && printf '%s\n' 'Acquire::Retries "5";' \
+        > /etc/apt/apt.conf.d/80-snapshot-retries \
+    && sed -i \
+        -e "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
+        -e "s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
+        /etc/apt/sources.list.d/ubuntu.sources \
+    && sed -i '/^Signed-By:/a Check-Valid-Until: no' \
+        /etc/apt/sources.list.d/ubuntu.sources \
+    && retry_command apt-get -o Acquire::https::Verify-Peer=false update \
+    && awk -F= '$1 == "ca-certificates" \
+            || $1 == "libssl3t64" \
+            || $1 == "openssl" \
+            || $1 == "openssl-provider-legacy" { print }' \
+        /tmp/classic-packages.lock \
+        > /tmp/classic-bootstrap.lock \
+    && retry_command sh -c \
+        'xargs -r apt-get -o Acquire::https::Verify-Peer=false \
+            install -y --no-install-recommends \
+            < /tmp/classic-bootstrap.lock' \
+    && rm -f /tmp/classic-bootstrap.lock \
+    && rm -rf /var/lib/apt/lists/* \
+    && retry_command apt-get update \
+    && retry_command sh -c \
+        'xargs -r apt-get install -y --no-install-recommends \
+            < /tmp/classic-packages.lock' \
+    && rm -f /etc/apt/apt.conf.d/80-snapshot-retries \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
+
+COPY tools/smoke-git-lfs.sh /usr/local/bin/atrinik-git-lfs-smoke
+RUN chmod 0755 /usr/local/bin/atrinik-git-lfs-smoke \
+    && runuser -u ubuntu -- env HOME=/home/ubuntu \
+        bash /usr/local/bin/atrinik-git-lfs-smoke
+
+COPY --from=mesa-dozen \
+    /usr/lib/x86_64-linux-gnu/libvulkan_dzn.so \
+    /usr/lib/x86_64-linux-gnu/libvulkan_dzn.so
+COPY --from=mesa-dozen \
+    /usr/share/vulkan/icd.d/dzn_icd.x86_64.json \
+    /usr/share/vulkan/icd.d/dzn_icd.x86_64.json
+RUN ldconfig
+
+# Classic requires the same checksum-pinned SDL3_mixer contract as the broad
+# Linux image. Its codec dependencies are statically linked into the shared
+# library, while SDL3 and the remaining native libraries come from the frozen
+# Ubuntu package snapshot above.
+COPY audio-toolchain.json /tmp/audio-toolchain.json
+COPY tools/build-sdl3-mixer.sh /tmp/build-sdl3-mixer.sh
+RUN /tmp/build-sdl3-mixer.sh \
+        /tmp/audio-toolchain.json cmake /usr/local "$(nproc)" \
+    && ldconfig \
+    && test "$(pkg-config --modversion sdl3-mixer)" \
+        = "$(jq -r '.sdl_mixer.version' /tmp/audio-toolchain.json)"
+
+COPY tools/audio/opus-probe.opus /usr/local/share/atrinik/audio/opus-probe.opus
+COPY tools/audio/sdl3-mixer-probe.c /tmp/sdl3-mixer-probe.c
+RUN test "$(sha256sum /usr/local/share/atrinik/audio/opus-probe.opus \
+        | cut -d' ' -f1)" \
+        = "$(jq -r '.fixture.sha256' /tmp/audio-toolchain.json)" \
+    && cc -std=c17 -Wall -Wextra -Werror \
+        /tmp/sdl3-mixer-probe.c \
+        -o /usr/local/bin/atrinik-sdl3-mixer-probe \
+        $(pkg-config --cflags --libs sdl3-mixer) \
+    && atrinik-sdl3-mixer-probe \
+        /usr/local/share/atrinik/audio/opus-probe.opus \
+    && rm /tmp/sdl3-mixer-probe.c
+
+# Classic's GPU shader pipeline uses a qualified DXC release and a source
+# snapshot of SPIRV-Cross. Build the latter from its locked archive and retain
+# every upstream license beside the installed tools. The same final image also
+# carries the pinned Lavapipe/Xvfb runtime below for fork-safe GPU coverage.
+COPY classic-shader-toolchain.json /tmp/classic-shader-toolchain.json
+COPY tools/install_classic_shader_toolchain.py \
+    /tmp/install_classic_shader_toolchain.py
+RUN python3 /tmp/install_classic_shader_toolchain.py \
+        --manifest /tmp/classic-shader-toolchain.json \
+        --cache /tmp/classic-shader-downloads \
+        --prefix /usr/local \
+        --jobs "$(nproc)" \
+    && ldconfig \
+    && test -x /usr/local/bin/dxc \
+    && test -x /usr/local/bin/spirv-cross \
+    && dxc --version >/dev/null \
+    && spirv-cross --help >/dev/null 2>&1 \
+    && rm -rf /tmp/classic-shader-downloads \
+        /tmp/classic-shader-toolchain.json \
+        /tmp/install_classic_shader_toolchain.py
+
+ENV CCACHE_DIR=/cache/ccache
+RUN install -d -m 1777 "${CCACHE_DIR}"
+
+COPY classic-toolchain.json /usr/local/share/atrinik/classic-toolchain.json
+COPY classic-packages.lock /usr/local/share/atrinik/classic-packages.lock
+COPY classic-shader-toolchain.json \
+    /usr/local/share/atrinik/classic-shader-toolchain.json
+COPY classic-shader-toolchain.spdx.json \
+    /usr/local/share/atrinik/classic-shader-toolchain.spdx.json
+COPY classic-vulkan-toolchain.json \
+    /usr/local/share/atrinik/classic-vulkan-toolchain.json
+COPY classic-vulkan-toolchain.spdx.json \
+    /usr/local/share/atrinik/classic-vulkan-toolchain.spdx.json
+COPY classic-vulkan-packages.lock \
+    /usr/local/share/atrinik/classic-vulkan-packages.lock
+COPY audio-toolchain.json /usr/local/share/atrinik/audio-toolchain.json
+COPY audio-toolchain.spdx.json /usr/local/share/atrinik/audio-toolchain.spdx.json
+
+USER ubuntu
+WORKDIR /workspace
+
+# One application-only TLS closure is shared by Classic and broad Linux builds.
+# Keep distro TLS packages and their consumers unchanged; Classic explicitly
+# selects this prefix instead of mixing OpenSSL 4 with the distro libcurl.
+FROM classic-base AS classic-tls-build
+USER root
+COPY linux/tls /tmp/classic-tls
+COPY tools/install_classic_shader_toolchain.py /tmp/classic-tls/install_classic_shader_toolchain.py
+RUN python3 /tmp/classic-tls/build.py --cache /tmp/classic-tls-downloads \
+        --build-root /tmp/classic-tls-build --jobs 2 \
+    && runuser -u ubuntu -- python3 /tmp/classic-tls/smoke.py \
+    && rm -rf /tmp/classic-tls-downloads /tmp/classic-tls-build
+
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS toolchain
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -438,6 +589,13 @@ COPY classic-vulkan-toolchain.spdx.json \
 COPY classic-vulkan-packages.lock \
     /usr/local/share/atrinik/classic-vulkan-packages.lock
 
+# This COPY deliberately selects the same qualified application TLS closure as
+# classic-ci without changing system tools' loader or provider configuration.
+COPY --from=classic-tls-build /opt/atrinik/tls /opt/atrinik/tls
+COPY linux/tls /usr/local/share/atrinik/classic-tls
+ENV ATRINIK_CLASSIC_TLS_PREFIX=/opt/atrinik/tls
+RUN runuser -u ubuntu -- python3 /usr/local/share/atrinik/classic-tls/smoke.py
+
 FROM toolchain AS validation
 
 COPY .github/actionlint.yaml /workspace/.github/actionlint.yaml
@@ -503,144 +661,11 @@ RUN actionlint \
             ) \
           '
 
-# Classic Check uses a separate task-focused target. It intentionally starts
-# from the pinned Ubuntu base instead of inheriting the replacement toolchain,
-# and resolves packages from a fixed Ubuntu archive snapshot. Its exact CA and
-# TLS runtime packages are bootstrapped first because the minimal base cannot
-# validate the HTTPS snapshot service.
-FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS classic-ci
-
-ARG TARGETARCH
-ENV DEBIAN_FRONTEND=noninteractive \
-    UBUNTU_SNAPSHOT=20260810T000000Z
-
-COPY classic-packages.lock /tmp/classic-packages.lock
-# APT still verifies the signed Release metadata and package hashes. Only TLS
-# peer verification is temporarily unavailable in the minimal base.
-# Snapshot package downloads can still fail after per-request retries. Repeat
-# the transaction so successfully fetched archives can be reused.
-RUN test "${TARGETARCH}" = amd64 \
-    && test "$(dpkg --print-architecture)" = amd64 \
-    && retry_command() { \
-        attempt=1; \
-        while test "${attempt}" -le 2; do \
-            if "$@"; then \
-                return 0; \
-            fi; \
-            if test "${attempt}" -eq 2; then \
-                return 1; \
-            fi; \
-            attempt=$((attempt + 1)); \
-            sleep 5; \
-        done; \
-    } \
-    && printf '%s\n' 'Acquire::Retries "5";' \
-        > /etc/apt/apt.conf.d/80-snapshot-retries \
-    && sed -i \
-        -e "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
-        -e "s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|" \
-        /etc/apt/sources.list.d/ubuntu.sources \
-    && sed -i '/^Signed-By:/a Check-Valid-Until: no' \
-        /etc/apt/sources.list.d/ubuntu.sources \
-    && retry_command apt-get -o Acquire::https::Verify-Peer=false update \
-    && awk -F= '$1 == "ca-certificates" \
-            || $1 == "libssl3t64" \
-            || $1 == "openssl" \
-            || $1 == "openssl-provider-legacy" { print }' \
-        /tmp/classic-packages.lock \
-        > /tmp/classic-bootstrap.lock \
-    && retry_command sh -c \
-        'xargs -r apt-get -o Acquire::https::Verify-Peer=false \
-            install -y --no-install-recommends \
-            < /tmp/classic-bootstrap.lock' \
-    && rm -f /tmp/classic-bootstrap.lock \
-    && rm -rf /var/lib/apt/lists/* \
-    && retry_command apt-get update \
-    && retry_command sh -c \
-        'xargs -r apt-get install -y --no-install-recommends \
-            < /tmp/classic-packages.lock' \
-    && rm -f /etc/apt/apt.conf.d/80-snapshot-retries \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
-
-COPY tools/smoke-git-lfs.sh /usr/local/bin/atrinik-git-lfs-smoke
-RUN chmod 0755 /usr/local/bin/atrinik-git-lfs-smoke \
-    && runuser -u ubuntu -- env HOME=/home/ubuntu \
-        bash /usr/local/bin/atrinik-git-lfs-smoke
-
-COPY --from=mesa-dozen \
-    /usr/lib/x86_64-linux-gnu/libvulkan_dzn.so \
-    /usr/lib/x86_64-linux-gnu/libvulkan_dzn.so
-COPY --from=mesa-dozen \
-    /usr/share/vulkan/icd.d/dzn_icd.x86_64.json \
-    /usr/share/vulkan/icd.d/dzn_icd.x86_64.json
-RUN ldconfig
-
-# Classic requires the same checksum-pinned SDL3_mixer contract as the broad
-# Linux image. Its codec dependencies are statically linked into the shared
-# library, while SDL3 and the remaining native libraries come from the frozen
-# Ubuntu package snapshot above.
-COPY audio-toolchain.json /tmp/audio-toolchain.json
-COPY tools/build-sdl3-mixer.sh /tmp/build-sdl3-mixer.sh
-RUN /tmp/build-sdl3-mixer.sh \
-        /tmp/audio-toolchain.json cmake /usr/local "$(nproc)" \
-    && ldconfig \
-    && test "$(pkg-config --modversion sdl3-mixer)" \
-        = "$(jq -r '.sdl_mixer.version' /tmp/audio-toolchain.json)"
-
-COPY tools/audio/opus-probe.opus /usr/local/share/atrinik/audio/opus-probe.opus
-COPY tools/audio/sdl3-mixer-probe.c /tmp/sdl3-mixer-probe.c
-RUN test "$(sha256sum /usr/local/share/atrinik/audio/opus-probe.opus \
-        | cut -d' ' -f1)" \
-        = "$(jq -r '.fixture.sha256' /tmp/audio-toolchain.json)" \
-    && cc -std=c17 -Wall -Wextra -Werror \
-        /tmp/sdl3-mixer-probe.c \
-        -o /usr/local/bin/atrinik-sdl3-mixer-probe \
-        $(pkg-config --cflags --libs sdl3-mixer) \
-    && atrinik-sdl3-mixer-probe \
-        /usr/local/share/atrinik/audio/opus-probe.opus \
-    && rm /tmp/sdl3-mixer-probe.c
-
-# Classic's GPU shader pipeline uses a qualified DXC release and a source
-# snapshot of SPIRV-Cross. Build the latter from its locked archive and retain
-# every upstream license beside the installed tools. The same final image also
-# carries the pinned Lavapipe/Xvfb runtime below for fork-safe GPU coverage.
-COPY classic-shader-toolchain.json /tmp/classic-shader-toolchain.json
-COPY tools/install_classic_shader_toolchain.py \
-    /tmp/install_classic_shader_toolchain.py
-RUN python3 /tmp/install_classic_shader_toolchain.py \
-        --manifest /tmp/classic-shader-toolchain.json \
-        --cache /tmp/classic-shader-downloads \
-        --prefix /usr/local \
-        --jobs "$(nproc)" \
-    && ldconfig \
-    && test -x /usr/local/bin/dxc \
-    && test -x /usr/local/bin/spirv-cross \
-    && dxc --version >/dev/null \
-    && spirv-cross --help >/dev/null 2>&1 \
-    && rm -rf /tmp/classic-shader-downloads \
-        /tmp/classic-shader-toolchain.json \
-        /tmp/install_classic_shader_toolchain.py
-
-ENV CCACHE_DIR=/cache/ccache
-RUN install -d -m 1777 "${CCACHE_DIR}"
-
-COPY classic-toolchain.json /usr/local/share/atrinik/classic-toolchain.json
-COPY classic-packages.lock /usr/local/share/atrinik/classic-packages.lock
-COPY classic-shader-toolchain.json \
-    /usr/local/share/atrinik/classic-shader-toolchain.json
-COPY classic-shader-toolchain.spdx.json \
-    /usr/local/share/atrinik/classic-shader-toolchain.spdx.json
-COPY classic-vulkan-toolchain.json \
-    /usr/local/share/atrinik/classic-vulkan-toolchain.json
-COPY classic-vulkan-toolchain.spdx.json \
-    /usr/local/share/atrinik/classic-vulkan-toolchain.spdx.json
-COPY classic-vulkan-packages.lock \
-    /usr/local/share/atrinik/classic-vulkan-packages.lock
-COPY audio-toolchain.json /usr/local/share/atrinik/audio-toolchain.json
-COPY audio-toolchain.spdx.json /usr/local/share/atrinik/audio-toolchain.spdx.json
-
-USER ubuntu
-WORKDIR /workspace
+FROM classic-base AS classic-ci
+COPY --from=classic-tls-build /opt/atrinik/tls /opt/atrinik/tls
+COPY linux/tls /usr/local/share/atrinik/classic-tls
+ENV ATRINIK_CLASSIC_TLS_PREFIX=/opt/atrinik/tls
+RUN python3 /usr/local/share/atrinik/classic-tls/smoke.py
 
 FROM classic-ci AS classic-validation
 

@@ -467,3 +467,27 @@ Redistributors must retain the pinned source archives, notices, build recipes,
 and Debian source coordinates and satisfy the corresponding-source and LGPL
 replacement/relinking obligations in the contract. Authored game media remain
 `content@main`, resources and sound inputs owned by their respective repositories.
+
+### Classic application TLS
+
+The Linux Classic and broad Linux images carry an application-only TLS prefix at
+`/opt/atrinik/tls`, declared by `ATRINIK_CLASSIC_TLS_PREFIX`. Its
+[`linux/tls/manifest.json`](linux/tls/manifest.json) pins OpenSSL 4.0.3 and libcurl
+8.22.0 source archives. Classic consumers must select this prefix explicitly for
+both OpenSSL and libcurl, and retain its `lib` directory in their runtime search
+path. Copy the complete prefix, including providers and upstream notices, when
+packaging a consumer. The prefix uses the public `SSL_get_peer_addr` API; a build
+against the system OpenSSL 3 package does not provide that capability.
+
+The application libcurl supports HTTP/HTTPS, IDN and zlib. Optional SSH, LDAP,
+GSSAPI, PSL, HTTP/2 and HTTP/3 integrations are disabled in this bounded cohort.
+System tools and Python retain their distribution TLS packages: there is no
+global `LD_LIBRARY_PATH`, `OPENSSL_MODULES` or command-path override. The sealed
+Debian portable producer and Windows MXE toolchain retain their separate pinned
+consumer contracts.
+
+`classic-tls-build` runs the upstream OpenSSL QUIC API tests. Both Linux consumer
+images additionally compile a public API/provider probe and exercise trusted and
+untrusted loopback HTTPS against Python's system TLS stack, without external
+network access. This qualifies the dependency closure; Classic's own tests must
+still prove actual per-connection peer identity and authorization behavior.

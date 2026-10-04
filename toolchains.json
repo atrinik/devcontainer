@@ -17,9 +17,15 @@
     "trivy": "0.73.0"
   },
   "rust": {
-    "components": ["clippy", "rustfmt"],
+    "components": [
+      "clippy",
+      "rustfmt"
+    ],
     "edition": "2024",
-    "targets": ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu"]
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "x86_64-pc-windows-gnu"
+    ]
   },
   "graphics": {
     "headless_validation": true,
@@ -36,5 +42,12 @@
     "atrinik/renderer",
     "atrinik/server",
     "atrinik/website"
-  ]
+  ],
+  "classic_tls": {
+    "prefix": "/opt/atrinik/tls",
+    "manifest": "/opt/atrinik/tls/share/atrinik/classic-tls.json",
+    "openssl": "4.0.3",
+    "libcurl": "8.22.0",
+    "required_api": "SSL_get_peer_addr"
+  }
 }
