@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schema_version": 1,
+  "platform": "linux/amd64",
+  "target": "classic-final",
+  "image": "ghcr.io/atrinik/classic-build",
+  "dxc": {
+    "repository": "microsoft/DirectXShaderCompiler",
+    "tag": "v1.9.2607",
+    "commit": "0d3ee6b551b8fa768fbf825300ebab81047ef6a8",
+    "url": "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2607/linux_dxc_2026_07_29.x86_x64.tar.gz",
+    "sha256": "55665c87824051ed4774ff3280a79ccbbb7d39243b9736ca5e98222134112d54",
+    "archive_root": "linux_dxc_2026_07_29.x86_x64",
+    "files": {
+      "bin/dxc": "b1bfa493d5c780b94c20b8b5f5aed50d1c4d03339cd55f496bd223eedeec1734",
+      "lib/libdxcompiler.so": "be01593d3ff635fca6f20b044aa49c777f6409e50a28fb0242a0c87272620b62",
+      "lib/libdxil.so": "e74c02162cd553a0ceab041937d749cfd6ab9adf919142603ff5fc55af222c73",
+      "LICENCE-MIT.txt": "903df5512f7d02609fed0c780a9b704f5a3eeb6e4d84ebe42a29845c81899a3c",
+      "LICENSE-LLVM.txt": "729615317e28dd03907e46f0fc3b5e88f7853cee61d1a1471d2749335516b46f",
+      "LICENSE-MS.txt": "734f72f239fe7b07b4c7203f294c1a7ce27095687278bab7e56d630d7c672963"
+    }
+  },
+  "spirv_cross": {
+    "repository": "KhronosGroup/SPIRV-Cross",
+    "commit": "9c3c8e2cefdd8194b193bb8ed2fdff4d5527e382",
+    "url": "https://codeload.github.com/KhronosGroup/SPIRV-Cross/tar.gz/9c3c8e2cefdd8194b193bb8ed2fdff4d5527e382",
+    "sha256": "78939435d588998e5174a7865ddd36b6d9d7cd05eafac42d42ef537ea770b40a",
+    "license": "Apache-2.0",
+    "license_path": "LICENSE",
+    "license_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "install": {
+    "dxc": {
+      "executable": "bin/dxc",
+      "libraries": [
+        "lib/libdxcompiler.so",
+        "lib/libdxil.so"
+      ],
+      "licenses": [
+        {
+          "archive_path": "LICENCE-MIT.txt",
+          "destination": "share/licenses/dxc/LICENCE-MIT.txt"
+        },
+        {
+          "archive_path": "LICENSE-LLVM.txt",
+          "destination": "share/licenses/dxc/LICENSE-LLVM.txt"
+        },
+        {
+          "archive_path": "LICENSE-MS.txt",
+          "destination": "share/licenses/dxc/LICENSE-MS.txt"
+        }
+      ]
+    },
+    "spirv_cross": {
+      "executable": "bin/spirv-cross",
+      "license": {
+        "archive_path": "LICENSE",
+        "destination": "share/licenses/spirv-cross/LICENSE"
+      }
+    }
+  },
+  "runtime": {
+    "vulkan_icd": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "display_server": "Xvfb",
+    "commands": ["vulkaninfo", "Xvfb", "xvfb-run"]
+  }
+}

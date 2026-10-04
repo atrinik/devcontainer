@@ -15,10 +15,30 @@
 - Treat Dockerfile inputs, `.dockerignore`, cache scopes, build arguments,
   published tags, and workflow path filters as one contract. If a relevant file
   changes, the required aggregate validation must still run.
+- `portable/Dockerfile` owns the separate `portable-final` Debian 12/glibc 2.36
+  Linux/amd64 build target and its sealed shader cohort. Keep its input/package,
+  CPU/ABI/provider, source/license, non-root consumer, required-check and
+  `classic-portable-build` publication contracts synchronized. Generate shaders
+  with the unchanged canonical tools in the build-only Ubuntu stage; copy only
+  canonical-manifest-verified data into Debian. The consumer rejects changed
+  source commits or shader inputs. Never repurpose this target as a coordinator.
 - `classic-final` is the slim Classic Check target. Keep its Ubuntu snapshot,
   direct package lock, tool inventory, non-root ccache mount, Classic validation
-  revision, smoke/SBOM checks, and published tags synchronized. Do not make it
-  inherit the broad replacement/development toolchain.
+  revision, shader-toolchain inventory, GPU runtime, smoke/SBOM checks, and
+  published tags synchronized. Do not make it inherit the broad
+  replacement/development toolchain.
+- The broad Linux and `classic-final` images include the snapshot-pinned Git LFS
+  client. Keep the Linux tool manifests, Classic package lock, non-root version
+  checks, and isolated worktree/payload smoke synchronized when changing this
+  prerequisite.
+- The public Classic image's shader contract is defined by
+  `classic-shader-toolchain.json`: retain the exact DXC/SPIRV-Cross archive and
+  source checksums, upstream licenses, and `/usr/local/bin` tool paths. Its
+  `classic-vulkan-toolchain.json` contract builds the pinned Mesa Dozen driver
+  from `classic-vulkan-packages.lock`, carries only the dzn library and ICD
+  into both Linux images, and records the WSLg host mounts/environment. Its
+  pinned Lavapipe/Xvfb packages remain the fork-safe headless path; consumers
+  still pin a released image digest and supply WSLg adapter selection.
 - Keep a stable numeric runner UID when restoring a Classic ccache directory;
   the mode-1777 mount root supports non-root initialization but does not make
   ccache's owner-writable nested directories reusable across different UIDs.
@@ -27,7 +47,8 @@
   must never move a rolling, platform, or version tag.
 - Every semantic release publishes the broad Linux, slim Linux Classic,
   general Windows, and task-focused Windows Classic images with their
-  supported tags. The Linux publisher owns `linux-build` and `classic-build`;
+  supported tags. The Linux publisher owns `linux-build`, `classic-build`, and
+  `classic-portable-build`;
   the Windows publisher owns both `windows-build` variants. Keep the
   `classic-check` target branched from the expensive shared MXE foundation
   before general-image Python/worldmaker additions, preserve the general

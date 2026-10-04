@@ -85,6 +85,10 @@ docker build --file windows/Dockerfile \
 
 docker run --rm atrinik-linux-build clang --version
 docker run --rm --user ubuntu --env HOME=/home/ubuntu \
+  atrinik-linux-build git lfs version
+docker run --rm --user ubuntu --env HOME=/home/ubuntu \
+  atrinik-linux-build atrinik-git-lfs-smoke
+docker run --rm --user ubuntu --env HOME=/home/ubuntu \
   atrinik-linux-build gh version
 docker run --rm --user ubuntu --env HOME=/home/ubuntu \
   --env GH_TOKEN=unused atrinik-linux-build gh extension list
@@ -107,7 +111,18 @@ docker run --rm atrinik-linux-build node --version
 docker run --rm atrinik-linux-build pnpm --version
 docker run --rm atrinik-classic-build gcc --version
 docker run --rm atrinik-classic-build cmake --version
+docker run --rm --user ubuntu --env HOME=/home/ubuntu \
+  atrinik-classic-build git lfs version
+docker run --rm --user ubuntu --env HOME=/home/ubuntu \
+  atrinik-classic-build atrinik-git-lfs-smoke
 docker run --rm atrinik-classic-build ccache --version
+docker run --rm atrinik-classic-build dxc --version
+docker run --rm atrinik-classic-build spirv-cross --help
+docker run --rm atrinik-classic-build \
+  sh -c 'test -f /usr/share/vulkan/icd.d/lvp_icd.json && \
+    test -f /usr/share/vulkan/icd.d/dzn_icd.x86_64.json && \
+    VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json \
+      xvfb-run -a vulkaninfo --summary'
 docker run --rm atrinik-linux-build \
   atrinik-sdl3-mixer-probe \
   /usr/local/share/atrinik/audio/opus-probe.opus
@@ -163,6 +178,51 @@ needed by the Classic client and server. SDL3_mixer and its codec closure retain
 the checksum-pinned source and nested SPDX inventory used by the development
 image.
 
+The same public `classic-build` image now carries the qualified DXC release and
+SPIRV-Cross source snapshot described by
+[`classic-shader-toolchain.json`](classic-shader-toolchain.json). Their
+checksum-verified executables are available as `dxc` and `spirv-cross`, with
+the upstream license files under `/usr/local/share/licenses`. The direct
+Lavapipe, Vulkan, and Xvfb runtime packages are locked in
+[`classic-packages.lock`](classic-packages.lock), so a released immutable
+Classic digest can serve both the shader-producing build and fork-safe GPU
+coverage jobs. The Classic consumer must update its separate workflow to pin
+that released digest; this image change does not rewrite consumer source.
+
+The public Linux and Classic images also carry the Mesa Dozen Vulkan runtime
+described by [`classic-vulkan-toolchain.json`](classic-vulkan-toolchain.json).
+Mesa 26.0.8 is built once from its checksum-pinned source archive with only
+the Wayland/D3D12 Vulkan path enabled; the build-only package closure is
+recorded in [`classic-vulkan-packages.lock`](classic-vulkan-packages.lock) and
+the source provenance in
+[`classic-vulkan-toolchain.spdx.json`](classic-vulkan-toolchain.spdx.json).
+Only those two custom-built artifacts—`/usr/lib/x86_64-linux-gnu/libvulkan_dzn.so`
+and `/usr/share/vulkan/icd.d/dzn_icd.x86_64.json`—enter the runtime images
+from the Mesa build stage. CI continues to select Lavapipe explicitly through
+Xvfb. A WSLg consumer can
+select Dozen after providing `/dev/dxg`, `/usr/lib/wsl`, and the WSLg runtime
+mounts plus its adapter name:
+
+```sh
+docker run --rm --gpus=all \
+  --device=/dev/dxg \
+  --volume /usr/lib/wsl:/usr/lib/wsl:ro \
+  --volume /mnt/wslg:/mnt/wslg:ro \
+  --env DISPLAY= \
+  --env WAYLAND_DISPLAY=wayland-0 \
+  --env XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir \
+  --env LD_LIBRARY_PATH=/usr/lib/wsl/lib \
+  --env GALLIUM_DRIVER=d3d12 \
+  --env MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA \
+  --env VK_DRIVER_FILES=/usr/share/vulkan/icd.d/dzn_icd.x86_64.json \
+  atrinik-classic-build vulkaninfo --summary
+```
+
+The adapter name is deliberately consumer-supplied; non-WSLg CI never selects
+an NVIDIA device. The image validator runs the existing Lavapipe/Xvfb probe
+and runs the Dozen probe only when all WSLg mounts/libraries and the consumer
+adapter variable are present.
+
 Classic runs as the unprivileged `ubuntu` user by default. `/cache/ccache` is a
 mode-1777 mount contract so CI can run with its own numeric UID and persist the
 directory without granting root. Consumers must still select ccache explicitly
@@ -188,8 +248,10 @@ the digest, never a rolling tag. To update that pin:
 
 1. Update the matching Ubuntu base digest and snapshot value in both
    `linux/Dockerfile` and `classic-toolchain.json`, refresh the exact direct
-   versions in `classic-packages.lock`, and update the tool versions and pinned
-   Classic validation commit in `classic-toolchain.json`.
+   versions in `classic-packages.lock`, and update the tool versions, shader
+   coordinates in `classic-shader-toolchain.json`, Mesa Dozen source
+   coordinates in `classic-vulkan-toolchain.json`, the Vulkan build lock, and
+   pinned Classic validation commit in `classic-toolchain.json`.
 2. Build `classic-validation` and `classic-final`, run the repository checks,
    and compare compressed image size plus local client/server timings with the
    prior digest.
@@ -347,3 +409,61 @@ the pinned Classic client and server checks as a non-root user.
 The repository's original build configuration and automation are MIT licensed;
 see [LICENSE](LICENSE). Software installed into the published images retains
 its own upstream license.
+
+## Portable Linux Classic baseline
+
+`portable/Dockerfile` provides `portable-final` for Linux/amd64. It builds the
+modern SDL3 family and OpenSSL 3.5 against a digest-pinned Debian 12/glibc 2.36
+base and signed package snapshot. The separate contract is
+[`portable/contract.json`](portable/contract.json). This target does not change
+the canonical Ubuntu coordinator, existing Classic Check, or Windows images.
+
+The canonical DXC payload needs newer glibc than Debian 12. A build-only Ubuntu
+stage uses the unchanged shader-toolchain lock to generate the pinned Classic
+cohort, compares it with the source's canonical manifest, and records input,
+tool, installer and output hashes. Only shader data and notices cross into
+Debian. Consumers must verify the exact source commit and every shader input,
+then pass `/opt/atrinik-portable/shaders` as `ATRINIK_GPU_SHADER_DIRECTORY`.
+Changed source inputs require a reviewed image update; the consumer check fails
+rather than silently regenerating with a different compiler.
+
+The image exposes its contract, actual tool/package versions, Debian source
+coordinates, source archives, notices, and shader-generation record under
+`/opt/atrinik-portable`. Shared application libraries live under `/usr/local`;
+Debian packages provide the baseline transitive libraries. Compiler flags use
+`-march=x86-64 -mtune=generic`. Verification checks actual ELF dependency
+providers, versioned symbols, loader relocations and CPU notes, plus device-free
+image/font decoding, audio decoding and OpenSSL provider loading. The
+Vulkan, X11-XCB and D-Bus loaders receive the same recursive ABI and source
+checks as linked dependencies. FDO dlopen notes are parsed independently of GNU
+CPU properties for compatibility with Debian 12 binutils. X11 is the supported
+display backend; host graphics drivers stay external. Native Wayland is not
+enabled. A Wayland desktop requires an XWayland display route, which remains
+subject to parent integration qualification. SDL Steam user storage is
+unsupported by this Classic target; its exact SDL feature/provider declaration
+is recorded as excluded in the contract.
+Unused OpenGL/OpenGL ES backends are disabled so Debian Mesa driver packages are
+not pulled into this Classic SDL_GPU build target.
+
+Automatic PR CI explicitly selects `Portable Classic image`, builds/checks the
+Dockerfile without registry credentials, runs non-root smoke, and compiles and
+tests the exact Classic consumer offline in the baseline image. `Required
+checks` fails for any selected missing, skipped, cancelled or failed portable
+job. The consumer artifact retains source, compiler, test and ELF evidence.
+These container checks do not qualify hardware gameplay, audible playback or
+relocation across the final Ubuntu/Debian distribution matrix.
+
+After an authorized maintainer merge and semantic release, the Linux publisher
+validates this target and consumer before release aliases move. It publishes
+`classic-portable-build:sha-COMMIT` with SBOM/provenance, then promotes that exact
+digest to `latest`, `debian-12` and the semantic version. Recover a partial
+promotion by rerunning the failed job from the same workflow run. The existing
+`candidate_only` dispatch retains its Classic-only behavior. A dispatch,
+registry push, merge or release is a separate publication action; PR CI performs
+none of them. Consumers select only the actual published immutable manifest
+digest and retain producer-run/source coordinates.
+
+Redistributors must retain the pinned source archives, notices, build recipes,
+and Debian source coordinates and satisfy the corresponding-source and LGPL
+replacement/relinking obligations in the contract. Authored game media remain
+`content@main`, resources and sound inputs owned by their respective repositories.

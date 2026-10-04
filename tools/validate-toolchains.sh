@@ -14,7 +14,7 @@ jq -e '
   .schema_version == 1
   and .platform == "linux/amd64"
   and (.tools | keys == [
-    "buf", "go", "node", "pnpm", "protoc", "protoc-gen-go",
+    "buf", "git-lfs", "go", "node", "pnpm", "protoc", "protoc-gen-go",
     "protoc-gen-prost", "rust", "rustup", "syft", "trivy"
   ])
   and (.consumers | length == 7)
@@ -41,8 +41,11 @@ if [[ -n ${installed} ]]; then
     "$(jq -r '.tools.syft' "${expected}")"
   test "$(trivy --version | sed -n '1s/^Version: //p')" = \
     "$(jq -r '.tools.trivy' "${expected}")"
+  test "$(git lfs version | sed -n '1s|^git-lfs/\([^ ]*\).*$|\1|p')" = \
+    "$(jq -r '.tools["git-lfs"]' "${expected}")"
   command -v Xvfb >/dev/null
   command -v xvfb-run >/dev/null
+  bash "$(dirname -- "${BASH_SOURCE[0]}")/smoke-git-lfs.sh"
 fi
 
 jq -e '

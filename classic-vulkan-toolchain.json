@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schema_version": 1,
+  "platform": "linux/amd64",
+  "target": "classic-final",
+  "image": "ghcr.io/atrinik/classic-build",
+  "base": {
+    "image": "ubuntu:26.04",
+    "digest": "sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03",
+    "apt_snapshot": "20260810T000000Z"
+  },
+  "source": {
+    "repository": "mesa/mesa",
+    "tag": "mesa-26.0.8",
+    "version": "26.0.8",
+    "commit": "60e95b787857afbc9a00b693b91c0d9c8923a430",
+    "url": "https://archive.mesa3d.org/mesa-26.0.8.tar.xz",
+    "sha256": "caf1c0061a68e88dfa74967a7e780c0e85d65b6c4e334cd69095a5dc54ad78bc",
+    "archive_root": "mesa-26.0.8"
+  },
+  "build": {
+    "system": "meson",
+    "version": "1.10.1",
+    "package_lock": "classic-vulkan-packages.lock",
+    "configure": {
+      "buildtype": "release",
+      "libdir": "lib/x86_64-linux-gnu",
+      "prefix": "/usr",
+      "wrap_mode": "nodownload"
+    },
+    "options": {
+      "build-tests": false,
+      "display-info": "disabled",
+      "egl": "disabled",
+      "expat": "disabled",
+      "gallium-d3d12-graphics": "enabled",
+      "gallium-d3d12-video": "disabled",
+      "gallium-drivers": ["d3d12"],
+      "gallium-rusticl": false,
+      "gallium-va": "disabled",
+      "gbm": "disabled",
+      "glx": "disabled",
+      "gles1": "disabled",
+      "gles2": "disabled",
+      "html-docs": "disabled",
+      "install-mesa-clc": false,
+      "libunwind": "disabled",
+      "llvm": "disabled",
+      "lmsensors": "disabled",
+      "mesa-clc": "auto",
+      "opengl": false,
+      "perfetto": false,
+      "platforms": ["wayland"],
+      "shared-glapi": "disabled",
+      "spirv-tools": "disabled",
+      "teflon": false,
+      "valgrind": "disabled",
+      "vulkan-drivers": ["microsoft-experimental"],
+      "vulkan-manifest-per-architecture": true,
+      "xmlconfig": "disabled",
+      "zstd": "disabled"
+    }
+  },
+  "install": {
+    "library": "/usr/lib/x86_64-linux-gnu/libvulkan_dzn.so",
+    "icd": "/usr/share/vulkan/icd.d/dzn_icd.x86_64.json",
+    "icd_library": "libvulkan_dzn.so",
+    "icd_api_version": "1.1.335"
+  },
+  "runtime": {
+    "packages": [
+      {"name": "libdrm2", "version": "2.4.131-1"},
+      {"name": "libudev1", "version": "259.5-0ubuntu3.3"},
+      {"name": "libvulkan1", "version": "1.4.341.0-1"},
+      {"name": "libwayland-client0", "version": "1.24.0-2"},
+      {"name": "mesa-vulkan-drivers", "version": "26.0.3-1ubuntu1"},
+      {"name": "vulkan-tools", "version": "1.4.341.0+dfsg1-1"},
+      {"name": "zlib1g", "version": "1:1.3.dfsg+really1.3.1-1ubuntu3"}
+    ],
+    "shared_library_sonames": [
+      "libc.so.6",
+      "libdrm.so.2",
+      "libgcc_s.so.1",
+      "libm.so.6",
+      "libudev.so.1",
+      "libwayland-client.so.0",
+      "libz.so.1"
+    ],
+    "headless": {
+      "vulkan_icd": "/usr/share/vulkan/icd.d/lvp_icd.json",
+      "display_server": "Xvfb",
+      "commands": ["vulkaninfo", "Xvfb", "xvfb-run"]
+    },
+    "wslg": {
+      "vulkan_icd": "/usr/share/vulkan/icd.d/dzn_icd.x86_64.json",
+      "required_mounts": [
+        "/dev/dxg",
+        "/mnt/wslg/runtime-dir",
+        "/usr/lib/wsl"
+      ],
+      "required_host_libraries": [
+        "/usr/lib/wsl/lib/libd3d12.so",
+        "/usr/lib/wsl/lib/libdxcore.so"
+      ],
+      "fixed_environment": {
+        "DISPLAY": "",
+        "GALLIUM_DRIVER": "d3d12",
+        "LD_LIBRARY_PATH": "/usr/lib/wsl/lib",
+        "VK_DRIVER_FILES": "/usr/share/vulkan/icd.d/dzn_icd.x86_64.json",
+        "WAYLAND_DISPLAY": "wayland-0",
+        "XDG_RUNTIME_DIR": "/mnt/wslg/runtime-dir"
+      },
+      "consumer_environment": ["MESA_D3D12_DEFAULT_ADAPTER_NAME"],
+      "probe": ["vulkaninfo", "--summary"]
+    }
+  }
+}
