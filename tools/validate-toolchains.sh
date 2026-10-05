@@ -23,6 +23,7 @@ jq -e '
 ' "${expected}" >/dev/null
 
 if [[ -n ${installed} ]]; then
+  /usr/local/bin/atrinik-verify-classic-curl /usr/local
   cmp --silent "${expected}" "${installed}"
 
   test "$(go env GOVERSION)" = "go$(jq -r '.tools.go' "${expected}")"
@@ -130,7 +131,7 @@ fi
 if [[ -n ${classic_check_expected} ]]; then
   jq -e '
   keys == [
-    "$schema", "base", "consumer", "excluded", "host_packages", "mxe",
+    "$schema", "base", "consumer", "curl_contract", "excluded", "host_packages", "mxe",
     "runtime_contract", "schema_version", "staging", "target", "verification"
   ]
   and .["$schema"] == "https://json-schema.org/draft/2020-12/schema"
@@ -150,7 +151,7 @@ if [[ -n ${classic_check_expected} ]]; then
   ]
   and .base == {
     "image": "mcr.microsoft.com/devcontainers/base:bookworm",
-    "digest": "sha256:73d85a96694a2cadca1ba3fcb5721f2312a64f1d571dd86f6c77e10a708931dc"
+    "digest": "sha256:86165cfc170e9b2aa8df90b847127eea97b08eb9987021e6e6ec6c3a96545d7c"
   }
   and .host_packages == [
     "ca-certificates", "cmake", "git", "ninja-build", "python3"
@@ -163,7 +164,7 @@ if [[ -n ${classic_check_expected} ]]; then
   and .mxe.commit == "8784776b145a8ddd350ce32aa0908ac10977060c"
   and .mxe.target == "x86_64-w64-mingw32.shared"
   and .mxe.packages == [
-    "cc", "cmake", "curl", "libidn2", "libxml2", "openssl", "sdl3",
+    "c-ares", "cc", "cmake", "curl", "libidn2", "libxml2", "openssl", "sdl3",
     "sdl3_image", "sdl3_ttf", "zlib"
   ]
   and .mxe.additional_libraries == [
@@ -206,17 +207,30 @@ if [[ -n ${classic_check_expected} ]]; then
     "inventory": "/usr/local/share/atrinik/audio-toolchain.json",
     "sbom": "/usr/local/share/atrinik/audio-toolchain.spdx.json",
     "probe": "/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/atrinik-sdl3-mixer-probe.exe",
-    "import_contract_source": "audio-toolchain.json#windows"
+    "import_contract_source": "audio-toolchain.json#windows",
+    "cares_license": {
+      "source":"/opt/mxe/usr/x86_64-w64-mingw32.shared/share/licenses/c-ares/LICENSE.md",
+      "upstream":"https://github.com/c-ares/c-ares/blob/v1.34.6/LICENSE.md",
+      "sha256":"460f5e768fda3752ca2169a95df062578a10fb126bfd65f3b9b1a1bed2f84807",
+      "bundle_name":"c-ares-LICENSE.md"
+    }
   }
-  and (.verification | keys == ["native_tests"])
+  and (.verification | keys == ["native_tests", "public_ca"])
   and .verification.native_tests == [
     {"executable":"libatrinik-path.exe","build_target":"libatrinik-path","source":"libatrinik/build/windows-tests/libatrinik-path.exe","arguments":[]},
-    {"executable":"libatrinik-rendezvous.exe","build_target":"libatrinik-rendezvous","source":"libatrinik/build/windows-tests/libatrinik-rendezvous.exe","arguments":["fixtures/rendezvous-invite-v1.json","fixtures/rendezvous-invite-v1-negative.json"]},
-    {"executable":"libatrinik-metaserver-publisher.exe","build_target":"libatrinik-metaserver-publisher","source":"libatrinik/build/windows-tests/libatrinik-metaserver-publisher.exe","arguments":["fixtures/metaserver-publisher-v1.json"]},
+    {"executable":"libatrinik-rendezvous.exe","build_target":"libatrinik-rendezvous","source":"libatrinik/build/windows-tests/libatrinik-rendezvous.exe","arguments":[]},
+    {"executable":"libatrinik-metaserver-publisher.exe","build_target":"libatrinik-metaserver-publisher","source":"libatrinik/build/windows-tests/libatrinik-metaserver-publisher.exe","arguments":["fixtures/metaserver-classic-publisher-v3.json"]},
     {"executable":"libatrinik-metaserver-url.exe","build_target":"libatrinik-metaserver-url","source":"libatrinik/build/windows-tests/libatrinik-metaserver-url.exe","arguments":[]},
     {"executable":"libatrinik-stun.exe","build_target":"libatrinik-stun","source":"libatrinik/build/windows-tests/libatrinik-stun.exe","arguments":[]},
-    {"executable":"client-rich-presence-tests.exe","build_target":null,"source":"client/build/windows-release/client-rich-presence-tests.exe","arguments":[]}
+    {"executable":"libatrinik-socket-quic.exe","build_target":"libatrinik-socket-quic","source":"libatrinik/build/windows-tests/libatrinik-socket-quic.exe","arguments":[]},
+    {"executable":"atrinik-curl-cancellation-probe.exe","build_target":null,"source":"libatrinik/build/windows-curl-probe/atrinik-curl-cancellation-probe.exe","arguments":[]},
+    {"executable":"client-rich-presence-tests.exe","build_target":null,"source":"client/build/windows-tests/client-rich-presence-tests.exe","arguments":[]}
   ]
+  and .verification.public_ca == {
+    "source":"client/ca-bundle.crt",
+    "sha256":"a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505",
+    "endpoint":"https://curl.se/"
+  }
   and .excluded == {
     "paths": [
       "/opt/mxe/.git", "/opt/mxe/.ccache/ccache", "/opt/mxe/log",

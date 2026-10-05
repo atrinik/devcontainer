@@ -109,6 +109,48 @@ jobs:
             type=gha,scope=classic-build-image
           cache-to: type=gha,mode=max,scope=classic-build-image,ignore-error=true
 
+      - name: Read Classic cancellation qualification consumer
+        id: curl-consumer
+        run: echo "commit=$(jq -er '.consumer_validation.commit' classic-toolchain.json)" >> "${GITHUB_OUTPUT}"
+
+      - name: Check out Classic cancellation qualification consumer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: atrinik/classic
+          ref: ${{ steps.curl-consumer.outputs.commit }}
+          path: build/curl-classic
+          persist-credentials: false
+
+      - name: Load Classic cancellation qualification image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: linux/Dockerfile
+          target: classic-final
+          platforms: linux/amd64
+          load: true
+          tags: atrinik-classic-curl:qualification
+          cache-from: type=gha,scope=classic-build-image
+
+      - name: Qualify Classic cancellation and public TLS before publication
+        run: tools/smoke-classic-curl.sh atrinik-classic-curl:qualification build/curl-classic
+
+      - name: Load broad Linux cancellation qualification image
+        if: ${{ !inputs.candidate_only }}
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: linux/Dockerfile
+          target: final
+          platforms: linux/amd64
+          load: true
+          tags: atrinik-linux-curl:qualification
+          cache-from: type=gha,scope=linux-build-image
+
+      - name: Qualify broad Linux cancellation and public TLS before publication
+        if: ${{ !inputs.candidate_only }}
+        run: tools/smoke-classic-curl.sh atrinik-linux-curl:qualification build/curl-classic
+
       # The portable target has its own ABI and real consumer; validate it before aliases move.
       - name: Read portable consumer revision
         if: ${{ !inputs.candidate_only }}

@@ -150,6 +150,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libgd-dev \
         libidn2-dev \
         libminiupnpc-dev \
+        libpsl-dev=0.21.2-1.1build2 \
         libreadline-dev \
         libsdl3-dev \
         libsdl3-image-dev \
@@ -212,6 +213,15 @@ ARG GH_STACK_SOURCE_COMMIT=a1b4a3d4d0bcde9ec3a78ab99b2d63af121857a9
 ARG GH_STACK_LICENSE_SHA256=2510b446bc1f0cf9702453075d20cd88631e20e5642658edb7325d9c1eb534f7
 ARG GIT_VERSION=2.53.0
 ARG GIT_LFS_VERSION=3.7.1
+# The system OpenSSL 3.5.5 remains the TLS provider. Install the same curl
+# release with the c-ares resolver and explicitly exclude the threaded backend.
+COPY classic-curl-toolchain.json /tmp/classic-curl-toolchain.json
+COPY tools/build-classic-curl.sh /tmp/build-classic-curl.sh
+COPY tools/verify-classic-curl.sh /usr/local/bin/atrinik-verify-classic-curl
+RUN /tmp/build-classic-curl.sh /tmp/classic-curl-toolchain.json /usr/local 2 \
+    && /usr/local/bin/atrinik-verify-classic-curl /usr/local \
+    && rm /tmp/build-classic-curl.sh /tmp/classic-curl-toolchain.json
+
 ARG GO_VERSION=1.26.5
 ARG GO_SHA256=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
 ARG NODE_VERSION=24.18.1
@@ -561,6 +571,15 @@ RUN test "${TARGETARCH}" = amd64 \
             < /tmp/classic-packages.lock' \
     && rm -f /etc/apt/apt.conf.d/80-snapshot-retries \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
+
+# The system OpenSSL 3.5.5 remains the TLS provider. Install the same curl
+# release with the c-ares resolver and explicitly exclude the threaded backend.
+COPY classic-curl-toolchain.json /tmp/classic-curl-toolchain.json
+COPY tools/build-classic-curl.sh /tmp/build-classic-curl.sh
+COPY tools/verify-classic-curl.sh /usr/local/bin/atrinik-verify-classic-curl
+RUN /tmp/build-classic-curl.sh /tmp/classic-curl-toolchain.json /usr/local 2 \
+    && /usr/local/bin/atrinik-verify-classic-curl /usr/local \
+    && rm /tmp/build-classic-curl.sh /tmp/classic-curl-toolchain.json
 
 COPY tools/smoke-git-lfs.sh /usr/local/bin/atrinik-git-lfs-smoke
 RUN chmod 0755 /usr/local/bin/atrinik-git-lfs-smoke \

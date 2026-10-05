@@ -36,5 +36,6 @@
     "atrinik/renderer",
     "atrinik/server",
     "atrinik/website"
-  ]
+  ],
+  "curl_contract": "/usr/local/share/atrinik/classic-curl-toolchain.json"
 }

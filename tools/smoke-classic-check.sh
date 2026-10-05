@@ -48,7 +48,25 @@ for consumer_job in "${consumer_jobs[@]}"; do
   fi
 done
 
+mapfile -t native_fixture_arguments < <(jq -r \
+  '.verification.native_tests[].arguments[]' \
+  "${image_checkout}/windows/classic-check-toolchain.json")
+for fixture in "${native_fixture_arguments[@]}"; do
+  if [[ ${fixture} != fixtures/* ||
+        ! -f ${classic_checkout}/libatrinik/tests/${fixture} ]]; then
+    echo "Declared native fixture is missing from the pinned Classic source: ${fixture}" >&2
+    exit 1
+  fi
+done
+
 python3 "${classic_checkout}/client/tools/dependencies.py" sync
+# Follow the pinned consumer workflow: validate a host-generated shader cohort
+# before the offline MXE build rather than copying host compiler binaries.
+CMAKE_BUILD_PARALLEL_LEVEL=4 \
+  bash "${classic_checkout}/tools/ci/prepare_gpu_shaders.sh" \
+    "${classic_checkout}" \
+    "${classic_checkout}/build/gpu-shader-downloads" \
+    "${classic_checkout}/build/gpu-shaders"
 umask 077
 mkdir -p "${classic_checkout}/build"
 discord_test_file=$(mktemp \
@@ -62,6 +80,7 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
   --env CCACHE_TEMPDIR=/tmp/atrinik-classic-check-ccache-tmp \
   --env CCACHE_MAXSIZE=250M \
   --env ATRINIK_PACKAGE_VERSION=0.0.0 \
+  --env ATRINIK_GPU_SHADER_DIRECTORY=/workspace/build/gpu-shaders \
   --env ATRINIK_DISCORD_APPLICATION_ID_FILE="/workspace/${discord_test_relative}" \
   --volume "${classic_checkout}:/workspace" \
   --volume "${image_checkout}:/image-source:ro" \
@@ -94,9 +113,22 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
     mapfile -t native_targets < <(python3 -c \
       "import json,sys; value=json.load(open(sys.argv[1])); print(*(item[\"build_target\"] for item in value[\"verification\"][\"native_tests\"] if item[\"build_target\"] is not None), sep=chr(10))" \
       /image-source/windows/classic-check-toolchain.json)
-    test "${#native_targets[@]}" -eq 5
+    test "${#native_targets[@]}" -eq 6
     cmake --build libatrinik/build/windows-tests \
       --target "${native_targets[@]}" --parallel "$(nproc)"
+
+    qualification_commit=$(python3 -c \
+      "import json,sys; print(json.load(open(sys.argv[1]))[\"consumer\"][\"validation_commit\"])" \
+      /image-source/windows/classic-check-toolchain.json)
+    x86_64-w64-mingw32.shared-cmake \
+      -S /image-source/tools/curl-probe \
+      -B libatrinik/build/windows-curl-probe \
+      -G Ninja \
+      -DATRINIK_CLASSIC_SOURCE_DIR=/workspace \
+      -DATRINIK_CLASSIC_QUALIFICATION_COMMIT="${qualification_commit}" \
+      -DCMAKE_BUILD_TYPE=Release
+    cmake --build libatrinik/build/windows-curl-probe \
+      --target atrinik-curl-cancellation-probe --parallel "$(nproc)"
 
     cd client
     bash tools/build-windows-package.sh build/windows-pr-package
@@ -105,21 +137,53 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
     test "${#packages[@]}" -eq 1
     package=${packages[0]}
     python3 /image-source/tools/verify-classic-check-package.py \
-      "${package}" x86_64-w64-mingw32.shared-objdump
+      "${package}" x86_64-w64-mingw32.shared-objdump \
+      /image-source/windows/classic-check-toolchain.json
     cd ..
+
+    # The production package disables tests. Build the native client test in the
+    # separate directory used by the pinned consumer workflow.
+    x86_64-w64-mingw32.shared-cmake \
+      -S client \
+      -B client/build/windows-tests \
+      -G Ninja \
+      -DBUILD_TESTING=ON \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DPACKAGE_TYPE=none \
+      -DATRINIK_PACKAGE_VERSION=0.0.0 \
+      -DATRINIK_GPU_SHADER_DIRECTORY=/workspace/build/gpu-shaders \
+      -DFETCHCONTENT_SOURCE_DIR_ATRINIK_PROTOCOL=/workspace/protocol \
+      -DFETCHCONTENT_SOURCE_DIR_LIBATRINIK=/workspace/libatrinik
+    cmake --build client/build/windows-tests \
+      --target client-rich-presence-tests --parallel "$(nproc)"
 
     stage=libatrinik/build/windows-test-bundle
     cmake -E remove_directory "${stage}"
     mapfile -t native_sources < <(python3 -c \
       "import json,sys; value=json.load(open(sys.argv[1])); print(*(item[\"source\"] for item in value[\"verification\"][\"native_tests\"]), sep=chr(10))" \
       /image-source/windows/classic-check-toolchain.json)
-    test "${#native_sources[@]}" -eq 6
+    test "${#native_sources[@]}" -eq 8
     python3 tools/ci/stage_windows_runtime.py \
       --objdump x86_64-w64-mingw32.shared-objdump \
       --runtime-dir "${MXE_RUNTIME_DIR}" \
       --output-dir "${stage}" \
       "${native_sources[@]}"
     cmake -E copy_directory libatrinik/tests/fixtures "${stage}/fixtures"
+    test "$(sha256sum client/ca-bundle.crt | cut -d " " -f 1)" = \
+      "$(python3 -c "import json; print(json.load(open(\"/image-source/windows/classic-check-toolchain.json\"))[\"verification\"][\"public_ca\"][\"sha256\"])")"
+    cmake -E copy client/ca-bundle.crt "${stage}/ca-bundle.crt"
+    cmake -E copy LICENSE.md "${stage}/Classic-LICENSE.md"
+    cmake -E copy ATTRIBUTIONS.md "${stage}/ATTRIBUTIONS.md"
+    cmake -E copy docs/CA-BUNDLE.md "${stage}/CA-BUNDLE.md"
+    cares_license=/opt/mxe/usr/x86_64-w64-mingw32.shared/share/licenses/c-ares/LICENSE.md
+    test "$(sha256sum "${cares_license}" | cut -d " " -f 1)" = \
+      "$(python3 -c "import json; print(json.load(open(\"/image-source/windows/classic-check-toolchain.json\"))[\"runtime_contract\"][\"cares_license\"][\"sha256\"])")"
+    cmake -E copy "${cares_license}" "${stage}/c-ares-LICENSE.md"
+    cmake -E copy_directory /image-source/tools/curl-probe "${stage}/sources/curl-probe"
+    printf "%s\n" "Classic source: https://github.com/atrinik/classic/tree/${qualification_commit}" \
+      > "${stage}/sources/Classic-source.txt"
+    cmake -E copy /image-source/tools/run-classic-native-tests.ps1 \
+      "${stage}/run-classic-native-tests.ps1"
     cmake -E copy /image-source/windows/classic-check-toolchain.json \
       "${stage}/classic-check-toolchain.json"
     ccache --show-stats

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
+import json
 import re
 import subprocess
 import sys
@@ -28,6 +30,7 @@ SYSTEM_DLLS = {
     "crypt32.dll",
     "d2d1.dll",
     "d3d11.dll",
+    "d3d12.dll",
     "dbghelp.dll",
     "dinput8.dll",
     "dnsapi.dll",
@@ -38,6 +41,7 @@ SYSTEM_DLLS = {
     "imm32.dll",
     "iphlpapi.dll",
     "kernel32.dll",
+    "msimg32.dll",
     "msvcrt.dll",
     "ncrypt.dll",
     "normaliz.dll",
@@ -74,14 +78,20 @@ def is_system_dll(name: str) -> bool:
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
+    if len(sys.argv) != 4:
         print(
-            f"usage: {Path(sys.argv[0]).name} PACKAGE OBJDUMP",
+            f"usage: {Path(sys.argv[0]).name} PACKAGE OBJDUMP TOOLCHAIN_MANIFEST",
             file=sys.stderr,
         )
         return 2
     package = Path(sys.argv[1])
     objdump = sys.argv[2]
+    manifest = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+    expected_payloads = {
+        "ca-bundle.crt": manifest["verification"]["public_ca"]["sha256"],
+        manifest["runtime_contract"]["cares_license"]["bundle_name"]:
+            manifest["runtime_contract"]["cares_license"]["sha256"],
+    }
     application_id = b"123456789012345678\n"
     with zipfile.ZipFile(package) as archive, tempfile.TemporaryDirectory() as temporary:
         names = archive.namelist()
@@ -97,6 +107,14 @@ def main() -> int:
         for name in names:
             if not name.endswith("/"):
                 archive_by_basename.setdefault(Path(name).name.lower(), []).append(name)
+        for basename, expected_digest in expected_payloads.items():
+            if not re.fullmatch(r"[0-9a-f]{64}", expected_digest):
+                raise RuntimeError(f"invalid expected checksum for {basename}")
+            matches = archive_by_basename.get(basename.lower(), [])
+            if len(matches) != 1:
+                raise RuntimeError(f"package must contain exactly one {basename}")
+            if hashlib.sha256(archive.read(matches[0])).hexdigest() != expected_digest:
+                raise RuntimeError(f"packaged {basename} checksum does not match toolchain contract")
         missing_expected = EXPECTED_RUNTIME_DLLS - archive_by_basename.keys()
         if missing_expected:
             raise RuntimeError(

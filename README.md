@@ -467,3 +467,45 @@ Redistributors must retain the pinned source archives, notices, build recipes,
 and Debian source coordinates and satisfy the corresponding-source and LGPL
 replacement/relinking obligations in the contract. Authored game media remain
 `content@main`, resources and sound inputs owned by their respective repositories.
+
+### Classic curl resolver
+
+The broad and slim Linux images install curl 8.18.0 and c-ares 1.34.6 in
+`/usr/local`; the existing system OpenSSL 3.5.5 remains the TLS provider.
+CMake and pkg-config use the installed headers and libraries there, and
+`ldconfig` registers `libcurl.so.4` and `libcares.so.2`. System curl packages
+remain recorded in the package lock for reproducibility; they are not the
+Classic application's selected resolver provider.
+
+Both MXE Windows images retain curl 8.21.0 in the standard shared target
+prefix, add `libcares-2.dll` to that runtime directory, and explicitly pin
+OpenSSL 3.5.5. The source pins are in `classic-curl-toolchain.json`. LDAP/LDAPS and RTMP are
+excluded explicitly; HTTP/TLS, HTTP2, compression, PSL and IDN remain supported.
+The generated curl configuration is retained in `share/atrinik/curl` and
+`atrinik-verify-classic-curl` rejects threaded resolver macros: ASYNCHDNS and
+a non-null c-ares version alone are insufficient for a pure c-ares backend.
+
+Producer build checks establish the selected source and resolver configuration.
+Activation additionally requires actual stalled-DNS cancellation through easy,
+multi and global cleanup, HTTP/TLS including the public CA bundle, Classic
+QUIC, and Linux ELF / Windows DLL closure checks against the immutable image.
+Linux cross-build success does not establish native Windows execution.
+
+Classic producer qualification runs the real library cancellation helper with
+witnessed stalled DNS and HTTP, then verifies the pinned Classic public CA bundle
+against `https://curl.se/`. Both Linux variants run these checks before candidate
+or release publication. Windows candidates stage the portable helper probe and
+native QUIC test with their resolved DLL closure; validation, measurement and
+release pipelines execute all eight native tests with process deadlines and
+verify actual public TLS before alias promotion. `tools/curl-probe` is explicitly
+GPL-2.0-or-later, matching the linked Classic library; its sources and Classic
+license/source coordinates accompany the native qualification bundle.
+
+The Windows producer and native qualification bundle retain the exact c-ares
+1.34.6 MIT notice, including its named copyright holders. The Windows inventory
+pins its upstream source, installed path and checksum.
+
+Windows smoke prepares and validates the GPU shader cohort through the pinned
+Classic `tools/ci/prepare_gpu_shaders.sh` workflow before its offline MXE build.
+The container consumes generated artifacts, so host shader-tool binaries do not
+become container ABI dependencies.

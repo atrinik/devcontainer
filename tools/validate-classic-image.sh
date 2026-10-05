@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+/usr/local/bin/atrinik-verify-classic-curl /usr/local
+
 if [[ $# -ne 9 ]]; then
   echo "usage: $0 PACKAGE_LOCK EXPECTED_INVENTORY INSTALLED_INVENTORY AUDIO_INVENTORY DOCKERFILE SHADER_INVENTORY SHADER_INSTALLED SHADER_SPDX SHADER_SPDX_INSTALLED" >&2
   exit 2

@@ -4,7 +4,7 @@
   "target": "classic-check",
   "consumer": {
     "repository": "atrinik/classic",
-    "validation_commit": "8fec1db157bcfdd050c1ba360e77365bce701bba",
+    "validation_commit": "9136e13efabc0f6edd513517b3a437c927b5edea",
     "workflow": ".github/workflows/check.yml",
     "jobs": [
       "Build native Windows tests",
@@ -17,7 +17,7 @@
   },
   "base": {
     "image": "mcr.microsoft.com/devcontainers/base:bookworm",
-    "digest": "sha256:73d85a96694a2cadca1ba3fcb5721f2312a64f1d571dd86f6c77e10a708931dc"
+    "digest": "sha256:86165cfc170e9b2aa8df90b847127eea97b08eb9987021e6e6ec6c3a96545d7c"
   },
   "host_packages": [
     "ca-certificates",
@@ -31,6 +31,7 @@
     "commit": "8784776b145a8ddd350ce32aa0908ac10977060c",
     "target": "x86_64-w64-mingw32.shared",
     "packages": [
+      "c-ares",
       "cc",
       "cmake",
       "curl",
@@ -98,7 +99,13 @@
     "inventory": "/usr/local/share/atrinik/audio-toolchain.json",
     "sbom": "/usr/local/share/atrinik/audio-toolchain.spdx.json",
     "probe": "/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/atrinik-sdl3-mixer-probe.exe",
-    "import_contract_source": "audio-toolchain.json#windows"
+    "import_contract_source": "audio-toolchain.json#windows",
+    "cares_license": {
+      "source": "/opt/mxe/usr/x86_64-w64-mingw32.shared/share/licenses/c-ares/LICENSE.md",
+      "upstream": "https://github.com/c-ares/c-ares/blob/v1.34.6/LICENSE.md",
+      "sha256": "460f5e768fda3752ca2169a95df062578a10fb126bfd65f3b9b1a1bed2f84807",
+      "bundle_name": "c-ares-LICENSE.md"
+    }
   },
   "verification": {
     "native_tests": [
@@ -112,17 +119,14 @@
         "executable": "libatrinik-rendezvous.exe",
         "build_target": "libatrinik-rendezvous",
         "source": "libatrinik/build/windows-tests/libatrinik-rendezvous.exe",
-        "arguments": [
-          "fixtures/rendezvous-invite-v1.json",
-          "fixtures/rendezvous-invite-v1-negative.json"
-        ]
+        "arguments": []
       },
       {
         "executable": "libatrinik-metaserver-publisher.exe",
         "build_target": "libatrinik-metaserver-publisher",
         "source": "libatrinik/build/windows-tests/libatrinik-metaserver-publisher.exe",
         "arguments": [
-          "fixtures/metaserver-publisher-v1.json"
+          "fixtures/metaserver-classic-publisher-v3.json"
         ]
       },
       {
@@ -138,12 +142,29 @@
         "arguments": []
       },
       {
+        "executable": "libatrinik-socket-quic.exe",
+        "build_target": "libatrinik-socket-quic",
+        "source": "libatrinik/build/windows-tests/libatrinik-socket-quic.exe",
+        "arguments": []
+      },
+      {
+        "executable": "atrinik-curl-cancellation-probe.exe",
+        "build_target": null,
+        "source": "libatrinik/build/windows-curl-probe/atrinik-curl-cancellation-probe.exe",
+        "arguments": []
+      },
+      {
         "executable": "client-rich-presence-tests.exe",
         "build_target": null,
-        "source": "client/build/windows-release/client-rich-presence-tests.exe",
+        "source": "client/build/windows-tests/client-rich-presence-tests.exe",
         "arguments": []
       }
-    ]
+    ],
+    "public_ca": {
+      "source": "client/ca-bundle.crt",
+      "sha256": "a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505",
+      "endpoint": "https://curl.se/"
+    }
   },
   "excluded": {
     "paths": [
@@ -162,5 +183,6 @@
       "general-purpose MXE development checkout"
     ],
     "reason": "Classic Check builds and stages only libatrinik and client native Windows tests; server packaging and worldmaker remain on the general-purpose image."
-  }
+  },
+  "curl_contract": "/usr/local/share/atrinik/classic-curl-toolchain.json"
 }

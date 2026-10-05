@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "resolver": "c-ares",
+  "threaded_resolver": false,
+  "cares": {
+    "version": "1.34.6",
+    "url": "https://github.com/c-ares/c-ares/releases/download/v1.34.6/c-ares-1.34.6.tar.gz",
+    "sha256": "912dd7cc3b3e8a79c52fd7fb9c0f4ecf0aaa73e45efda880266a2d6e26b84ef5"
+  },
+  "linux": {
+    "curl_version": "8.18.0",
+    "curl_url": "https://curl.se/download/curl-8.18.0.tar.xz",
+    "curl_sha256": "40df79166e74aa20149365e11ee4c798a46ad57c34e4f68fd13100e2c9a91946",
+    "prefix": "/usr/local",
+    "ca_bundle": "/etc/ssl/certs/ca-certificates.crt",
+    "openssl_version": "3.5.5",
+    "build_packages": {
+      "libpsl-dev": "0.21.2-1.1build2"
+    },
+    "payload": {
+      "include": [
+        "include/curl",
+        "include/ares.h",
+        "include/ares_version.h",
+        "include/ares_build.h",
+        "include/ares_dns.h",
+        "include/ares_dns_record.h",
+        "include/ares_nameser.h"
+      ],
+      "library_families": [
+        "lib/libcurl.so*",
+        "lib/libcares.so*"
+      ],
+      "pkg_config": [
+        "lib/pkgconfig/libcurl.pc",
+        "lib/pkgconfig/libcares.pc"
+      ],
+      "licenses": [
+        "share/licenses/curl/COPYING",
+        "share/licenses/c-ares/LICENSE.md"
+      ],
+      "evidence": [
+        "share/atrinik/classic-curl-toolchain.json",
+        "share/atrinik/curl/curl_config.h",
+        "share/atrinik/curl/config.log"
+      ]
+    }
+  },
+  "windows": {
+    "curl_version": "8.21.0",
+    "prefix": "/opt/mxe/usr/x86_64-w64-mingw32.shared",
+    "openssl_version": "3.5.5",
+    "openssl_sha256": "b28c91532a8b65a1f983b4c28b7488174e4a01008e29ce8e69bd789f28bc2a89",
+    "cares_runtime": "libcares-2.dll"
+  },
+  "excluded_features": [
+    "LDAP",
+    "LDAPS",
+    "RTMP"
+  ]
+}
