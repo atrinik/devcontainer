@@ -65,7 +65,9 @@ RUN git clone --filter=blob:none https://github.com/mxe/mxe.git /opt/mxe \
     && git -C /opt/mxe checkout "${MXE_REF}"
 
 COPY windows/curl-openssl.patch /tmp/curl-openssl.patch
-RUN git -C /opt/mxe apply /tmp/curl-openssl.patch \
+COPY windows/openssl-3.5.patch /tmp/openssl-3.5.patch
+COPY windows/c-ares.mk /opt/mxe/src/c-ares.mk
+RUN git -C /opt/mxe apply /tmp/curl-openssl.patch /tmp/openssl-3.5.patch \
     && chown -R vscode:vscode /opt/mxe
 
 ENV MXE_ROOT=/opt/mxe \
@@ -98,8 +100,14 @@ RUN git -C /opt/mxe apply /tmp/sdl3-image-disable-tiff.patch \
 RUN make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
         MXE_TARGETS=x86_64-w64-mingw32.shared \
         sdl3_ttf
-RUN test "$(/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/curl-config --ssl-backends)" \
-        = "OpenSSL"
+COPY --chown=vscode:vscode tools/verify-classic-curl.sh /tmp/verify-classic-curl.sh
+RUN /tmp/verify-classic-curl.sh /opt/mxe/usr/x86_64-w64-mingw32.shared \
+    && test "$(/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/curl-config --ssl-backends)" \
+        = "OpenSSL" \
+    && test "$(/opt/mxe/usr/bin/x86_64-w64-mingw32.shared-pkg-config --modversion openssl)" = "3.5.5" \
+    && test "$(/opt/mxe/usr/bin/x86_64-w64-mingw32.shared-pkg-config --modversion libcares)" = "1.34.6" \
+    && /opt/mxe/usr/x86_64-w64-mingw32.shared/bin/curl-config --configure \
+        | grep -F -- --disable-threaded-resolver
 
 # Install the audio manifest reader after the expensive MXE foundation so this
 # small dependency does not invalidate the established cross-toolchain cache.
@@ -220,6 +228,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         zlib1g-dev
 
 COPY windows/mxe-path.sh /etc/profile.d/mxe-path.sh
+COPY classic-curl-toolchain.json /usr/local/share/atrinik/classic-curl-toolchain.json
 COPY audio-toolchain.json /usr/local/share/atrinik/audio-toolchain.json
 COPY audio-toolchain.spdx.json /usr/local/share/atrinik/audio-toolchain.spdx.json
 
@@ -308,6 +317,7 @@ ENV MXE_ROOT=/opt/mxe \
 COPY windows/mxe-path.sh /etc/profile.d/mxe-path.sh
 COPY windows/classic-check-toolchain.json \
     /usr/local/share/atrinik/classic-check-toolchain.json
+COPY classic-curl-toolchain.json /usr/local/share/atrinik/classic-curl-toolchain.json
 COPY audio-toolchain.json /usr/local/share/atrinik/audio-toolchain.json
 COPY audio-toolchain.spdx.json \
     /usr/local/share/atrinik/audio-toolchain.spdx.json

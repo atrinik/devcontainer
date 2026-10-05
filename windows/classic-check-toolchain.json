@@ -31,6 +31,7 @@
     "commit": "8784776b145a8ddd350ce32aa0908ac10977060c",
     "target": "x86_64-w64-mingw32.shared",
     "packages": [
+      "c-ares",
       "cc",
       "cmake",
       "curl",
@@ -162,5 +163,6 @@
       "general-purpose MXE development checkout"
     ],
     "reason": "Classic Check builds and stages only libatrinik and client native Windows tests; server packaging and worldmaker remain on the general-purpose image."
-  }
+  },
+  "curl_contract": "/usr/local/share/atrinik/classic-curl-toolchain.json"
 }

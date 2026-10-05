@@ -23,6 +23,7 @@ jq -e '
 ' "${expected}" >/dev/null
 
 if [[ -n ${installed} ]]; then
+  /usr/local/bin/atrinik-verify-classic-curl /usr/local
   cmp --silent "${expected}" "${installed}"
 
   test "$(go env GOVERSION)" = "go$(jq -r '.tools.go' "${expected}")"
@@ -130,7 +131,7 @@ fi
 if [[ -n ${classic_check_expected} ]]; then
   jq -e '
   keys == [
-    "$schema", "base", "consumer", "excluded", "host_packages", "mxe",
+    "$schema", "base", "consumer", "curl_contract", "excluded", "host_packages", "mxe",
     "runtime_contract", "schema_version", "staging", "target", "verification"
   ]
   and .["$schema"] == "https://json-schema.org/draft/2020-12/schema"
@@ -163,7 +164,7 @@ if [[ -n ${classic_check_expected} ]]; then
   and .mxe.commit == "8784776b145a8ddd350ce32aa0908ac10977060c"
   and .mxe.target == "x86_64-w64-mingw32.shared"
   and .mxe.packages == [
-    "cc", "cmake", "curl", "libidn2", "libxml2", "openssl", "sdl3",
+    "c-ares", "cc", "cmake", "curl", "libidn2", "libxml2", "openssl", "sdl3",
     "sdl3_image", "sdl3_ttf", "zlib"
   ]
   and .mxe.additional_libraries == [

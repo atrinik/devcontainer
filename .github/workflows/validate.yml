@@ -53,7 +53,7 @@ jobs:
                 classic-vulkan-toolchain.json | \
                 classic-vulkan-toolchain.spdx.json | \
                 classic-vulkan-packages.lock | \
-                toolchains.json | tools/audio/* | \
+                toolchains.json | classic-curl-toolchain.json | tools/build-classic-curl.sh | tools/verify-classic-curl.sh | tools/audio/* | \
                 tools/build-sdl3-mixer.sh | \
                 tools/install_classic_vulkan_toolchain.py | \
                 tools/require-image-checks.sh | \
@@ -69,6 +69,7 @@ jobs:
                 .github/workflows/validate.yml | linux/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
                 classic-packages.lock | classic-toolchain.json | \
+                classic-curl-toolchain.json | tools/build-classic-curl.sh | tools/verify-classic-curl.sh | \
                 classic-shader-toolchain.json | \
                 classic-shader-toolchain.spdx.json | \
                 classic-vulkan-toolchain.json | \
@@ -93,6 +94,7 @@ jobs:
                 .github/workflows/publish-windows.yml | \
                 .github/workflows/validate.yml | windows/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
+                classic-curl-toolchain.json | tools/verify-classic-curl.sh | \
                 tools/audio/* | \
                 tools/build-sdl3-mixer.sh | \
                 tools/measure-classic-check-images.sh | \
