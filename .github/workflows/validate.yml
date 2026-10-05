@@ -53,7 +53,8 @@ jobs:
                 classic-vulkan-toolchain.json | \
                 classic-vulkan-toolchain.spdx.json | \
                 classic-vulkan-packages.lock | \
-                toolchains.json | classic-curl-toolchain.json | tools/build-classic-curl.sh | tools/verify-classic-curl.sh | tools/audio/* | \
+                toolchains.json | classic-toolchain.json | windows/classic-check-toolchain.json | classic-curl-toolchain.json | tools/build-classic-curl.sh | tools/verify-classic-curl.sh | \
+                tools/curl-probe/* | tools/smoke-classic-curl.sh | tools/audio/* | \
                 tools/build-sdl3-mixer.sh | \
                 tools/install_classic_vulkan_toolchain.py | \
                 tools/require-image-checks.sh | \
@@ -68,8 +69,9 @@ jobs:
             .dockerignore | .github/workflows/publish-linux.yml | \
                 .github/workflows/validate.yml | linux/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
-                classic-packages.lock | classic-toolchain.json | \
+                classic-packages.lock | classic-toolchain.json | windows/classic-check-toolchain.json | \
                 classic-curl-toolchain.json | tools/build-classic-curl.sh | tools/verify-classic-curl.sh | \
+                tools/curl-probe/* | tools/smoke-classic-curl.sh | \
                 classic-shader-toolchain.json | \
                 classic-shader-toolchain.spdx.json | \
                 classic-vulkan-toolchain.json | \
@@ -95,6 +97,7 @@ jobs:
                 .github/workflows/validate.yml | windows/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
                 classic-curl-toolchain.json | tools/verify-classic-curl.sh | \
+                tools/curl-probe/* | tools/run-classic-native-tests.ps1 | \
                 tools/audio/* | \
                 tools/build-sdl3-mixer.sh | \
                 tools/measure-classic-check-images.sh | \
@@ -158,6 +161,21 @@ jobs:
           tags: atrinik-linux-validation:ci
           cache-from: type=gha,scope=linux-build-image
           cache-to: type=gha,mode=max,scope=linux-build-image,ignore-error=true
+
+      - name: Read broad Linux cancellation qualification consumer
+        id: curl-consumer
+        run: echo "commit=$(jq -er '.consumer_validation.commit' classic-toolchain.json)" >> "${GITHUB_OUTPUT}"
+
+      - name: Check out broad Linux cancellation qualification consumer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: atrinik/classic
+          ref: ${{ steps.curl-consumer.outputs.commit }}
+          path: build/curl-classic
+          persist-credentials: false
+
+      - name: Qualify broad Linux cancellation and public TLS
+        run: tools/smoke-classic-curl.sh atrinik-linux-validation:ci build/curl-classic
 
       - name: Verify non-root gh-stack contract
         run: |
@@ -346,25 +364,7 @@ jobs:
       - name: Execute every Classic Check native test
         shell: pwsh
         run: |
-          $bundle = (Resolve-Path "build/native-windows-tests").Path
-          $env:PATH = "${bundle};${env:PATH}"
-          $inventoryPath = Join-Path $bundle "classic-check-toolchain.json"
-          $tests = (Get-Content -Raw $inventoryPath | ConvertFrom-Json).verification.native_tests
-          if ($tests.Count -ne 6) { throw "Expected six declared native tests" }
-          foreach ($test in $tests) {
-            $executable = Join-Path $bundle $test.executable
-            $arguments = @($test.arguments | ForEach-Object {
-              if ([IO.Path]::IsPathRooted($_) -or $_ -like "../*" -or $_ -like "..\\*") {
-                throw "Unsafe native-test argument: $_"
-              }
-              Join-Path $bundle $_
-            })
-            & $executable @arguments
-            if ($LASTEXITCODE -ne 0) {
-              throw "$($test.executable) failed: ${LASTEXITCODE}"
-            }
-          }
-
+          & (Join-Path (Resolve-Path "build/native-windows-tests").Path "run-classic-native-tests.ps1")
   classic:
     name: Classic CI image
     needs: changes
@@ -410,6 +410,10 @@ jobs:
           repository: atrinik/classic
           ref: ${{ steps.consumer.outputs.commit }}
           path: classic
+          persist-credentials: false
+
+      - name: Qualify Classic resolver cancellation and public TLS
+        run: tools/smoke-classic-curl.sh atrinik-classic-build:validation classic
 
       - name: Run Classic client and server checks as the runner user
         run: |

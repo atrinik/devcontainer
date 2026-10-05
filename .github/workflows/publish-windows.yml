@@ -178,25 +178,7 @@ jobs:
       - name: Execute every Classic Check native test
         shell: pwsh
         run: |
-          $bundle = (Resolve-Path "build/native-windows-tests").Path
-          $env:PATH = "${bundle};${env:PATH}"
-          $inventoryPath = Join-Path $bundle "classic-check-toolchain.json"
-          $tests = (Get-Content -Raw $inventoryPath | ConvertFrom-Json).verification.native_tests
-          if ($tests.Count -ne 6) { throw "Expected six declared native tests" }
-          foreach ($test in $tests) {
-            $executable = Join-Path $bundle $test.executable
-            $arguments = @($test.arguments | ForEach-Object {
-              if ([IO.Path]::IsPathRooted($_) -or $_ -like "../*" -or $_ -like "..\\*") {
-                throw "Unsafe native-test argument: $_"
-              }
-              Join-Path $bundle $_
-            })
-            & $executable @arguments
-            if ($LASTEXITCODE -ne 0) {
-              throw "$($test.executable) failed: ${LASTEXITCODE}"
-            }
-          }
-
+          & (Join-Path (Resolve-Path "build/native-windows-tests").Path "run-classic-native-tests.ps1")
   promote:
     name: Promote verified Windows image aliases
     needs:

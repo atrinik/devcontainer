@@ -33,6 +33,10 @@
   curl with c-ares and no threaded resolver. Preserve generated configuration,
   header/runtime/license closure and native cancellation qualification; ASYNCHDNS
   or a non-null c-ares field alone does not prove the selected backend.
+  Both Linux publication paths must run `tools/smoke-classic-curl.sh` against
+  their actual loaded candidate before publication; `candidate_only` retains
+  this gate. Windows validation/measurement/publication share the bundled
+  native runner, including cancellation, QUIC and pinned public-CA checks.
 - The broad Linux and `classic-final` images include the snapshot-pinned Git LFS
   client. Keep the Linux tool manifests, Classic package lock, non-root version
   checks, and isolated worktree/payload smoke synchronized when changing this

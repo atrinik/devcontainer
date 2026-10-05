@@ -4,7 +4,7 @@
   "target": "classic-check",
   "consumer": {
     "repository": "atrinik/classic",
-    "validation_commit": "cf79a590dd9789e8a6b6e1fbd57d7f5110845e05",
+    "validation_commit": "8f5b8236bcd13e311f5b7e9a987e358df883eb2a",
     "workflow": ".github/workflows/check.yml",
     "jobs": [
       "Build native Windows tests",
@@ -139,12 +139,29 @@
         "arguments": []
       },
       {
+        "executable": "libatrinik-socket-quic.exe",
+        "build_target": "libatrinik-socket-quic",
+        "source": "libatrinik/build/windows-tests/libatrinik-socket-quic.exe",
+        "arguments": []
+      },
+      {
+        "executable": "atrinik-curl-cancellation-probe.exe",
+        "build_target": null,
+        "source": "libatrinik/build/windows-curl-probe/atrinik-curl-cancellation-probe.exe",
+        "arguments": []
+      },
+      {
         "executable": "client-rich-presence-tests.exe",
         "build_target": null,
         "source": "client/build/windows-release/client-rich-presence-tests.exe",
         "arguments": []
       }
-    ]
+    ],
+    "public_ca": {
+      "source": "client/ca-bundle.crt",
+      "sha256": "8c7a422750d1ff035b940bb74c13fdea2d1dc55cda1eafb68201088ed4b47d35",
+      "endpoint": "https://curl.se/"
+    }
   },
   "excluded": {
     "paths": [

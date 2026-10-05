@@ -490,3 +490,13 @@ Activation additionally requires actual stalled-DNS cancellation through easy,
 multi and global cleanup, HTTP/TLS including the public CA bundle, Classic
 QUIC, and Linux ELF / Windows DLL closure checks against the immutable image.
 Linux cross-build success does not establish native Windows execution.
+
+Classic producer qualification runs the real library cancellation helper with
+witnessed stalled DNS and HTTP, then verifies the pinned Classic public CA bundle
+against `https://curl.se/`. Both Linux variants run these checks before candidate
+or release publication. Windows candidates stage the portable helper probe and
+native QUIC test with their resolved DLL closure; validation, measurement and
+release pipelines execute all eight native tests with process deadlines and
+verify actual public TLS before alias promotion. `tools/curl-probe` is explicitly
+GPL-2.0-or-later, matching the linked Classic library; its sources and Classic
+license/source coordinates accompany the native qualification bundle.

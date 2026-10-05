@@ -94,9 +94,22 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
     mapfile -t native_targets < <(python3 -c \
       "import json,sys; value=json.load(open(sys.argv[1])); print(*(item[\"build_target\"] for item in value[\"verification\"][\"native_tests\"] if item[\"build_target\"] is not None), sep=chr(10))" \
       /image-source/windows/classic-check-toolchain.json)
-    test "${#native_targets[@]}" -eq 5
+    test "${#native_targets[@]}" -eq 6
     cmake --build libatrinik/build/windows-tests \
       --target "${native_targets[@]}" --parallel "$(nproc)"
+
+    qualification_commit=$(python3 -c \
+      "import json,sys; print(json.load(open(sys.argv[1]))[\"consumer\"][\"validation_commit\"])" \
+      /image-source/windows/classic-check-toolchain.json)
+    x86_64-w64-mingw32.shared-cmake \
+      -S /image-source/tools/curl-probe \
+      -B libatrinik/build/windows-curl-probe \
+      -G Ninja \
+      -DATRINIK_CLASSIC_SOURCE_DIR=/workspace \
+      -DATRINIK_CLASSIC_QUALIFICATION_COMMIT="${qualification_commit}" \
+      -DCMAKE_BUILD_TYPE=Release
+    cmake --build libatrinik/build/windows-curl-probe \
+      --target atrinik-curl-cancellation-probe --parallel "$(nproc)"
 
     cd client
     bash tools/build-windows-package.sh build/windows-pr-package
@@ -113,13 +126,22 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
     mapfile -t native_sources < <(python3 -c \
       "import json,sys; value=json.load(open(sys.argv[1])); print(*(item[\"source\"] for item in value[\"verification\"][\"native_tests\"]), sep=chr(10))" \
       /image-source/windows/classic-check-toolchain.json)
-    test "${#native_sources[@]}" -eq 6
+    test "${#native_sources[@]}" -eq 8
     python3 tools/ci/stage_windows_runtime.py \
       --objdump x86_64-w64-mingw32.shared-objdump \
       --runtime-dir "${MXE_RUNTIME_DIR}" \
       --output-dir "${stage}" \
       "${native_sources[@]}"
     cmake -E copy_directory libatrinik/tests/fixtures "${stage}/fixtures"
+    test "$(sha256sum client/ca-bundle.crt | cut -d " " -f 1)" = \
+      "$(python3 -c "import json; print(json.load(open(\"/image-source/windows/classic-check-toolchain.json\"))[\"verification\"][\"public_ca\"][\"sha256\"])")"
+    cmake -E copy client/ca-bundle.crt "${stage}/ca-bundle.crt"
+    cmake -E copy LICENSE.md "${stage}/Classic-LICENSE.md"
+    cmake -E copy_directory /image-source/tools/curl-probe "${stage}/sources/curl-probe"
+    printf "%s\n" "Classic source: https://github.com/atrinik/classic/tree/${qualification_commit}" \
+      > "${stage}/sources/Classic-source.txt"
+    cmake -E copy /image-source/tools/run-classic-native-tests.ps1 \
+      "${stage}/run-classic-native-tests.ps1"
     cmake -E copy /image-source/windows/classic-check-toolchain.json \
       "${stage}/classic-check-toolchain.json"
     ccache --show-stats

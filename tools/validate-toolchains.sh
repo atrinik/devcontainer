@@ -209,15 +209,22 @@ if [[ -n ${classic_check_expected} ]]; then
     "probe": "/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/atrinik-sdl3-mixer-probe.exe",
     "import_contract_source": "audio-toolchain.json#windows"
   }
-  and (.verification | keys == ["native_tests"])
+  and (.verification | keys == ["native_tests", "public_ca"])
   and .verification.native_tests == [
     {"executable":"libatrinik-path.exe","build_target":"libatrinik-path","source":"libatrinik/build/windows-tests/libatrinik-path.exe","arguments":[]},
     {"executable":"libatrinik-rendezvous.exe","build_target":"libatrinik-rendezvous","source":"libatrinik/build/windows-tests/libatrinik-rendezvous.exe","arguments":["fixtures/rendezvous-invite-v1.json","fixtures/rendezvous-invite-v1-negative.json"]},
     {"executable":"libatrinik-metaserver-publisher.exe","build_target":"libatrinik-metaserver-publisher","source":"libatrinik/build/windows-tests/libatrinik-metaserver-publisher.exe","arguments":["fixtures/metaserver-publisher-v1.json"]},
     {"executable":"libatrinik-metaserver-url.exe","build_target":"libatrinik-metaserver-url","source":"libatrinik/build/windows-tests/libatrinik-metaserver-url.exe","arguments":[]},
     {"executable":"libatrinik-stun.exe","build_target":"libatrinik-stun","source":"libatrinik/build/windows-tests/libatrinik-stun.exe","arguments":[]},
+    {"executable":"libatrinik-socket-quic.exe","build_target":"libatrinik-socket-quic","source":"libatrinik/build/windows-tests/libatrinik-socket-quic.exe","arguments":[]},
+    {"executable":"atrinik-curl-cancellation-probe.exe","build_target":null,"source":"libatrinik/build/windows-curl-probe/atrinik-curl-cancellation-probe.exe","arguments":[]},
     {"executable":"client-rich-presence-tests.exe","build_target":null,"source":"client/build/windows-release/client-rich-presence-tests.exe","arguments":[]}
   ]
+  and .verification.public_ca == {
+    "source":"client/ca-bundle.crt",
+    "sha256":"8c7a422750d1ff035b940bb74c13fdea2d1dc55cda1eafb68201088ed4b47d35",
+    "endpoint":"https://curl.se/"
+  }
   and .excluded == {
     "paths": [
       "/opt/mxe/.git", "/opt/mxe/.ccache/ccache", "/opt/mxe/log",
