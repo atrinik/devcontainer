@@ -222,7 +222,7 @@ if [[ -n ${classic_check_expected} ]]; then
   ]
   and .verification.public_ca == {
     "source":"client/ca-bundle.crt",
-    "sha256":"8c7a422750d1ff035b940bb74c13fdea2d1dc55cda1eafb68201088ed4b47d35",
+    "sha256":"a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505",
     "endpoint":"https://curl.se/"
   }
   and .excluded == {

@@ -137,6 +137,8 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
       "$(python3 -c "import json; print(json.load(open(\"/image-source/windows/classic-check-toolchain.json\"))[\"verification\"][\"public_ca\"][\"sha256\"])")"
     cmake -E copy client/ca-bundle.crt "${stage}/ca-bundle.crt"
     cmake -E copy LICENSE.md "${stage}/Classic-LICENSE.md"
+    cmake -E copy ATTRIBUTIONS.md "${stage}/ATTRIBUTIONS.md"
+    cmake -E copy docs/CA-BUNDLE.md "${stage}/CA-BUNDLE.md"
     cmake -E copy_directory /image-source/tools/curl-probe "${stage}/sources/curl-probe"
     printf "%s\n" "Classic source: https://github.com/atrinik/classic/tree/${qualification_commit}" \
       > "${stage}/sources/Classic-source.txt"

@@ -2,7 +2,7 @@
 
 `atrinik-curl-cancellation-probe` links the real `Atrinik::Core`
 `curl_perform_cancellable` helper from a clean Classic commit. The default is
-`cf79a590dd9789e8a6b6e1fbd57d7f5110845e05`; producers can pass a full lowercase
+`66923f8dc65ecbb607df0dd2235517bbca705e3c`; producers can pass a full lowercase
 `ATRINIK_CLASSIC_QUALIFICATION_COMMIT` SHA from their committed consumer manifest.
 The bridge requires actual Git HEAD and clean tracked source to match that SHA.
 The C17 source uses Winsock and a
