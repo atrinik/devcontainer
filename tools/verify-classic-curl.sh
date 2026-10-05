@@ -10,6 +10,18 @@ if grep -Eq '^#define USE_THREADS_(POSIX|WIN32) 1$' "$config"; then
 fi
 "$prefix/bin/curl-config" --configure | grep -F -- --disable-threaded-resolver
 "$prefix/bin/curl-config" --ssl-backends | grep -Fx OpenSSL
+features=$("$prefix/bin/curl-config" --features)
+protocols=$("$prefix/bin/curl-config" --protocols)
+for feature in AsynchDNS HTTP2 IDN PSL SSL libz brotli zstd; do
+  grep -Fx "$feature" <<< "$features"
+done
+for protocol in HTTP HTTPS WS WSS; do
+  grep -Fx "$protocol" <<< "$protocols"
+done
+if grep -Eq '^(LDAP|LDAPS|RTMP|RTMPS|RTMPE|RTMPT|RTMPTE|RTMPTS)$' <<< "$protocols"; then
+  echo 'excluded LDAP or RTMP protocol present' >&2
+  exit 1
+fi
 if [[ $prefix == /usr/local ]]; then
   test "$(pkg-config --modversion libcurl)" = 8.18.0
   test "$(pkg-config --variable=prefix libcurl)" = "$prefix"
