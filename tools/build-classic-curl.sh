@@ -14,8 +14,8 @@ fetch() {
 }
 fetch "$(jq -r '.cares.url' "$manifest")" "$work/cares.tar.gz" "$(jq -r '.cares.sha256' "$manifest")"
 fetch "$(jq -r '.linux.curl_url' "$manifest")" "$work/curl.tar.xz" "$(jq -r '.linux.curl_sha256' "$manifest")"
-tar -xf "$work/cares.tar.gz" -C "$work"
-tar -xf "$work/curl.tar.xz" -C "$work"
+tar --no-same-owner -xf "$work/cares.tar.gz" -C "$work"
+tar --no-same-owner -xf "$work/curl.tar.xz" -C "$work"
 cmake -S "$work/c-ares-$(jq -r '.cares.version' "$manifest")" -B "$work/cares-build" \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" -DCMAKE_INSTALL_LIBDIR=lib \
   -DCARES_STATIC=OFF -DCARES_SHARED=ON -DCARES_BUILD_TOOLS=OFF -DCARES_BUILD_TESTS=OFF
