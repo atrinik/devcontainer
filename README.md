@@ -500,3 +500,7 @@ release pipelines execute all eight native tests with process deadlines and
 verify actual public TLS before alias promotion. `tools/curl-probe` is explicitly
 GPL-2.0-or-later, matching the linked Classic library; its sources and Classic
 license/source coordinates accompany the native qualification bundle.
+
+The Windows producer and native qualification bundle retain the exact c-ares
+1.34.6 MIT notice, including its named copyright holders. The Windows inventory
+pins its upstream source, installed path and checksum.

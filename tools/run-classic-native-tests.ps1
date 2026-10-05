@@ -6,6 +6,11 @@ $env:PATH = "${bundle};${env:PATH}"
 $inventory = Get-Content -Raw (Join-Path $bundle 'classic-check-toolchain.json') | ConvertFrom-Json
 $tests = $inventory.verification.native_tests
 if ($tests.Count -ne 8) { throw 'Expected eight declared native tests' }
+$caresNotice = $inventory.runtime_contract.cares_license
+$noticePath = Join-Path $bundle $caresNotice.bundle_name
+if ((Get-FileHash -Algorithm SHA256 $noticePath).Hash.ToLowerInvariant() -ne $caresNotice.sha256) {
+    throw 'c-ares license notice does not match the pinned producer'
+}
 
 function Invoke-QualifiedNativeTest {
     param([string]$Executable, [string[]]$Arguments, [int]$TimeoutMs)

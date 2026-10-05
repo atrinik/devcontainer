@@ -183,6 +183,10 @@ RUN mxe_commit=$(jq -er '.mxe.commit' \
     && rm -rf /tmp/miniupnp /tmp/miniupnp-build \
         /tmp/classic-check-toolchain.json
 
+# Retain the exact notice for the new resolver DLL after the MXE foundation.
+COPY --chown=vscode:vscode windows/licenses/c-ares-1.34.6.LICENSE.md \
+    /opt/mxe/usr/x86_64-w64-mingw32.shared/share/licenses/c-ares/LICENSE.md
+
 FROM windows-shared AS windows-build
 
 RUN mkdir -p "${ATRINIK_WINDOWS_PYTHON_RUNTIME_DIR}" /tmp/python-sdk \

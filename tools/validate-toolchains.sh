@@ -207,7 +207,13 @@ if [[ -n ${classic_check_expected} ]]; then
     "inventory": "/usr/local/share/atrinik/audio-toolchain.json",
     "sbom": "/usr/local/share/atrinik/audio-toolchain.spdx.json",
     "probe": "/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/atrinik-sdl3-mixer-probe.exe",
-    "import_contract_source": "audio-toolchain.json#windows"
+    "import_contract_source": "audio-toolchain.json#windows",
+    "cares_license": {
+      "source":"/opt/mxe/usr/x86_64-w64-mingw32.shared/share/licenses/c-ares/LICENSE.md",
+      "upstream":"https://github.com/c-ares/c-ares/blob/v1.34.6/LICENSE.md",
+      "sha256":"460f5e768fda3752ca2169a95df062578a10fb126bfd65f3b9b1a1bed2f84807",
+      "bundle_name":"c-ares-LICENSE.md"
+    }
   }
   and (.verification | keys == ["native_tests", "public_ca"])
   and .verification.native_tests == [

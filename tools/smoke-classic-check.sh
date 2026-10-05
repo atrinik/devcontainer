@@ -139,6 +139,10 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
     cmake -E copy LICENSE.md "${stage}/Classic-LICENSE.md"
     cmake -E copy ATTRIBUTIONS.md "${stage}/ATTRIBUTIONS.md"
     cmake -E copy docs/CA-BUNDLE.md "${stage}/CA-BUNDLE.md"
+    cares_license=/opt/mxe/usr/x86_64-w64-mingw32.shared/share/licenses/c-ares/LICENSE.md
+    test "$(sha256sum "${cares_license}" | cut -d " " -f 1)" = \
+      "$(python3 -c "import json; print(json.load(open(\"/image-source/windows/classic-check-toolchain.json\"))[\"runtime_contract\"][\"cares_license\"][\"sha256\"])")"
+    cmake -E copy "${cares_license}" "${stage}/c-ares-LICENSE.md"
     cmake -E copy_directory /image-source/tools/curl-probe "${stage}/sources/curl-probe"
     printf "%s\n" "Classic source: https://github.com/atrinik/classic/tree/${qualification_commit}" \
       > "${stage}/sources/Classic-source.txt"
