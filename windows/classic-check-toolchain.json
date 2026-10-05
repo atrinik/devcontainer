@@ -4,7 +4,7 @@
   "target": "classic-check",
   "consumer": {
     "repository": "atrinik/classic",
-    "validation_commit": "66923f8dc65ecbb607df0dd2235517bbca705e3c",
+    "validation_commit": "9136e13efabc0f6edd513517b3a437c927b5edea",
     "workflow": ".github/workflows/check.yml",
     "jobs": [
       "Build native Windows tests",
@@ -119,17 +119,14 @@
         "executable": "libatrinik-rendezvous.exe",
         "build_target": "libatrinik-rendezvous",
         "source": "libatrinik/build/windows-tests/libatrinik-rendezvous.exe",
-        "arguments": [
-          "fixtures/rendezvous-invite-v1.json",
-          "fixtures/rendezvous-invite-v1-negative.json"
-        ]
+        "arguments": []
       },
       {
         "executable": "libatrinik-metaserver-publisher.exe",
         "build_target": "libatrinik-metaserver-publisher",
         "source": "libatrinik/build/windows-tests/libatrinik-metaserver-publisher.exe",
         "arguments": [
-          "fixtures/metaserver-publisher-v1.json"
+          "fixtures/metaserver-classic-publisher-v3.json"
         ]
       },
       {
@@ -159,7 +156,7 @@
       {
         "executable": "client-rich-presence-tests.exe",
         "build_target": null,
-        "source": "client/build/windows-release/client-rich-presence-tests.exe",
+        "source": "client/build/windows-tests/client-rich-presence-tests.exe",
         "arguments": []
       }
     ],

@@ -48,6 +48,17 @@ for consumer_job in "${consumer_jobs[@]}"; do
   fi
 done
 
+mapfile -t native_fixture_arguments < <(jq -r \
+  '.verification.native_tests[].arguments[]' \
+  "${image_checkout}/windows/classic-check-toolchain.json")
+for fixture in "${native_fixture_arguments[@]}"; do
+  if [[ ${fixture} != fixtures/* ||
+        ! -f ${classic_checkout}/libatrinik/tests/${fixture} ]]; then
+    echo "Declared native fixture is missing from the pinned Classic source: ${fixture}" >&2
+    exit 1
+  fi
+done
+
 python3 "${classic_checkout}/client/tools/dependencies.py" sync
 # Follow the pinned consumer workflow: validate a host-generated shader cohort
 # before the offline MXE build rather than copying host compiler binaries.
@@ -126,8 +137,25 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
     test "${#packages[@]}" -eq 1
     package=${packages[0]}
     python3 /image-source/tools/verify-classic-check-package.py \
-      "${package}" x86_64-w64-mingw32.shared-objdump
+      "${package}" x86_64-w64-mingw32.shared-objdump \
+      /image-source/windows/classic-check-toolchain.json
     cd ..
+
+    # The production package disables tests. Build the native client test in the
+    # separate directory used by the pinned consumer workflow.
+    x86_64-w64-mingw32.shared-cmake \
+      -S client \
+      -B client/build/windows-tests \
+      -G Ninja \
+      -DBUILD_TESTING=ON \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DPACKAGE_TYPE=none \
+      -DATRINIK_PACKAGE_VERSION=0.0.0 \
+      -DATRINIK_GPU_SHADER_DIRECTORY=/workspace/build/gpu-shaders \
+      -DFETCHCONTENT_SOURCE_DIR_ATRINIK_PROTOCOL=/workspace/protocol \
+      -DFETCHCONTENT_SOURCE_DIR_LIBATRINIK=/workspace/libatrinik
+    cmake --build client/build/windows-tests \
+      --target client-rich-presence-tests --parallel "$(nproc)"
 
     stage=libatrinik/build/windows-test-bundle
     cmake -E remove_directory "${stage}"

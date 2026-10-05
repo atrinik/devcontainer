@@ -36,7 +36,7 @@
   ],
   "consumer_validation": {
     "repository": "atrinik/classic",
-    "commit": "66923f8dc65ecbb607df0dd2235517bbca705e3c"
+    "commit": "9136e13efabc0f6edd513517b3a437c927b5edea"
   },
   "curl_contract": "/usr/local/share/atrinik/classic-curl-toolchain.json"
 }
