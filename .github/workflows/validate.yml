@@ -129,6 +129,9 @@ jobs:
       - name: Test Classic dependency preflight
         run: python3 -m unittest tools/tests/test_verify_classic_check_dependencies.py
 
+      - name: Test Classic package runtime closure
+        run: python3 -m unittest tools/tests/test_verify_classic_check_package.py
+
       - name: Test Classic shader toolchain installer
         run: python3 -m unittest tools/tests/test_install_classic_shader_toolchain.py
 
