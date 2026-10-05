@@ -479,7 +479,8 @@ Classic application's selected resolver provider.
 
 Both MXE Windows images retain curl 8.21.0 in the standard shared target
 prefix, add `libcares-2.dll` to that runtime directory, and explicitly pin
-OpenSSL 3.5.5. The source pins are in `classic-curl-toolchain.json`.
+OpenSSL 3.5.5. The source pins are in `classic-curl-toolchain.json`. LDAP/LDAPS and RTMP are
+excluded explicitly; HTTP/TLS, HTTP2, compression, PSL and IDN remain supported.
 The generated curl configuration is retained in `share/atrinik/curl` and
 `atrinik-verify-classic-curl` rejects threaded resolver macros: ASYNCHDNS and
 a non-null c-ares version alone are insufficient for a pure c-ares backend.

@@ -151,7 +151,7 @@ if [[ -n ${classic_check_expected} ]]; then
   ]
   and .base == {
     "image": "mcr.microsoft.com/devcontainers/base:bookworm",
-    "digest": "sha256:73d85a96694a2cadca1ba3fcb5721f2312a64f1d571dd86f6c77e10a708931dc"
+    "digest": "sha256:86165cfc170e9b2aa8df90b847127eea97b08eb9987021e6e6ec6c3a96545d7c"
   }
   and .host_packages == [
     "ca-certificates", "cmake", "git", "ninja-build", "python3"

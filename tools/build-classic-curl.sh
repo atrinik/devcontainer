@@ -26,7 +26,7 @@ PKG_CONFIG_PATH="$prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
   ./configure --prefix="$prefix" --libdir="$prefix/lib" --with-openssl \
   --enable-ares="$prefix" --disable-threaded-resolver --disable-static --enable-versioned-symbols \
   --with-ca-bundle="$(jq -r '.linux.ca_bundle' "$manifest")" \
-  --with-ca-path=/etc/ssl/certs
+  --with-ca-path=/etc/ssl/certs --disable-ldap --disable-ldaps --without-librtmp
 # ASYNCHDNS and a non-null ares field alone also describe newer hybrid backends.
 # Reject the macros that take precedence over USE_ARES in curl_setup.h.
 grep -Eq '^#define USE_ARES 1$' lib/curl_config.h

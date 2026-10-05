@@ -10,7 +10,7 @@ diff --git a/src/curl.mk b/src/curl.mk
 
  define $(PKG)_UPDATE
      $(WGET) -q -O- 'https://curl.haxx.se/download/?C=M;O=D' | \
-@@ -20,7 +20,10 @@
+@@ -20,7 +20,13 @@
  define $(PKG)_BUILD
      cd '$(BUILD_DIR)' && $(SOURCE_DIR)/configure \
          $(MXE_CONFIGURE_OPTS) \
@@ -19,6 +19,9 @@ diff --git a/src/curl.mk b/src/curl.mk
 +        --without-schannel \
 +        --enable-ares='$(PREFIX)/$(TARGET)' \
 +        --disable-threaded-resolver \
++        --disable-ldap \
++        --disable-ldaps \
++        --without-librtmp \
          --with-libidn2 \
          --enable-sspi \
          --enable-ipv6 \
