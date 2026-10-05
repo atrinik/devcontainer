@@ -49,6 +49,13 @@ for consumer_job in "${consumer_jobs[@]}"; do
 done
 
 python3 "${classic_checkout}/client/tools/dependencies.py" sync
+# Follow the pinned consumer workflow: validate a host-generated shader cohort
+# before the offline MXE build rather than copying host compiler binaries.
+CMAKE_BUILD_PARALLEL_LEVEL=4 \
+  bash "${classic_checkout}/tools/ci/prepare_gpu_shaders.sh" \
+    "${classic_checkout}" \
+    "${classic_checkout}/build/gpu-shader-downloads" \
+    "${classic_checkout}/build/gpu-shaders"
 umask 077
 mkdir -p "${classic_checkout}/build"
 discord_test_file=$(mktemp \
@@ -62,6 +69,7 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
   --env CCACHE_TEMPDIR=/tmp/atrinik-classic-check-ccache-tmp \
   --env CCACHE_MAXSIZE=250M \
   --env ATRINIK_PACKAGE_VERSION=0.0.0 \
+  --env ATRINIK_GPU_SHADER_DIRECTORY=/workspace/build/gpu-shaders \
   --env ATRINIK_DISCORD_APPLICATION_ID_FILE="/workspace/${discord_test_relative}" \
   --volume "${classic_checkout}:/workspace" \
   --volume "${image_checkout}:/image-source:ro" \

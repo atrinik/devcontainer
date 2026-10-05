@@ -504,3 +504,8 @@ license/source coordinates accompany the native qualification bundle.
 The Windows producer and native qualification bundle retain the exact c-ares
 1.34.6 MIT notice, including its named copyright holders. The Windows inventory
 pins its upstream source, installed path and checksum.
+
+Windows smoke prepares and validates the GPU shader cohort through the pinned
+Classic `tools/ci/prepare_gpu_shaders.sh` workflow before its offline MXE build.
+The container consumes generated artifacts, so host shader-tool binaries do not
+become container ABI dependencies.
