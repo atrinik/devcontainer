@@ -6,8 +6,16 @@ cmake_minimum_required(VERSION 3.21)
 project(atrinik-curl-qualification LANGUAGES C)
 include(CTest)
 
-set(ATRINIK_CLASSIC_SOURCE_DIR "" CACHE PATH "Clean cf79 Classic source checkout")
-set(qualification_commit "cf79a590dd9789e8a6b6e1fbd57d7f5110845e05")
+set(ATRINIK_CLASSIC_SOURCE_DIR "" CACHE PATH "Clean pinned Classic source checkout")
+set(ATRINIK_CLASSIC_QUALIFICATION_COMMIT
+    "cf79a590dd9789e8a6b6e1fbd57d7f5110845e05" CACHE STRING
+    "Full Classic commit from the producer's committed consumer manifest")
+set(qualification_commit "${ATRINIK_CLASSIC_QUALIFICATION_COMMIT}")
+string(LENGTH "${qualification_commit}" qualification_commit_length)
+if (NOT qualification_commit MATCHES "^[0-9a-f]+$" OR
+        NOT qualification_commit_length EQUAL 40)
+    message(FATAL_ERROR "ATRINIK_CLASSIC_QUALIFICATION_COMMIT must be a full lowercase Git SHA")
+endif ()
 if (NOT EXISTS "${ATRINIK_CLASSIC_SOURCE_DIR}/libatrinik/curl.c")
     message(FATAL_ERROR "ATRINIK_CLASSIC_SOURCE_DIR must name the pinned Classic checkout")
 endif ()
