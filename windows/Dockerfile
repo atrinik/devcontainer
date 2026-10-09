@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 
-FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:86165cfc170e9b2aa8df90b847127eea97b08eb9987021e6e6ec6c3a96545d7c AS windows-shared
+FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:9a5942e64b35c5497c591b9bf177f4a3002d43440bf0a5e1a14fc34667b1a5c1 AS windows-shared
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -292,7 +292,7 @@ RUN mkdir -p /opt/classic-check/mxe \
     && cp -a /opt/mxe/usr/x86_64-pc-linux-gnu/share/cmake-3.31 \
         /opt/classic-check/mxe/usr/x86_64-pc-linux-gnu/share/
 
-FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:86165cfc170e9b2aa8df90b847127eea97b08eb9987021e6e6ec6c3a96545d7c AS classic-check
+FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:9a5942e64b35c5497c591b9bf177f4a3002d43440bf0a5e1a14fc34667b1a5c1 AS classic-check
 
 ENV DEBIAN_FRONTEND=noninteractive
 
