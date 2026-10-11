@@ -33,7 +33,7 @@ RUN python3 /tmp/install_llvm_toolchain.py --manifest /tmp/llvm-toolchain.json \
     && rm -rf /tmp/llvm-downloads
 
 
-FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:86165cfc170e9b2aa8df90b847127eea97b08eb9987021e6e6ec6c3a96545d7c AS windows-shared
+FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:9a5942e64b35c5497c591b9bf177f4a3002d43440bf0a5e1a14fc34667b1a5c1 AS windows-shared
 ENV DEBIAN_FRONTEND=noninteractive
 RUN rm -f /etc/apt/apt.conf.d/docker-clean
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -178,7 +178,7 @@ RUN x86_64-w64-mingw32-clang --version | grep -F '23.1.3' \
     && pkg-config --exists libidn2 && ssh -V
 
 # Shared expensive dependency stage branches before Python/worldmaker additions.
-FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:86165cfc170e9b2aa8df90b847127eea97b08eb9987021e6e6ec6c3a96545d7c AS classic-check
+FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:9a5942e64b35c5497c591b9bf177f4a3002d43440bf0a5e1a14fc34667b1a5c1 AS classic-check
 ENV DEBIAN_FRONTEND=noninteractive
 RUN rm -f /etc/apt/apt.conf.d/docker-clean
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
