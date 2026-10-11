@@ -138,6 +138,8 @@ def main(root: Path, jobs: int) -> None:
                         "-DCARES_BUILD_TOOLS=OFF", "-DCARES_BUILD_TESTS=OFF", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"], check=True)
         subprocess.run(["cmake", "--build", str(work / "cares-build"), "--parallel", str(jobs)], check=True)
         subprocess.run(["cmake", "--install", str(work / "cares-build")], check=True)
+        # Curl runs its newly linked CLI while generating shell completion data.
+        subprocess.run(["ldconfig"], check=True)
         shutil.copy2(work / "cares-build/compile_commands.json", retained / "cares-compile-commands.json")
         cares_notices = root / "notices/c-ares"
         cares_notices.mkdir(parents=True, exist_ok=True)
