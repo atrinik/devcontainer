@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Atrinik contributors
 # SPDX-License-Identifier: MIT
-name: Qualify Windows GLib TLS repair
+name: Qualify Windows GLib and Cairo TLS repairs
 
 on:
   pull_request:
@@ -22,10 +22,15 @@ concurrency:
 # remains owned by validate.yml and publish-windows.yml.
 jobs:
   cross-build:
-    name: Build scoped GLib TLS qualification bundle
+    name: Build scoped ${{ matrix.library }} TLS qualification bundle
+    strategy:
+      fail-fast: false
+      matrix:
+        library: [glib, cairo]
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     env:
+      LIBRARY: ${{ matrix.library }}
       SDK_IMAGE: ghcr.io/atrinik/windows-build:candidate-sha-1d82af6036b831d97cc470e2230357047e4c78f8@sha256:914acf5c3c05546ca4fb45e47362d754ec717a9062f6ebcc1b81b3ab7d0ad325
     steps:
       - name: Check out qualification sources
@@ -33,7 +38,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Stage and verify immutable GLib source
+      - name: Stage and verify immutable library source
         shell: bash
         run: |
           set -euo pipefail
@@ -43,27 +48,39 @@ jobs:
           # has neither registry credentials nor network access.
           python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
           records = json.loads(Path('windows/dependencies.json').read_text())['dependencies']
-          package, = [item for item in records if item['name'] == 'glib']
-          expected = {
-              'version': '2.89.3',
-              'url': 'https://download.gnome.org/sources/glib/2.89/glib-2.89.3.tar.xz',
-              'archive': 'glib-2.89.3.tar.xz',
-              'sha256': '09fd1e99f991067749ad66090e482ec4bd6514ad53abb4e9fbbdc2a4d2753532',
+          library = os.environ['LIBRARY']
+          package, = [item for item in records if item['name'] == library]
+          inputs = {
+              'glib': {
+                  'version': '2.89.3',
+                  'url': 'https://download.gnome.org/sources/glib/2.89/glib-2.89.3.tar.xz',
+                  'archive': 'glib-2.89.3.tar.xz',
+                  'sha256': '09fd1e99f991067749ad66090e482ec4bd6514ad53abb4e9fbbdc2a4d2753532',
+              },
+              'cairo': {
+                  'version': '1.18.4',
+                  'url': 'https://cairographics.org/releases/cairo-1.18.4.tar.xz',
+                  'archive': 'cairo-1.18.4.tar.xz',
+                  'sha256': '445ed8208a6e4823de1226a74ca319d3600e83f6369f99b14265006599c32ccb',
+              },
           }
+          expected = inputs[library]
           if any(package.get(key) != value for key, value in expected.items()):
-              raise SystemExit('GLib source differs from the scoped qualification input')
-          Path('build/glib-qualification/provenance/glib-source.json').write_text(
-              json.dumps(expected, indent=2) + '\n')
+              raise SystemExit('Library source differs from the scoped qualification input')
+          Path('build/glib-qualification/provenance/library-source.json').write_text(
+              json.dumps({'library': library, **expected}, indent=2) + '\n')
+          Path('build/glib-qualification/downloads/source-url.txt').write_text(expected['url'])
+          Path('build/glib-qualification/downloads/source.sha256').write_text(
+              expected['sha256'] + '  build/glib-qualification/downloads/source.tar.xz\n')
           PY
           curl --fail --location --proto '=https' --tlsv1.2 \
             --connect-timeout 15 --max-time 120 \
-            https://download.gnome.org/sources/glib/2.89/glib-2.89.3.tar.xz \
-            -o build/glib-qualification/downloads/glib-2.89.3.tar.xz
-          printf '%s  %s\n' \
-            09fd1e99f991067749ad66090e482ec4bd6514ad53abb4e9fbbdc2a4d2753532 \
-            build/glib-qualification/downloads/glib-2.89.3.tar.xz | sha256sum --check --strict
+            "$(cat build/glib-qualification/downloads/source-url.txt)" \
+            -o build/glib-qualification/downloads/source.tar.xz
+          sha256sum --check --strict build/glib-qualification/downloads/source.sha256
           git rev-parse HEAD > build/glib-qualification/provenance/source-commit.txt
           git rev-parse 'HEAD^{tree}' > build/glib-qualification/provenance/source-tree.txt
           printf '%s\n' "${SDK_IMAGE}" > build/glib-qualification/provenance/sdk-image.txt
@@ -91,8 +108,8 @@ jobs:
             --pids-limit 512 --ulimit nofile=4096:4096 --cap-drop ALL \
             --security-opt no-new-privileges --env HOME=/tmp/glib-home \
             --workdir /tmp/qualification/source "${SDK_IMAGE}" \
-            python3 windows/qualify-glib-tls.py \
-            --source-archive /tmp/qualification/downloads/glib-2.89.3.tar.xz \
+            python3 windows/qualify-glib-tls.py --library "${LIBRARY}" \
+            --source-archive /tmp/qualification/downloads/source.tar.xz \
             --work-dir /tmp/qualification/work --output /tmp/qualification/bundle)
           cleanup() { docker rm --force "${worker}" >/dev/null; }
           trap cleanup EXIT
@@ -113,7 +130,7 @@ jobs:
           cp -R build/glib-qualification/provenance build/glib-native-bundle/provenance
           cp windows/qualify-glib-tls.py windows/run-glib-tls-qualification.ps1 \
             build/glib-native-bundle/provenance/
-          cp build/glib-qualification/downloads/glib-2.89.3.tar.xz \
+          cp build/glib-qualification/downloads/source.tar.xz \
             build/glib-native-bundle/provenance/
           # Bound artifact size and reject links before uploading executable input.
           python3 - <<'PY'
@@ -132,10 +149,10 @@ jobs:
                   raise SystemExit(f'Missing qualification artifact: {name}')
           PY
 
-      - name: Upload bounded native GLib bundle
+      - name: Upload bounded native library bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: windows-glib-tls-native-bundle
+          name: windows-${{ matrix.library }}-tls-native-bundle
           path: build/glib-native-bundle
           if-no-files-found: error
           retention-days: 3
@@ -144,7 +161,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: windows-glib-tls-cross-build-evidence
+          name: windows-${{ matrix.library }}-tls-cross-build-evidence
           path: |
             build/glib-cross-build.log
             build/glib-qualification/provenance
@@ -152,7 +169,7 @@ jobs:
           retention-days: 3
 
   native-windows:
-    name: Verify GLib TLS repair and negative controls on Windows
+    name: Verify GLib and Cairo TLS repairs and negative controls on Windows
     needs: cross-build
     permissions: {}
     runs-on: windows-2025
@@ -162,23 +179,42 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: windows-glib-tls-native-bundle
-          path: build/glib-native-bundle
+          path: build/glib-native-bundle/glib
+
+      - name: Download scoped native Cairo bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: windows-cairo-tls-native-bundle
+          path: build/glib-native-bundle/cairo
 
       - name: Require native TLS lifecycle and negative controls
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          & pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path (Resolve-Path 'build/glib-native-bundle').Path 'run-glib-tls-qualification.ps1')
-          if ($LASTEXITCODE -ne 0) { throw "Native GLib qualification failed: $LASTEXITCODE" }
+          foreach ($library in @('glib', 'cairo')) {
+            $bundle = (Resolve-Path "build/glib-native-bundle/$library").Path
+            $metadata = Get-Content -Raw (Join-Path $bundle 'qualification.json') | ConvertFrom-Json
+            if ($metadata.library -ne $library) { throw "Bundle library mismatch: $library" }
+            & pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $bundle 'run-glib-tls-qualification.ps1')
+            if ($LASTEXITCODE -ne 0) { throw "Native $library qualification failed: $LASTEXITCODE" }
+            $results = @(Get-Content -Raw (Join-Path $bundle 'native-results.json') | ConvertFrom-Json)
+            if ($results.Count -ne 3 -or @($results | Where-Object { $_.passed -ne $true }).Count -ne 0) {
+              throw "Native $library qualification did not pass all three lanes"
+            }
+            $lanes = @($results.lane | Sort-Object)
+            if (($lanes -join ',') -ne 'candidate,original,relinked') {
+              throw "Native $library qualification lane mismatch"
+            }
+          }
 
-      - name: Retain native GLib qualification evidence
+      - name: Retain native TLS qualification evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: windows-glib-tls-native-evidence
           path: |
-            build/glib-native-bundle/qualification.json
-            build/glib-native-bundle/provenance
+            build/glib-native-bundle/*/qualification.json
+            build/glib-native-bundle/*/provenance
             build/glib-native-bundle/**/*.json
             build/glib-native-bundle/**/*.stdout.txt
             build/glib-native-bundle/**/*.stderr.txt
