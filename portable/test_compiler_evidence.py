@@ -108,6 +108,16 @@ class CompilerEvidence(unittest.TestCase):
             with self.subTest(role=role), self.assertRaises(ValueError):
                 evidence.validate(value)
 
+    def test_unwinder_search_order_and_probe_digest_are_sealed(self):
+        value = copy.deepcopy(self.value)
+        value["compile"]["driver_output"] = value["compile"]["driver_output"].replace(
+            '"-L/opt/llvm-23.1.3/bin/../lib"', '"-L/usr/local/lib" "-L/opt/llvm-23.1.3/bin/../lib"')
+        with self.assertRaisesRegex(ValueError, "must be first"):
+            evidence.validate(value)
+        self.value["compile"]["output_sha256"] = "NOT-A-HASH"
+        with self.assertRaisesRegex(ValueError, "output digest"):
+            evidence.validate(self.value)
+
     def test_probe_source_output_and_temporary_object_are_bound(self):
         for field in ("source_sha256", "command"):
             value = copy.deepcopy(self.value)

@@ -86,6 +86,8 @@ def validate(value: dict, *, installed: bool = False) -> None:
             raise ValueError("changed installed LLVM identity: " + expected)
     if any(VERSION not in entry["version"] for entry in tools.values()):
         raise ValueError("wrong installed LLVM version")
+    if not re.fullmatch(r"[0-9a-f]{64}", value["compile"]["output_sha256"]):
+        raise ValueError("invalid portable probe output digest")
     command = value["compile"]["command"]
     if value["compile"]["driver_command"] != [command[0], "-###", *command[1:]]:
         raise ValueError("changed portable compiler driver command")
@@ -137,8 +139,10 @@ def validate(value: dict, *, installed: bool = False) -> None:
             raise ValueError("foreign LLD library directory")
         library_directories.append(posixpath.normpath(directory))
         index += 1
-    if "/opt/llvm-23.1.3/lib" not in library_directories:
-        raise ValueError("LLVM runtime library directory missing from LLD invocation")
+    if not library_directories or library_directories[0] != "/opt/llvm-23.1.3/lib":
+        raise ValueError("LLVM runtime library directory must be first in LLD invocation")
+    if installed and Path("/opt/llvm-23.1.3/lib/libunwind.so").exists():
+        raise ValueError("shared LLVM unwinder shadows the recorded static archive")
     runtime = value["runtime"]["path"]
     suffix = [object_path, runtime, "--as-needed", "-lunwind", "--no-as-needed", "-lc", runtime,
               "--as-needed", "-lunwind", "--no-as-needed",
