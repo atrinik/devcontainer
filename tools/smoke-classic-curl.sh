@@ -22,6 +22,7 @@ docker run --rm --init --read-only --cap-drop ALL --security-opt no-new-privileg
     cmake -S /image-source/tools/curl-probe -B /tmp/curl-probe -G Ninja \
       -DATRINIK_CLASSIC_SOURCE_DIR=/workspace \
       -DATRINIK_CLASSIC_QUALIFICATION_COMMIT="$QUALIFICATION_COMMIT" \
+      -DCMAKE_TOOLCHAIN_FILE=/workspace/cmake/toolchains/llvm.cmake \
       -DCMAKE_BUILD_TYPE=Release
     cmake --build /tmp/curl-probe --target atrinik-curl-cancellation-probe --parallel 4
     ctest --test-dir /tmp/curl-probe --output-on-failure --no-tests=error \
