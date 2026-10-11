@@ -82,8 +82,17 @@ if [[ ${cmake_command} == cmake ]]; then
   : "${RANLIB:?explicit LLVM ranlib required}"
   "${CC}" --version | grep -F 'clang version 23.1.3' >/dev/null
   "${CXX}" --version | grep -F 'clang version 23.1.3' >/dev/null
-  compiler_args=(-DCMAKE_C_COMPILER="${CC}" -DCMAKE_CXX_COMPILER="${CXX}"
-    -DCMAKE_AR="${AR}" -DCMAKE_RANLIB="${RANLIB}")
+  cmake_tool_path() {
+    local executable
+    executable=$(command -v "$1") || return 1
+    realpath -s -- "${executable}"
+  }
+  cmake_cc=$(cmake_tool_path "${CC}")
+  cmake_cxx=$(cmake_tool_path "${CXX}")
+  cmake_ar=$(cmake_tool_path "${AR}")
+  cmake_ranlib=$(cmake_tool_path "${RANLIB}")
+  compiler_args=(-DCMAKE_C_COMPILER="${cmake_cc}" -DCMAKE_CXX_COMPILER="${cmake_cxx}"
+    -DCMAKE_AR="${cmake_ar}" -DCMAKE_RANLIB="${cmake_ranlib}")
   if [[ -n ${ATRINIK_RELEASE_C_FLAGS:-} ]]; then
     compiler_args+=(-DCMAKE_C_FLAGS_RELEASE="${ATRINIK_RELEASE_C_FLAGS}")
   fi

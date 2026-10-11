@@ -7,6 +7,7 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,6 +32,36 @@ def add_file(archive: tarfile.TarFile, name: str, content: bytes, mode: int = 0o
 
 
 class ClassicShaderToolchainTests(unittest.TestCase):
+    def test_build_preserves_absolute_compiler_alias_and_archive_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tools = root / "bin"
+            tools.mkdir()
+            for name in ("clang", "llvm-ar", "llvm-ranlib"):
+                (tools / name).write_text("#!/bin/sh\n", encoding="utf-8")
+                (tools / name).chmod(0o755)
+            (tools / "clang++").symlink_to("clang")
+            build = root / "build"
+            build.mkdir()
+            (build / "spirv-cross").write_text("#!/bin/sh\n", encoding="utf-8")
+            (build / "spirv-cross").chmod(0o755)
+            with mock.patch.dict(MODULE.os.environ, {"PATH": str(tools), "CC": "clang", "CXX": "clang++"}), \
+                    mock.patch.object(MODULE.subprocess, "check_output", return_value="clang version 23.1.3"), \
+                    mock.patch.object(MODULE.subprocess, "run") as run:
+                MODULE.run_build(root / "source", build, 2)
+            configure = run.call_args_list[0].args[0]
+            for variable, name in (("C_COMPILER", "clang"), ("CXX_COMPILER", "clang++"),
+                                   ("AR", "llvm-ar"), ("RANLIB", "llvm-ranlib")):
+                self.assertIn(f"-DCMAKE_{variable}={tools / name}", configure)
+
+    def test_build_rejects_missing_llvm_archiver_before_configure(self) -> None:
+        with mock.patch.dict(MODULE.os.environ, {"CC": "clang", "CXX": "clang++"}), \
+                mock.patch.object(MODULE.shutil, "which", side_effect=["/opt/llvm/bin/clang", "/opt/llvm/bin/clang++", None]), \
+                mock.patch.object(MODULE.subprocess, "run") as run:
+            with self.assertRaisesRegex(MODULE.ToolchainError, "missing LLVM tool: llvm-ar"):
+                MODULE.run_build(Path("source"), Path("build"), 2)
+            run.assert_not_called()
+
     def test_loads_the_qualified_manifest(self) -> None:
         manifest = MODULE.load_manifest(ROOT / "classic-shader-toolchain.json")
         self.assertEqual(manifest["dxc"]["tag"], "v1.9.2607")  # type: ignore[index]

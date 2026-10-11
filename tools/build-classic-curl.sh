@@ -15,6 +15,17 @@ export LD=${LD:-ld.lld}
 "${CC}" --version | grep -F "clang version 23.1.3" >/dev/null
 "${CXX}" --version | grep -F "clang version 23.1.3" >/dev/null
 "${LD}" --version | grep -E '^LLD 23\.1\.3([[:space:]]|$)' >/dev/null
+cmake_tool_path() {
+  local executable
+  executable=$(command -v "$1") || return 1
+  realpath -s -- "${executable}"
+}
+# Resolve each tool before constructing CMake arguments, so a missing tool
+# terminates this script instead of leaving an empty cache variable.
+cmake_cc=$(cmake_tool_path "${CC}")
+cmake_cxx=$(cmake_tool_path "${CXX}")
+cmake_ar=$(cmake_tool_path "${AR}")
+cmake_ranlib=$(cmake_tool_path "${RANLIB}")
 test "$(pkg-config --modversion openssl)" = "$(jq -r '.linux.openssl_version' "$manifest")"
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
@@ -27,8 +38,8 @@ fetch "$(jq -r '.linux.curl_url' "$manifest")" "$work/curl.tar.xz" "$(jq -r '.li
 tar --no-same-owner -xf "$work/cares.tar.gz" -C "$work"
 tar --no-same-owner -xf "$work/curl.tar.xz" -C "$work"
 cmake -S "$work/c-ares-$(jq -r '.cares.version' "$manifest")" -B "$work/cares-build" \
-  -DCMAKE_C_COMPILER="${CC}" -DCMAKE_CXX_COMPILER="${CXX}" \
-  -DCMAKE_AR="${AR}" -DCMAKE_RANLIB="${RANLIB}" \
+  -DCMAKE_C_COMPILER="${cmake_cc}" -DCMAKE_CXX_COMPILER="${cmake_cxx}" \
+  -DCMAKE_AR="${cmake_ar}" -DCMAKE_RANLIB="${cmake_ranlib}" \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" -DCMAKE_INSTALL_LIBDIR=lib \
   -DCARES_STATIC=OFF -DCARES_SHARED=ON -DCARES_BUILD_TOOLS=OFF -DCARES_BUILD_TESTS=OFF
 cmake --build "$work/cares-build" --parallel "$jobs"
