@@ -1,0 +1,155 @@
+
+File: /tmp/llvm-python-embed/_wmi.pyd
+Format: COFF-x86-64
+Arch: x86_64
+AddressSize: 64bit
+Import {
+  Name: PROPSYS.dll
+  ImportLookupTableRVA: 0x5860
+  ImportAddressTableRVA: 0x4140
+  Symbol: VariantToString (206)
+}
+Import {
+  Name: OLEAUT32.dll
+  ImportLookupTableRVA: 0x5840
+  ImportAddressTableRVA: 0x4120
+  Symbol:  (6)
+  Symbol:  (2)
+  Symbol:  (9)
+}
+Import {
+  Name: KERNEL32.dll
+  ImportLookupTableRVA: 0x5720
+  ImportAddressTableRVA: 0x4000
+  Symbol: IsDebuggerPresent (944)
+  Symbol: RaiseException (1176)
+  Symbol: GetSystemInfo (788)
+  Symbol: VirtualProtect (1562)
+  Symbol: VirtualQuery (1564)
+  Symbol: ReadFile (1193)
+  Symbol: WriteFile (1632)
+  Symbol: CreatePipe (250)
+  Symbol: WaitForSingleObject (1573)
+  Symbol: GetExitCodeThread (616)
+  Symbol: GetLastError (653)
+  Symbol: SetEvent (1372)
+  Symbol: CloseHandle (157)
+  Symbol: CreateThread (271)
+  Symbol: CreateEventA (214)
+  Symbol: FreeLibrary (468)
+  Symbol: InitializeSListHead (922)
+  Symbol: DisableThreadLibraryCalls (322)
+  Symbol: GetSystemTimeAsFileTime (794)
+  Symbol: GetCurrentThreadId (582)
+  Symbol: GetCurrentProcessId (578)
+  Symbol: QueryPerformanceCounter (1153)
+  Symbol: IsProcessorFeaturePresent (952)
+  Symbol: TerminateProcess (1496)
+  Symbol: GetCurrentProcess (577)
+  Symbol: SetUnhandledExceptionFilter (1464)
+  Symbol: UnhandledExceptionFilter (1531)
+  Symbol: RtlVirtualUnwind (1304)
+  Symbol: RtlLookupFunctionEntry (1297)
+  Symbol: RtlCaptureContext (1289)
+  Symbol: LocalFree (1026)
+  Symbol: MultiByteToWideChar (1059)
+  Symbol: LoadLibraryExA (1013)
+  Symbol: GetProcAddress (733)
+  Symbol: GetModuleHandleW (677)
+}
+Import {
+  Name: python314.dll
+  ImportLookupTableRVA: 0x5948
+  ImportAddressTableRVA: 0x4228
+  Symbol: PyEval_RestoreThread (277)
+  Symbol: PyModuleDef_Init (606)
+  Symbol: PyExc_OSError (327)
+  Symbol: PyMem_Free (583)
+  Symbol: PySys_Audit (875)
+  Symbol: PyUnicode_AsWideCharString (1044)
+  Symbol: PyErr_Format (207)
+  Symbol: PyUnicode_FromStringAndSize (1093)
+  Symbol: _PyArg_UnpackKeywords (1276)
+  Symbol: PyErr_SetString (245)
+  Symbol: PyUnicode_FromWideChar (1094)
+  Symbol: _PyArg_BadArgument (1266)
+  Symbol: PyErr_SetFromWindowsErr (235)
+  Symbol: PyEval_SaveThread (278)
+  Symbol: PyExc_ValueError (354)
+}
+Import {
+  Name: VCRUNTIME140_1.dll
+  ImportLookupTableRVA: 0x58B8
+  ImportAddressTableRVA: 0x4198
+  Symbol: __CxxFrameHandler4 (0)
+}
+Import {
+  Name: VCRUNTIME140.dll
+  ImportLookupTableRVA: 0x5870
+  ImportAddressTableRVA: 0x4150
+  Symbol: memcpy (60)
+  Symbol: __std_type_info_destroy_list (37)
+  Symbol: __std_terminate (35)
+  Symbol: _CxxThrowException (1)
+  Symbol: memset (62)
+  Symbol: __C_specific_handler (8)
+  Symbol: __std_exception_copy (33)
+  Symbol: __std_exception_destroy (34)
+}
+Import {
+  Name: api-ms-win-crt-string-l1-1-0.dll
+  ImportLookupTableRVA: 0x5930
+  ImportAddressTableRVA: 0x4210
+  Symbol: _wcsnicmp (84)
+  Symbol: strlen (139)
+}
+Import {
+  Name: api-ms-win-crt-heap-l1-1-0.dll
+  ImportLookupTableRVA: 0x58C8
+  ImportAddressTableRVA: 0x41A8
+  Symbol: free (24)
+  Symbol: _callnewh (8)
+  Symbol: malloc (25)
+}
+Import {
+  Name: api-ms-win-crt-runtime-l1-1-0.dll
+  ImportLookupTableRVA: 0x58E8
+  ImportAddressTableRVA: 0x41C8
+  Symbol: _initterm_e (55)
+  Symbol: _seh_filter_dll (63)
+  Symbol: _configure_narrow_argv (24)
+  Symbol: _cexit (22)
+  Symbol: _execute_onexit_table (34)
+  Symbol: _initialize_onexit_table (52)
+  Symbol: _initialize_narrow_environment (51)
+  Symbol: _initterm (54)
+}
+DelayImport {
+  Name: ole32.dll
+  Attributes: 0x1
+  ModuleHandle: 0x72D0
+  ImportAddressTable: 0x72A0
+  ImportNameTable: 0x5438
+  BoundDelayImportTable: 0x54D0
+  UnloadDelayImportTable: 0x0
+  Import {
+    Symbol: CoInitializeEx (97)
+    Address: 0x180001AF7
+  }
+  Import {
+    Symbol: CoCreateInstance (43)
+    Address: 0x180001AD3
+  }
+  Import {
+    Symbol: CoSetProxyBlanket (135)
+    Address: 0x180001ADF
+  }
+  Import {
+    Symbol: CoInitializeSecurity (98)
+    Address: 0x180001AEB
+  }
+  Import {
+    Symbol: CoUninitialize (145)
+    Address: 0x180001AC7
+  }
+}

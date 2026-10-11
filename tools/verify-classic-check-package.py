@@ -13,9 +13,8 @@ import tempfile
 import zipfile
 
 
-DLL_NAME = re.compile(r"^\s*DLL Name:\s*(\S+)\s*$", re.IGNORECASE | re.MULTILINE)
+IMPORT_NAME = re.compile(r"^\s*Name:\s*(\S+)\s*$", re.MULTILINE)
 EXPECTED_RUNTIME_DLLS = {
-    "libssp-0.dll",
     "sdl3.dll",
     "sdl3_image.dll",
     "sdl3_mixer.dll",
@@ -23,48 +22,71 @@ EXPECTED_RUNTIME_DLLS = {
 }
 SYSTEM_DLLS = {
     "advapi32.dll",
+    "avrt.dll",
     "bcrypt.dll",
     "cabinet.dll",
+    "cfgmgr32.dll",
     "comctl32.dll",
     "comdlg32.dll",
     "crypt32.dll",
     "d2d1.dll",
     "d3d11.dll",
     "d3d12.dll",
+    "d3d9.dll",
+    "d3dcompiler_47.dll",
     "dbghelp.dll",
     "dinput8.dll",
     "dnsapi.dll",
     "dwmapi.dll",
+    "dwrite.dll",
     "dxgi.dll",
     "gdi32.dll",
+    "gdiplus.dll",
+    "hid.dll",
     "imagehlp.dll",
     "imm32.dll",
     "iphlpapi.dll",
     "kernel32.dll",
+    "ksuser.dll",
+    "mf.dll",
+    "mfplat.dll",
+    "mfreadwrite.dll",
+    "mfuuid.dll",
     "msimg32.dll",
-    "msvcrt.dll",
+    "mswsock.dll",
     "ncrypt.dll",
+    "netapi32.dll",
+    "netio.dll",
     "normaliz.dll",
+    "ntdll.dll",
     "ole32.dll",
     "oleaut32.dll",
+    "opengl32.dll",
     "powrprof.dll",
+    "propsys.dll",
     "psapi.dll",
     "rpcrt4.dll",
+    "runtimeobject.dll",
     "secur32.dll",
     "setupapi.dll",
     "shell32.dll",
     "shlwapi.dll",
+    "ucrtbase.dll",
+    "uiautomationcore.dll",
     "user32.dll",
     "userenv.dll",
     "usp10.dll",
     "uxtheme.dll",
     "version.dll",
     "winhttp.dll",
+    "wininet.dll",
     "winmm.dll",
     "winspool.drv",
+    "wintrust.dll",
     "wldap32.dll",
     "ws2_32.dll",
     "wsock32.dll",
+    "wtsapi32.dll",
 }
 
 
@@ -72,20 +94,19 @@ def is_system_dll(name: str) -> bool:
     normalized = name.lower()
     return (
         normalized in SYSTEM_DLLS
-        or normalized.startswith("api-ms-win-")
-        or normalized.startswith("ext-ms-win-")
+        or (normalized.endswith(".dll") and normalized.startswith(("api-ms-win-", "ext-ms-win-")))
     )
 
 
 def main() -> int:
     if len(sys.argv) != 4:
         print(
-            f"usage: {Path(sys.argv[0]).name} PACKAGE OBJDUMP TOOLCHAIN_MANIFEST",
+            f"usage: {Path(sys.argv[0]).name} PACKAGE READOBJ TOOLCHAIN_MANIFEST",
             file=sys.stderr,
         )
         return 2
     package = Path(sys.argv[1])
-    objdump = sys.argv[2]
+    readobj = sys.argv[2]
     manifest = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
     expected_payloads = {
         "ca-bundle.crt": manifest["verification"]["public_ca"]["sha256"],
@@ -122,12 +143,15 @@ def main() -> int:
                 + ", ".join(sorted(missing_expected))
             )
 
-        queue = [Path(executable).name.lower()]
+        queue = [name for name in archive_by_basename
+                 if name.endswith((".exe", ".dll", ".pyd"))]
         inspected: set[str] = set()
         while queue:
             basename = queue.pop()
             if basename in inspected:
                 continue
+            if basename == "msvcrt.dll" or basename.startswith(("libgcc", "libstdc++", "libssp", "libgomp", "libatomic", "libquadmath")):
+                raise RuntimeError(f"packaged forbidden GCC or legacy CRT runtime: {basename}")
             matches = archive_by_basename.get(basename, [])
             if len(matches) != 1:
                 raise RuntimeError(
@@ -136,7 +160,7 @@ def main() -> int:
             binary = Path(temporary) / basename
             binary.write_bytes(archive.read(matches[0]))
             result = subprocess.run(
-                [objdump, "-p", str(binary)],
+                [readobj, "--coff-imports", str(binary)],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -147,9 +171,13 @@ def main() -> int:
                     f"cannot inspect packaged {basename}: "
                     f"{result.stderr.strip() or result.returncode}"
                 )
+            if "Format: COFF-x86-64" not in result.stdout:
+                raise RuntimeError(f"packaged runtime is not x86_64 COFF: {basename}")
             inspected.add(basename)
-            for dependency in DLL_NAME.findall(result.stdout):
+            for dependency in IMPORT_NAME.findall(result.stdout):
                 normalized = dependency.lower()
+                if normalized == "msvcrt.dll" or normalized.startswith(("libgcc", "libstdc++", "libssp", "libgomp", "libatomic", "libquadmath")):
+                    raise RuntimeError(f"packaged runtime imports forbidden GCC or legacy CRT runtime: {normalized}")
                 if not is_system_dll(normalized) and normalized not in inspected:
                     queue.append(normalized)
     return 0

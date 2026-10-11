@@ -2,7 +2,7 @@
 
 `atrinik-curl-cancellation-probe` links the real `Atrinik::Core`
 `curl_perform_cancellable` helper from a clean Classic commit. The default is
-`9136e13efabc0f6edd513517b3a437c927b5edea`; producers can pass a full lowercase
+`bbaf7785b6f7c5905b3f5c52f079d6198da0d540`; producers can pass a full lowercase
 `ATRINIK_CLASSIC_QUALIFICATION_COMMIT` SHA from their committed consumer manifest.
 The bridge requires actual Git HEAD and clean tracked source to match that SHA.
 The C17 source uses Winsock and a
@@ -14,13 +14,14 @@ Configure the bridge with the producer's normal dependency and toolchain flags:
 
 ```sh
 cmake -S tools/curl-probe -B build/curl-probe \
-  -DATRINIK_CLASSIC_SOURCE_DIR=/absolute/clean/classic
+  -DATRINIK_CLASSIC_SOURCE_DIR=/absolute/clean/classic \
+  -DCMAKE_TOOLCHAIN_FILE=/absolute/clean/classic/cmake/toolchains/llvm.cmake
 cmake --build build/curl-probe --target atrinik-curl-cancellation-probe
 ctest --test-dir build/curl-probe --output-on-failure \
   -R '^atrinik-curl-cancellation-qualification$'
 ```
 
-For MXE supply the producer's CMake toolchain file during configuration. The
+For LLVM MinGW supply the producer's CMake toolchain file during configuration. The
 target emits `atrinik-curl-cancellation-probe.exe` on Windows. Bundle its normal
 runtime DLL closure, then execute it **natively on Windows** under the runner's
 15-second process watchdog. A cross-build or Wine run does not substitute for

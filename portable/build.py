@@ -100,16 +100,20 @@ def main() -> None:
                 run("cmake", "-S", str(source), "-B", str(build), "-G", "Ninja",
                     "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_PREFIX=/usr/local",
                     "-DCMAKE_INSTALL_LIBDIR=lib", "-DBUILD_SHARED_LIBS=ON",
+                    "-DCMAKE_C_COMPILER=clang", "-DCMAKE_CXX_COMPILER=clang++",
+                    "-DCMAKE_C_FLAGS_RELEASE=-O2 -DNDEBUG",
+                    "-DCMAKE_CXX_FLAGS_RELEASE=-O2 -DNDEBUG",
                     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", *options[entry["name"]])
                 run("cmake", "--build", str(build), "--parallel", "2")
                 run("cmake", "--install", str(build))
+        run("python3", str(ROOT / "build-curl.py"), "--root", str(ROOT), "--jobs", "2")
         audio = json.loads((ROOT / "audio-toolchain.json").read_text())
         for entry in [audio["sdl_mixer"], *audio["dependencies"]]:
             download(entry["source"]["url"], entry["source"]["sha256"], archives)
         run("bash", str(ROOT / "tools/build-sdl3-mixer.sh"),
             str(ROOT / "audio-toolchain.json"), "cmake", "/usr/local", "2")
     run("ldconfig")
-    run("cc", *contract["compiler"]["cflags"].split(), str(ROOT / "audio/sdl3-mixer-probe.c"),
+    run("clang", *contract["compiler"]["cflags"].split(), str(ROOT / "audio/sdl3-mixer-probe.c"),
         "-o", str(ROOT / "audio/sdl3-mixer-probe"),
         *subprocess.check_output(["pkg-config", "--cflags", "--libs", "sdl3-mixer"], text=True).split())
 

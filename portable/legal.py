@@ -38,4 +38,16 @@ source_root.mkdir(parents=True)
 for name, version in sorted(source_packages.items()):
     subprocess.run(["apt-get", "-o", "Acquire::Retries=5", "source", "--download-only", "--only-source", name + "=" + version], cwd=source_root, check=True)
 artifacts = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(source_root.iterdir()) if path.is_file()}
-(root / "runtime-sources.json").write_text(json.dumps({"source_packages": source_packages, "archives": artifacts}, indent=2) + "\n")
+curl = json.loads((root / "curl-source-receipt.json").read_text())
+installed_curl = json.loads((root / "installed.json").read_text())["curl"]
+custom_providers = {}
+for package, entry in installed_curl["providers"].items():
+    sources = ({"sources/curl/" + name: sha for name, sha in curl["source_archives"].items()}
+               if package == "libcurl" else {curl["cares_archive"]["path"]: curl["cares_archive"]["sha256"]})
+    for relative, expected in sources.items():
+        if hashlib.sha256((root / relative).read_bytes()).hexdigest() != expected:
+            raise RuntimeError("changed custom curl corresponding source: " + relative)
+    custom_providers[package] = {**entry, "source_archives": sources,
+                                "build_receipt": "curl-source-receipt.json"}
+(root / "runtime-sources.json").write_text(json.dumps({"source_packages": source_packages, "archives": artifacts,
+                                                     "custom_providers": custom_providers}, indent=2) + "\n")

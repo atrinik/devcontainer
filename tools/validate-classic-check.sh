@@ -10,6 +10,12 @@ fi
 source_root=$(realpath "$1")
 jobs=$(nproc)
 
+export CC=clang CXX=clang++ AR=llvm-ar RANLIB=llvm-ranlib
+python3 /usr/local/bin/atrinik-validate-llvm-toolchain \
+  --manifest /opt/llvm-23.1.3/share/atrinik/llvm-toolchain.json --prefix /opt/llvm-23.1.3
+test -f "${source_root}/cmake/toolchains/llvm.cmake"
+test -f "${source_root}/tools/ci/llvm_coverage.py"
+
 mkdir -p "${HOME}"
 
 export CCACHE_BASEDIR=${source_root}
@@ -34,20 +40,31 @@ for component in server client; do
   python3 -m unittest discover -s tools/tests -p 'test_*.py'
   python3 tools/dependencies.py sync
   python3 tools/dependencies.py verify
-  cmake --preset linux-coverage \
+  coverage_options=()
+  if [[ ${component} == server ]]; then
+    # Match the server coverage lane: PCH can add unexecuted coverage mappings.
+    coverage_options+=(-DENABLE_PRECOMPILED_HEADERS=OFF)
+  fi
+  cmake --preset llvm-coverage \
+    "${coverage_options[@]}" \
+    -DCMAKE_TOOLCHAIN_FILE="${source_root}/cmake/toolchains/llvm.cmake" \
     -DCMAKE_C_COMPILER_LAUNCHER=ccache \
     -DFETCHCONTENT_SOURCE_DIR_ATRINIK_PROTOCOL="${source_root}/protocol" \
     -DFETCHCONTENT_SOURCE_DIR_LIBATRINIK="${source_root}/libatrinik"
   # Populate the dedicated cache deterministically even when the mounted source
   # checkout already contains build outputs from an earlier validation.
-  cmake --build --preset linux-coverage --clean-first --parallel "${jobs}"
-  ctest --preset linux-coverage
-  gcovr --root . --filter 'src/' --exclude 'src/tests/' \
-    --print-summary --xml "${component}-coverage.xml"
+  cmake --build --preset llvm-coverage --clean-first --parallel "${jobs}"
+  python3 "${source_root}/tools/ci/llvm_coverage.py" prepare \
+    --build-dir build/llvm-coverage
+  ctest --preset llvm-coverage
+  python3 "${source_root}/tools/ci/llvm_coverage.py" export \
+    --build-dir build/llvm-coverage --source-root "${source_root}" \
+    --component "${component}" --output "${component}-coverage.lcov"
+  test -s "${component}-coverage.lcov"
   # Force one identical rebuild against the mounted cache. A no-op incremental
   # build would not prove that consumer compiler outputs can be restored.
   warm_hits_before=$(ccache_hits)
-  cmake --build --preset linux-coverage --clean-first --parallel "${jobs}"
+  cmake --build --preset llvm-coverage --clean-first --parallel "${jobs}"
   warm_hits_after=$(ccache_hits)
   if [[ ${warm_hits_after} -le ${warm_hits_before} ]]; then
     echo "Classic ${component} warm rebuild restored no compiler outputs from ccache" >&2

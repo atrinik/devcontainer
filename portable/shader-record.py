@@ -26,6 +26,7 @@ record = {"schema_version": 1,
           "tool_manifest_sha256": digest(Path("/opt/shader-toolchain.json")),
           "installer_sha256": digest(Path("/opt/install-shaders.py")),
           "builder": {"base": "ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03", "snapshot": "20260810T000000Z", "package_lock_sha256": digest(Path("/tmp/classic-packages.lock"))},
+          "llvm_toolchain_manifest_sha256": digest(Path("/opt/llvm-23.1.3/share/atrinik/llvm-toolchain.json")),
           "tools": {name: digest(Path("/usr/local") / name) for name in ["bin/dxc", "lib/libdxcompiler.so", "lib/libdxil.so", "bin/spirv-cross"]}}
 assert record["output_manifest_sha256"] == record["expected_manifest_sha256"]
 Path("/cohort/generation.json").write_text(json.dumps(record, indent=2) + "\n")

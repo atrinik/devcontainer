@@ -5,6 +5,27 @@ manifest=${1:?usage: build-classic-curl.sh MANIFEST [PREFIX] [JOBS]}
 manifest=$(realpath "$manifest")
 prefix=${2:-/usr/local}
 jobs=${3:-2}
+: "${CC:?explicit LLVM C compiler required}"
+: "${CXX:?explicit LLVM C++ compiler required}"
+: "${AR:?explicit LLVM archiver required}"
+: "${RANLIB:?explicit LLVM ranlib required}"
+# Libtool discovers its linker separately from Clang's driver configuration.
+# Select the cohort's linker by name when the caller has not exported LD.
+export LD=${LD:-ld.lld}
+"${CC}" --version | grep -F "clang version 23.1.3" >/dev/null
+"${CXX}" --version | grep -F "clang version 23.1.3" >/dev/null
+"${LD}" --version | grep -E '^LLD 23\.1\.3([[:space:]]|$)' >/dev/null
+cmake_tool_path() {
+  local executable
+  executable=$(command -v "$1") || return 1
+  realpath -s -- "${executable}"
+}
+# Resolve each tool before constructing CMake arguments, so a missing tool
+# terminates this script instead of leaving an empty cache variable.
+cmake_cc=$(cmake_tool_path "${CC}")
+cmake_cxx=$(cmake_tool_path "${CXX}")
+cmake_ar=$(cmake_tool_path "${AR}")
+cmake_ranlib=$(cmake_tool_path "${RANLIB}")
 test "$(pkg-config --modversion openssl)" = "$(jq -r '.linux.openssl_version' "$manifest")"
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
@@ -16,9 +37,21 @@ fetch "$(jq -r '.cares.url' "$manifest")" "$work/cares.tar.gz" "$(jq -r '.cares.
 fetch "$(jq -r '.linux.curl_url' "$manifest")" "$work/curl.tar.xz" "$(jq -r '.linux.curl_sha256' "$manifest")"
 tar --no-same-owner -xf "$work/cares.tar.gz" -C "$work"
 tar --no-same-owner -xf "$work/curl.tar.xz" -C "$work"
+# Portable callers retain their explicit release optimization; ordinary Linux
+# callers keep CMake's existing Release defaults when these variables are absent.
+cares_release_flags=()
+if [[ -n ${ATRINIK_RELEASE_C_FLAGS:-} ]]; then
+  cares_release_flags+=("-DCMAKE_C_FLAGS_RELEASE=${ATRINIK_RELEASE_C_FLAGS}")
+fi
+if [[ -n ${ATRINIK_RELEASE_CXX_FLAGS:-} ]]; then
+  cares_release_flags+=("-DCMAKE_CXX_FLAGS_RELEASE=${ATRINIK_RELEASE_CXX_FLAGS}")
+fi
 cmake -S "$work/c-ares-$(jq -r '.cares.version' "$manifest")" -B "$work/cares-build" \
+  -DCMAKE_C_COMPILER="${cmake_cc}" -DCMAKE_CXX_COMPILER="${cmake_cxx}" \
+  -DCMAKE_AR="${cmake_ar}" -DCMAKE_RANLIB="${cmake_ranlib}" \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" -DCMAKE_INSTALL_LIBDIR=lib \
-  -DCARES_STATIC=OFF -DCARES_SHARED=ON -DCARES_BUILD_TOOLS=OFF -DCARES_BUILD_TESTS=OFF
+  -DCARES_STATIC=OFF -DCARES_SHARED=ON -DCARES_BUILD_TOOLS=OFF -DCARES_BUILD_TESTS=OFF \
+  "${cares_release_flags[@]}"
 cmake --build "$work/cares-build" --parallel "$jobs"
 cmake --install "$work/cares-build"
 cd "$work/curl-$(jq -r '.linux.curl_version' "$manifest")"

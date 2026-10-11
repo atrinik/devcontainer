@@ -1,0 +1,11 @@
+Version symbols section '.gnu.version' contains 5 entries:
+ Addr: 0000000000000278  Offset: 0x000278  Link: 1 (.dynsym)
+  000:   0 (*local*)       1 (*global*)      1 (*global*)      2h(ABI_1)      
+  004:   3 (ABI_2)      
+
+Version definition section '.gnu.version_d' contains 3 entries:
+ Addr: 0000000000000284  Offset: 0x000284  Link: 5 (.dynstr)
+  0x0000: Rev: 1  Flags: BASE  Index: 1  Cnt: 1  Name: versions.so
+  0x001c: Rev: 1  Flags: none  Index: 2  Cnt: 1  Name: ABI_1
+  0x0038: Rev: 1  Flags: none  Index: 3  Cnt: 1  Name: ABI_2
+

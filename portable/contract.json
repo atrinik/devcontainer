@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "platform": "linux/amd64",
   "target": "portable-final",
   "image": "ghcr.io/atrinik/classic-portable-build",
@@ -13,7 +13,16 @@
     "c_standard": 17,
     "cflags": "-O2 -march=x86-64 -mtune=generic",
     "cxxflags": "-O2 -march=x86-64 -mtune=generic",
-    "cpu": "x86-64"
+    "cpu": "x86-64",
+    "family": "clang",
+    "version": "23.1.3",
+    "linker": "lld",
+    "builtins": "compiler-rt",
+    "unwinder": "libunwind",
+    "binary_inspector": "llvm-readelf",
+    "toolchain_manifest": "llvm-toolchain.json",
+    "evidence": "/opt/atrinik-portable/compiler-evidence.json",
+    "lto": false
   },
   "prefix": "/usr/local",
   "metadata_directory": "/opt/atrinik-portable",
@@ -51,7 +60,7 @@
   "shader_manifest": "classic-shader-toolchain.json",
   "consumer": {
     "repository": "atrinik/classic",
-    "commit": "d926f6fd0418fb1af9060158c43d8d3ff5252580",
+    "commit": "bbaf7785b6f7c5905b3f5c52f079d6198da0d540",
     "shader_directory": "/opt/atrinik-portable/shaders",
     "cmake_argument": "ATRINIK_GPU_SHADER_DIRECTORY",
     "input_verification": "exact-source-commit-and-shader-input-sha256",
@@ -66,7 +75,8 @@
     "sdl3-image": "3.4.0",
     "sdl3-mixer": "3.2.4",
     "sdl3-ttf": "3.2.2",
-    "zlib": "1.2.13"
+    "zlib": "1.2.13",
+    "libcares": "1.34.6"
   },
   "runtime": {
     "image_codecs": [
@@ -112,7 +122,8 @@
       "libidn2.so.0",
       "libxml2.so.2",
       "libz.so.1",
-      "libdbus-1.so.3"
+      "libdbus-1.so.3",
+      "libcrypt.so.1"
     ],
     "graphics_backend": "SDL_GPU Vulkan; unused OpenGL/OpenGL ES backends disabled to avoid Debian Mesa-driver package dependencies",
     "unsupported_dlopen_features": [
@@ -124,7 +135,8 @@
         ],
         "reason": "Classic does not use the SDL Steam user-storage API; Steam integration is unsupported and its proprietary provider is not included."
       }
-    ]
+    ],
+    "curl_resolver": "c-ares only; threaded resolver disabled; native cancellable request qualification required"
   },
   "redistribution": {
     "source_archives": "/opt/atrinik-portable/sources",
@@ -133,6 +145,9 @@
     "debian_source_metadata": "/opt/atrinik-portable/debian-sources.json",
     "obligations": "Preserve notices and source archives; provide corresponding Debian sources from the recorded snapshot and source versions. Keep shared LGPL libraries replaceable; retain build recipes and permit relinking. Host drivers are external.",
     "runtime_corresponding_sources": "/opt/atrinik-portable/runtime-sources.json",
-    "shader_corresponding_sources": "/opt/atrinik-portable/sources/classic-shaders"
-  }
+    "shader_corresponding_sources": "/opt/atrinik-portable/sources/classic-shaders",
+    "toolchain_corresponding_sources": "/opt/atrinik-portable/sources/llvm",
+    "toolchain_notices": "/opt/atrinik-portable/notices/llvm"
+  },
+  "curl_manifest": "curl-toolchain.json"
 }

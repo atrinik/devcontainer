@@ -61,7 +61,7 @@ done
 
 python3 "${classic_checkout}/client/tools/dependencies.py" sync
 # Follow the pinned consumer workflow: validate a host-generated shader cohort
-# before the offline MXE build rather than copying host compiler binaries.
+# before the offline LLVM build rather than copying host compiler binaries.
 CMAKE_BUILD_PARALLEL_LEVEL=4 \
   bash "${classic_checkout}/tools/ci/prepare_gpu_shaders.sh" \
     "${classic_checkout}" \
@@ -87,9 +87,9 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
   --workdir /workspace \
   "${image}" \
   bash -euo pipefail -c '
-    test "$(command -v ccache)" = /opt/mxe/.ccache/bin/ccache
-    test "$(command -v x86_64-w64-mingw32.shared-gcc)" = \
-      /opt/mxe/usr/bin/x86_64-w64-mingw32.shared-gcc
+    command -v ccache
+    test "$(command -v x86_64-w64-mingw32-clang)" = \
+      /opt/llvm-mingw/bin/x86_64-w64-mingw32-clang
     test -w "${CCACHE_DIR%/*}"
     ccache --zero-stats
     python3 -c "import hashlib, json, pathlib, shutil, subprocess, tarfile, urllib.request, zipfile"
@@ -99,11 +99,13 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
       /usr/local/share/atrinik/audio-toolchain.json
     cmp /image-source/audio-toolchain.spdx.json \
       /usr/local/share/atrinik/audio-toolchain.spdx.json
-    test ! -e /opt/mxe/python-runtime
-    test ! -e "${MXE_PREFIX}/include/python3.14"
-    test ! -e "${MXE_PREFIX}/lib/libpython314.dll.a"
+    cmp /image-source/windows/dependencies.json \
+      /opt/atrinik-windows/share/atrinik/windows-dependencies/dependencies.json
+    test ! -e /opt/atrinik-windows/python-runtime
+    test ! -e "/opt/atrinik-windows/include/python3.14"
+    test ! -e "/opt/atrinik-windows/lib/libpython314.dll.a"
 
-    x86_64-w64-mingw32.shared-cmake \
+    cmake -DCMAKE_TOOLCHAIN_FILE="${ATRINIK_WINDOWS_TOOLCHAIN_FILE}" \
       -S libatrinik \
       -B libatrinik/build/windows-tests \
       -G Ninja \
@@ -120,7 +122,7 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
     qualification_commit=$(python3 -c \
       "import json,sys; print(json.load(open(sys.argv[1]))[\"consumer\"][\"validation_commit\"])" \
       /image-source/windows/classic-check-toolchain.json)
-    x86_64-w64-mingw32.shared-cmake \
+    cmake -DCMAKE_TOOLCHAIN_FILE="${ATRINIK_WINDOWS_TOOLCHAIN_FILE}" \
       -S /image-source/tools/curl-probe \
       -B libatrinik/build/windows-curl-probe \
       -G Ninja \
@@ -137,13 +139,13 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
     test "${#packages[@]}" -eq 1
     package=${packages[0]}
     python3 /image-source/tools/verify-classic-check-package.py \
-      "${package}" x86_64-w64-mingw32.shared-objdump \
+      "${package}" llvm-readobj \
       /image-source/windows/classic-check-toolchain.json
     cd ..
 
     # The production package disables tests. Build the native client test in the
     # separate directory used by the pinned consumer workflow.
-    x86_64-w64-mingw32.shared-cmake \
+    cmake -DCMAKE_TOOLCHAIN_FILE="${ATRINIK_WINDOWS_TOOLCHAIN_FILE}" \
       -S client \
       -B client/build/windows-tests \
       -G Ninja \
@@ -164,22 +166,27 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
       /image-source/windows/classic-check-toolchain.json)
     test "${#native_sources[@]}" -eq 8
     python3 tools/ci/stage_windows_runtime.py \
-      --objdump x86_64-w64-mingw32.shared-objdump \
-      --runtime-dir "${MXE_RUNTIME_DIR}" \
+      --readobj llvm-readobj \
+      --runtime-dir "${ATRINIK_WINDOWS_RUNTIME_DIR}" \
       --output-dir "${stage}" \
-      "${native_sources[@]}"
+      "${native_sources[@]}" \
+      "${ATRINIK_WINDOWS_RUNTIME_DIR}/atrinik-sdl3-mixer-probe.exe"
     cmake -E copy_directory libatrinik/tests/fixtures "${stage}/fixtures"
+    cmake -E copy /opt/atrinik-windows/share/atrinik/audio/opus-probe.opus "${stage}/opus-probe.opus"
+    cmake -E copy /image-source/audio-toolchain.json "${stage}/audio-toolchain.json"
     test "$(sha256sum client/ca-bundle.crt | cut -d " " -f 1)" = \
       "$(python3 -c "import json; print(json.load(open(\"/image-source/windows/classic-check-toolchain.json\"))[\"verification\"][\"public_ca\"][\"sha256\"])")"
     cmake -E copy client/ca-bundle.crt "${stage}/ca-bundle.crt"
     cmake -E copy LICENSE.md "${stage}/Classic-LICENSE.md"
     cmake -E copy ATTRIBUTIONS.md "${stage}/ATTRIBUTIONS.md"
     cmake -E copy docs/CA-BUNDLE.md "${stage}/CA-BUNDLE.md"
-    cares_license=/opt/mxe/usr/x86_64-w64-mingw32.shared/share/licenses/c-ares/LICENSE.md
+    cares_license=/opt/atrinik-windows/share/licenses/c-ares/LICENSE.md
     test "$(sha256sum "${cares_license}" | cut -d " " -f 1)" = \
       "$(python3 -c "import json; print(json.load(open(\"/image-source/windows/classic-check-toolchain.json\"))[\"runtime_contract\"][\"cares_license\"][\"sha256\"])")"
     cmake -E copy "${cares_license}" "${stage}/c-ares-LICENSE.md"
     cmake -E copy_directory /image-source/tools/curl-probe "${stage}/sources/curl-probe"
+    cmake -E copy_directory /image-source/windows "${stage}/sources/windows-producer"
+    cmake -E copy /opt/atrinik-windows/share/atrinik/windows-dependencies/pe-closure.json "${stage}/producer-pe-closure.json"
     printf "%s\n" "Classic source: https://github.com/atrinik/classic/tree/${qualification_commit}" \
       > "${stage}/sources/Classic-source.txt"
     cmake -E copy /image-source/tools/run-classic-native-tests.ps1 \

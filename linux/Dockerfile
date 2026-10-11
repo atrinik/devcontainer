@@ -1,9 +1,51 @@
 # syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 
+
+# One Debian 12-built LLVM cohort serves Ubuntu and portable consumers. The
+# bootstrap is build-only; every owned dependency uses the resulting Clang.
+FROM debian:bookworm-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867 AS llvm-toolchain
+ARG TARGETARCH
+ARG LLVM_BUILD_JOBS=2
+ENV DEBIAN_FRONTEND=noninteractive
+COPY llvm-bootstrap-packages.lock /tmp/llvm-bootstrap-packages.lock
+RUN test "${TARGETARCH}" = amd64 \
+    && test "$(dpkg --print-architecture)" = amd64 \
+    && rm /etc/apt/sources.list.d/debian.sources \
+    && printf '%s\n' \
+        'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260901T000000Z bookworm main' \
+        'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260901T000000Z bookworm-updates main' \
+        'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260901T000000Z bookworm-security main' \
+        > /etc/apt/sources.list \
+    && apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update \
+    && xargs apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+        < /tmp/llvm-bootstrap-packages.lock \
+    && while IFS='=' read -r package version; do \
+        test "$(dpkg-query --show --showformat='${Version}' "${package}")" = "${version}"; \
+       done < /tmp/llvm-bootstrap-packages.lock \
+    && sed -i 's|http://snapshot.debian.org|https://snapshot.debian.org|g' /etc/apt/sources.list \
+    && apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update \
+    && rm -rf /var/lib/apt/lists/*
+COPY llvm-toolchain.json /tmp/llvm-toolchain.json
+COPY tools/install_llvm_toolchain.py tools/validate_llvm_toolchain.py /tmp/
+RUN python3 /tmp/install_llvm_toolchain.py --manifest /tmp/llvm-toolchain.json \
+        --cache /tmp/llvm-downloads --prefix /opt/llvm-23.1.3 --jobs "${LLVM_BUILD_JOBS}" \
+    && PATH="/opt/llvm-23.1.3/bin:${PATH}" python3 /tmp/validate_llvm_toolchain.py \
+        --manifest /tmp/llvm-toolchain.json --prefix /opt/llvm-23.1.3 \
+    && rm -rf /tmp/llvm-downloads
+
+
 # The public Linux and Classic images share one checksum-pinned Mesa Dozen
 # build. Only the resulting ICD and driver are copied into either runtime
 # image; the source and build toolchain remain in this disposable stage.
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS mesa-dozen
+
+COPY --from=llvm-toolchain /opt/llvm-23.1.3 /opt/llvm-23.1.3
+ENV PATH=/opt/llvm-23.1.3/bin:${PATH} \
+    CC=clang CXX=clang++ \
+    AR=llvm-ar RANLIB=llvm-ranlib NM=llvm-nm STRIP=llvm-strip \
+    OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf GCOV=llvm-gcov
+COPY tools/validate_llvm_toolchain.py /usr/local/bin/atrinik-validate-llvm-toolchain
+COPY llvm-toolchain.json /usr/local/share/atrinik/llvm-toolchain.json
 
 ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -77,6 +119,14 @@ RUN python3 /tmp/install_classic_vulkan_toolchain.py \
 
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS toolchain
 
+COPY --from=llvm-toolchain /opt/llvm-23.1.3 /opt/llvm-23.1.3
+ENV PATH=/opt/llvm-23.1.3/bin:${PATH} \
+    CC=clang CXX=clang++ LD=ld.lld \
+    AR=llvm-ar RANLIB=llvm-ranlib NM=llvm-nm STRIP=llvm-strip \
+    OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf GCOV=llvm-gcov
+COPY tools/validate_llvm_toolchain.py /usr/local/bin/atrinik-validate-llvm-toolchain
+COPY llvm-toolchain.json /usr/local/share/atrinik/llvm-toolchain.json
+
 ENV DEBIAN_FRONTEND=noninteractive \
     UBUNTU_SNAPSHOT=20260810T000000Z
 
@@ -126,10 +176,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         ca-certificates \
         ccache \
         check \
-        clang \
-        clang-format \
-        clang-tidy \
-        clangd \
         cmake \
         cppcheck \
         cproto \
@@ -144,7 +190,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         iproute2 \
         jq \
         libasound2-plugins \
-        libclang-rt-dev \
         libcurl4-openssl-dev \
         libdrm2=2.4.131-1 \
         libgd-dev \
@@ -163,7 +208,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libwayland-client0=1.24.0-2 \
         libxml2-dev \
         libxml2-utils \
-        llvm \
         mesa-vulkan-drivers=26.0.3-1ubuntu1 \
         ninja-build \
         openssh-client \
@@ -333,7 +377,7 @@ COPY tools/audio/sdl3-mixer-probe.c /tmp/sdl3-mixer-probe.c
 RUN test "$(sha256sum /usr/local/share/atrinik/audio/opus-probe.opus \
         | cut -d' ' -f1)" \
         = "$(jq -r '.fixture.sha256' /tmp/audio-toolchain.json)" \
-    && cc -std=c17 -Wall -Wextra -Werror \
+    && clang -std=c17 -Wall -Wextra -Werror \
         /tmp/sdl3-mixer-probe.c \
         -o /usr/local/bin/atrinik-sdl3-mixer-probe \
         $(pkg-config --cflags --libs sdl3-mixer) \
@@ -400,7 +444,8 @@ RUN HOME="/home/${USERNAME}" runuser -u "${USERNAME}" -- \
 
 COPY tools/smoke-git-lfs.sh /usr/local/bin/atrinik-git-lfs-smoke
 RUN chmod 0755 /usr/local/bin/atrinik-git-lfs-smoke \
-    && clang --version \
+    && python3 /usr/local/bin/atrinik-validate-llvm-toolchain \
+        --manifest /usr/local/share/atrinik/llvm-toolchain.json --prefix /opt/llvm-23.1.3 \
     && test "$(go env GOVERSION)" = "go${GO_VERSION}" \
     && test "$(rustc --version | cut -d' ' -f2)" = "${RUST_VERSION}" \
     && test "$(node --version)" = "v${NODE_VERSION}" \
@@ -483,7 +528,7 @@ RUN actionlint \
             '([.artifacts[] | [.name, .version]] | sort) == \
              (($inventory[0].dependencies + [$inventory[0].sdl_mixer]) \
               | map([.name, .version]) \
-              | . + [["Mesa", $vulkan[0].source.version]] \
+              | . + [["Mesa", $vulkan[0].source.version], ["LLVM", "23.1.3"]] \
               | sort)' \
     && syft dir:/ --select-catalogers +sbom-cataloger -o spdx-json \
         | jq -e --slurpfile inventory /workspace/audio-toolchain.json ' \
@@ -519,6 +564,14 @@ RUN actionlint \
 # TLS runtime packages are bootstrapped first because the minimal base cannot
 # validate the HTTPS snapshot service.
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS classic-ci
+
+COPY --from=llvm-toolchain /opt/llvm-23.1.3 /opt/llvm-23.1.3
+ENV PATH=/opt/llvm-23.1.3/bin:${PATH} \
+    CC=clang CXX=clang++ LD=ld.lld \
+    AR=llvm-ar RANLIB=llvm-ranlib NM=llvm-nm STRIP=llvm-strip \
+    OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf GCOV=llvm-gcov
+COPY tools/validate_llvm_toolchain.py /usr/local/bin/atrinik-validate-llvm-toolchain
+COPY llvm-toolchain.json /usr/local/share/atrinik/llvm-toolchain.json
 
 ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -611,7 +664,7 @@ COPY tools/audio/sdl3-mixer-probe.c /tmp/sdl3-mixer-probe.c
 RUN test "$(sha256sum /usr/local/share/atrinik/audio/opus-probe.opus \
         | cut -d' ' -f1)" \
         = "$(jq -r '.fixture.sha256' /tmp/audio-toolchain.json)" \
-    && cc -std=c17 -Wall -Wextra -Werror \
+    && clang -std=c17 -Wall -Wextra -Werror \
         /tmp/sdl3-mixer-probe.c \
         -o /usr/local/bin/atrinik-sdl3-mixer-probe \
         $(pkg-config --cflags --libs sdl3-mixer) \
@@ -687,7 +740,9 @@ COPY tools/validate-vulkan-toolchain.sh \
     /workspace/tools/validate-vulkan-toolchain.sh
 
 USER ubuntu
-RUN /workspace/tools/validate-classic-image.sh \
+RUN python3 /usr/local/bin/atrinik-validate-llvm-toolchain \
+        --manifest /usr/local/share/atrinik/llvm-toolchain.json --prefix /opt/llvm-23.1.3 \
+    && /workspace/tools/validate-classic-image.sh \
         /workspace/classic-packages.lock \
         /workspace/classic-toolchain.json \
         /usr/local/share/atrinik/classic-toolchain.json \
@@ -709,7 +764,7 @@ RUN syft dir:/ --select-catalogers +sbom-cataloger -o spdx-json \
         | jq -e '.spdxVersion == "SPDX-2.3" \
             and ([.packages[].name] | index("ccache") != null) \
             and ([.packages[].name] | index("cmake") != null) \
-            and ([.packages[].name] | index("gcc") != null) \
+            and any(.packages[]; .name == "LLVM" and .versionInfo == "23.1.3") \
             and ([.packages[].name] | index("SDL3_mixer") != null) \
             and ([.packages[].name] | index("libogg") != null) \
             and ([.packages[].name] | index("libopus") != null) \

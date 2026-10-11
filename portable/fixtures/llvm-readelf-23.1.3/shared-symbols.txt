@@ -1,0 +1,8 @@
+
+Symbol table '.dynsym' contains 5 entries:
+   Num:    Value          Size Type    Bind   Vis       Ndx Name
+     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT   UND 
+     1: 00000000000013a0     6 FUNC    GLOBAL DEFAULT     8 old_copy
+     2: 00000000000013a8     6 FUNC    GLOBAL DEFAULT     8 new_copy
+     3: 00000000000013a0     6 FUNC    GLOBAL DEFAULT     8 copy@ABI_1
+     4: 00000000000013a8     6 FUNC    GLOBAL DEFAULT     8 copy@@ABI_2

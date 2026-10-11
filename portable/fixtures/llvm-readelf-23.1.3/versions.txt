@@ -1,0 +1,26 @@
+Version symbols section '.gnu.version' contains 50 entries:
+ Addr: 0000000000000b5e  Offset: 0x000b5e  Link: 4 (.dynsym)
+  000:   0 (*local*)       3 (GLIBC_2.3.4)   4 (GLIBC_2.34)    2 (GLIBC_2.2.5)
+  004:   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)   0 (*local*)       2 (GLIBC_2.2.5)
+  008:   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)
+  00c:   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)
+  010:   5 (GLIBC_2.4)     2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)   6 (GLIBC_2.16) 
+  014:   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)
+  018:   0 (*local*)       2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)
+  01c:   3 (GLIBC_2.3.4)   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)
+  020:   3 (GLIBC_2.3.4)   0 (*local*)       2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)
+  024:   2 (GLIBC_2.2.5)   7 (GLIBC_2.3)     2 (GLIBC_2.2.5)   1 (*global*)   
+  028:   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)   1 (*global*)      2 (GLIBC_2.2.5)
+  02c:   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)   2 (GLIBC_2.2.5)   1 (*global*)   
+  030:   1 (*global*)      1 (*global*)   
+
+Version needs section '.gnu.version_r' contains 1 entries:
+ Addr: 0000000000000bc8  Offset: 0x000bc8  Link: 5 (.dynstr)
+  0x0000: Version: 1  File: libc.so.6  Cnt: 6
+  0x0010:   Name: GLIBC_2.3  Flags: none  Version: 7
+  0x0020:   Name: GLIBC_2.16  Flags: none  Version: 6
+  0x0030:   Name: GLIBC_2.4  Flags: none  Version: 5
+  0x0040:   Name: GLIBC_2.34  Flags: none  Version: 4
+  0x0050:   Name: GLIBC_2.3.4  Flags: none  Version: 3
+  0x0060:   Name: GLIBC_2.2.5  Flags: none  Version: 2
+

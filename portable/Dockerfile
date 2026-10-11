@@ -1,4 +1,55 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
+FROM debian:bookworm-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867 AS portable-base
+ARG TARGETARCH
+ENV DEBIAN_FRONTEND=noninteractive
+COPY portable/packages.lock /tmp/portable-packages.lock
+# Signed snapshot metadata and package hashes remain mandatory, including bootstrap.
+RUN test "${TARGETARCH}" = amd64 \
+    && test "$(dpkg --print-architecture)" = amd64 \
+    && rm /etc/apt/sources.list.d/debian.sources \
+    && printf '%s\n' \
+      'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260901T000000Z bookworm main' \
+      'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260901T000000Z bookworm-updates main' \
+      'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260901T000000Z bookworm-security main' \
+      > /etc/apt/sources.list \
+    && apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update \
+    && xargs apt-get -o Acquire::Retries=5 install -y --no-install-recommends < /tmp/portable-packages.lock \
+    && sed -i 's|http://snapshot.debian.org|https://snapshot.debian.org|g' /etc/apt/sources.list \
+    && sed 's/^deb /deb-src /' /etc/apt/sources.list >> /etc/apt/sources.list.d/portable-source.list \
+    && apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update \
+    && useradd --create-home --uid 1000 --shell /bin/bash ubuntu
+
+FROM debian:bookworm-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867 AS portable-llvm
+ARG TARGETARCH
+ARG LLVM_BUILD_JOBS=2
+ENV DEBIAN_FRONTEND=noninteractive
+COPY llvm-bootstrap-packages.lock /tmp/llvm-bootstrap-packages.lock
+RUN test "${TARGETARCH}" = amd64 \
+    && test "$(dpkg --print-architecture)" = amd64 \
+    && rm /etc/apt/sources.list.d/debian.sources \
+    && printf '%s\n' \
+        'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260901T000000Z bookworm main' \
+        'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260901T000000Z bookworm-updates main' \
+        'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260901T000000Z bookworm-security main' \
+        > /etc/apt/sources.list \
+    && apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update \
+    && xargs apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+        < /tmp/llvm-bootstrap-packages.lock \
+    && while IFS='=' read -r package version; do \
+        test "$(dpkg-query --show --showformat='${Version}' "${package}")" = "${version}"; \
+       done < /tmp/llvm-bootstrap-packages.lock \
+    && sed -i 's|http://snapshot.debian.org|https://snapshot.debian.org|g' /etc/apt/sources.list \
+    && apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update \
+    && rm -rf /var/lib/apt/lists/*
+COPY llvm-toolchain.json /tmp/llvm-toolchain.json
+COPY tools/install_llvm_toolchain.py tools/validate_llvm_toolchain.py /tmp/
+RUN python3 /tmp/install_llvm_toolchain.py --manifest /tmp/llvm-toolchain.json \
+        --cache /tmp/llvm-downloads --prefix /opt/llvm-23.1.3 --jobs "${LLVM_BUILD_JOBS}" \
+    && PATH="/opt/llvm-23.1.3/bin:${PATH}" python3 /tmp/validate_llvm_toolchain.py \
+        --manifest /tmp/llvm-toolchain.json --prefix /opt/llvm-23.1.3 \
+    && rm -rf /tmp/llvm-downloads
+
+
 # Shader generators stay in the existing Ubuntu ABI; only verified data crosses.
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03 AS portable-shaders
 ARG TARGETARCH
@@ -19,6 +70,14 @@ RUN test "${TARGETARCH}" = amd64 \
     && apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update \
     && xargs apt-get -o Acquire::Retries=5 install -y --no-install-recommends < /tmp/classic-packages.lock \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=portable-llvm /opt/llvm-23.1.3 /opt/llvm-23.1.3
+ENV PATH=/opt/llvm-23.1.3/bin:${PATH} \
+    CC=clang CXX=clang++ AR=llvm-ar RANLIB=llvm-ranlib \
+    NM=llvm-nm STRIP=llvm-strip OBJCOPY=llvm-objcopy \
+    CFLAGS="-O2 -march=x86-64 -mtune=generic" \
+    CXXFLAGS="-O2 -march=x86-64 -mtune=generic" \
+    ATRINIK_RELEASE_C_FLAGS="-O2 -DNDEBUG" \
+    ATRINIK_RELEASE_CXX_FLAGS="-O2 -DNDEBUG"
 COPY classic-shader-toolchain.json /opt/shader-toolchain.json
 COPY tools/install_classic_shader_toolchain.py /opt/install-shaders.py
 RUN python3 /opt/install-shaders.py --manifest /opt/shader-toolchain.json \
@@ -41,36 +100,26 @@ COPY portable/shader-record.py /opt/shader-record.py
 RUN python3 /opt/shader-record.py
 
 
-FROM debian:bookworm-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867 AS portable-build
-ARG TARGETARCH
-ENV DEBIAN_FRONTEND=noninteractive \
+FROM portable-base AS portable-build
+COPY --from=portable-llvm /opt/llvm-23.1.3 /opt/llvm-23.1.3
+ENV PATH=/opt/llvm-23.1.3/bin:${PATH} \
+    CC=clang CXX=clang++ AR=llvm-ar RANLIB=llvm-ranlib \
+    NM=llvm-nm STRIP=llvm-strip OBJCOPY=llvm-objcopy \
     CFLAGS="-O2 -march=x86-64 -mtune=generic" \
     CXXFLAGS="-O2 -march=x86-64 -mtune=generic" \
-    PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
+    ATRINIK_RELEASE_C_FLAGS="-O2 -DNDEBUG" \
+    ATRINIK_RELEASE_CXX_FLAGS="-O2 -DNDEBUG"
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
     OPENSSL_MODULES=/usr/local/lib/ossl-modules
-COPY portable/packages.lock /tmp/portable-packages.lock
-# Signed snapshot metadata and package hashes remain mandatory, including bootstrap.
-RUN test "${TARGETARCH}" = amd64 \
-    && test "$(dpkg --print-architecture)" = amd64 \
-    && rm /etc/apt/sources.list.d/debian.sources \
-    && printf '%s\n' \
-      'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260901T000000Z bookworm main' \
-      'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260901T000000Z bookworm-updates main' \
-      'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260901T000000Z bookworm-security main' \
-      > /etc/apt/sources.list \
-    && apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update \
-    && xargs apt-get -o Acquire::Retries=5 install -y --no-install-recommends < /tmp/portable-packages.lock \
-    && sed -i 's|http://snapshot.debian.org|https://snapshot.debian.org|g' /etc/apt/sources.list \
-    && sed 's/^deb /deb-src /' /etc/apt/sources.list >> /etc/apt/sources.list.d/portable-source.list \
-    && apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update \
-    && useradd --create-home --uid 1000 --shell /bin/bash ubuntu
 COPY portable /opt/atrinik-portable
-COPY audio-toolchain.json audio-toolchain.spdx.json classic-shader-toolchain.json classic-shader-toolchain.spdx.json /opt/atrinik-portable/
-COPY tools/build-sdl3-mixer.sh tools/install_classic_shader_toolchain.py /opt/atrinik-portable/tools/
+COPY llvm-toolchain.json audio-toolchain.json audio-toolchain.spdx.json classic-shader-toolchain.json classic-shader-toolchain.spdx.json classic-curl-toolchain.json /opt/atrinik-portable/
+COPY tools/install_llvm_toolchain.py tools/validate_llvm_toolchain.py tools/build-sdl3-mixer.sh tools/install_classic_shader_toolchain.py /opt/atrinik-portable/tools/
 COPY tools/audio /opt/atrinik-portable/audio
 RUN python3 /opt/atrinik-portable/build.py \
     && ldconfig \
     && python3 /opt/atrinik-portable/inventory.py \
+    && cp -a /opt/llvm-23.1.3/share/atrinik/sources /opt/atrinik-portable/sources/llvm \
+    && cp -a /opt/llvm-23.1.3/share/licenses/llvm /opt/atrinik-portable/notices/llvm \
     && python3 /opt/atrinik-portable/legal.py \
     && rm -rf /var/lib/apt/lists/* \
     && install -d -m 1777 /cache/ccache
@@ -82,7 +131,7 @@ COPY --from=portable-shaders /cohort/corresponding-source /opt/atrinik-portable/
 COPY --from=portable-shaders /usr/local/share/licenses /opt/atrinik-portable/notices/shader-tools
 # Download caches use private temporary files; published inputs must be readable
 # by arbitrary non-root consumer UIDs, without adding write permissions.
-RUN chmod -R a+rX /opt/atrinik-portable /usr/local/share/licenses
+RUN chmod -R a+rX /opt/atrinik-portable /opt/llvm-23.1.3 /usr/local/share/licenses
 USER ubuntu
 WORKDIR /home/ubuntu
 

@@ -230,7 +230,9 @@ def load_manifest(path: Path) -> dict[str, object]:
     build = value["build"]
     if not isinstance(build, dict):
         raise ToolchainError("manifest build must be an object")
-    require_keys(build, {"system", "version", "package_lock", "configure", "options"}, "build")
+    require_keys(build, {"system", "version", "package_lock", "configure", "options", "compiler"}, "build")
+    if build["compiler"] != {'family': 'Clang', 'version': '23.1.3', 'runtime': 'compiler-rt', 'unwind': 'libunwind', 'linker': 'LLD'}:
+        raise ToolchainError("Mesa compiler cohort is not LLVM 23.1.3")
     if build["system"] != "meson" or build["version"] != "1.10.1":
         raise ToolchainError("manifest does not describe the pinned Meson build")
     safe_relative_path(build["package_lock"], "build.package_lock")
@@ -287,7 +289,6 @@ def load_manifest(path: Path) -> dict[str, object]:
     if shared != [
         "libc.so.6",
         "libdrm.so.2",
-        "libgcc_s.so.1",
         "libm.so.6",
         "libudev.so.1",
         "libwayland-client.so.0",
@@ -531,6 +532,11 @@ def run_build(
     option_args = [
         f"-D{name}={option_value(options[name])}" for name in sorted(options)
     ]
+    if os.environ.get("CC") != "clang" or os.environ.get("CXX") != "clang++":
+        raise ToolchainError("Mesa producer requires the explicit LLVM compiler cohort")
+    compiler = subprocess.check_output(["clang", "--version"], text=True)
+    if "clang version 23.1.3" not in compiler:
+        raise ToolchainError("Mesa producer requires Clang 23.1.3")
     subprocess.run(
         [
             meson,

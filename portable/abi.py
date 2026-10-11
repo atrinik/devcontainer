@@ -36,7 +36,46 @@ def symbols(text: str) -> tuple[set[str], set[str]]:
     return defined, required
 
 
-def symbol_providers(text: str, versions: dict[int, str]) -> dict[str, dict]:
+def version_symbol_indices(text: str) -> dict[int, int]:
+    """Read .gnu.version ordinals; LLVM omits their indices from dyn-syms."""
+    result = {}
+    active = False
+    for line in text.splitlines():
+        if line.startswith("Version symbols section"):
+            active = True
+            continue
+        if line.startswith("Version "):
+            active = False
+        if not active:
+            continue
+        row = re.match(r"\s*([0-9a-f]+):\s+(.*)", line)
+        if row:
+            start = int(row[1], 16)
+            # Both ordinals and printed version indices are hexadecimal. Parse
+            # every entry in order; skipping an unrecognized token would bind
+            # all subsequent symbols in that row to the wrong providers.
+            entries = []
+            remaining = row[2]
+            while remaining.strip():
+                entry = re.match(r"\s*([0-9a-f]+)h?\s*\([^)]*\)(?=\s|$)", remaining)
+                if entry is None or len(entries) == 4:
+                    raise ValueError("malformed ELF version symbol row")
+                index = int(entry[1], 16)
+                if index > 0xffff:
+                    raise ValueError("invalid ELF version symbol index")
+                entries.append(index & 0x7fff)
+                remaining = remaining[entry.end():]
+            if not entries:
+                raise ValueError("malformed ELF version symbol row")
+            for offset, index in enumerate(entries):
+                ordinal = start + offset
+                if ordinal in result:
+                    raise ValueError("duplicate ELF version symbol ordinal")
+                result[ordinal] = index
+    return result
+
+
+def symbol_providers(text: str, versions: dict[int, str], indices: dict[int, int] | None = None) -> dict[str, dict]:
     result = {}
     for line in text.splitlines():
         fields = line.split()
@@ -45,7 +84,10 @@ def symbol_providers(text: str, versions: dict[int, str]) -> dict[str, dict]:
         if fields[4] != "GLOBAL" or fields[6] != "UND" or "@" not in fields[7]:
             continue
         match = re.search(r"\((\d+)\)$", line)
-        index = int(match[1]) if match else None
+        ordinal = int(fields[0].rstrip(":"))
+        index = int(match[1]) if match else (indices or {}).get(ordinal)
+        if match and indices and indices.get(ordinal) != index:
+            raise ValueError(f"conflicting ELF symbol version index: {fields[7]}")
         if index not in versions:
             raise ValueError(f"missing ELF symbol version provider: {fields[7]}")
         name = fields[7].replace("@@", "@")
@@ -57,15 +99,15 @@ def symbol_providers(text: str, versions: dict[int, str]) -> dict[str, dict]:
 
 
 def section_bytes(path: Path, name: str) -> bytes:
-    sections = output("readelf", "-SW", str(path))
+    sections = output("llvm-readelf", "-SW", str(path))
     if not re.search(r"\]\s+" + re.escape(name) + r"\s", sections):
         return b""
-    # Binutils 2.40 returns failure for valid FDO dlopen notes with -n. Hex
-    # section inspection preserves those bytes without interpreting note types.
-    dump = output("readelf", "-x", name, str(path))
+    # Inspect note bytes independently so GNU CPU properties and FDO dlopen
+    # contracts do not depend on the inspector's presentation of note types.
+    dump = output("llvm-readelf", "-x", name, str(path))
     chunks = []
     for line in dump.splitlines():
-        match = re.match(r"\s+0x[0-9a-f]+\s+((?:[0-9a-f]{2,8}\s+){1,4})", line)
+        match = re.match(r"\s*0x[0-9a-f]+\s+((?:[0-9a-f]{2,8}\s+){1,4})", line)
         if match:
             chunks.append(bytes.fromhex(match[1]))
     if not chunks:
@@ -129,7 +171,7 @@ def dlopen_notes(data: bytes) -> list[dict]:
 
 
 def elf(path: Path) -> dict:
-    header = output("readelf", "-h", str(path))
+    header = output("llvm-readelf", "-h", str(path))
     if "Advanced Micro Devices X86-64" not in header or "ELF64" not in header:
         raise ValueError(f"wrong ELF target: {path}")
     if "little endian" not in header:
@@ -137,7 +179,7 @@ def elf(path: Path) -> dict:
     properties = section_bytes(path, ".note.gnu.property")
     cpu_notes(properties)
     loaders = dlopen_notes(section_bytes(path, ".note.dlopen"))
-    dynamic = output("readelf", "-d", str(path))
+    dynamic = output("llvm-readelf", "-d", str(path))
     needed = re.findall(r"\(NEEDED\).*\[([^\]]+)\]", dynamic)
     paths = []
     for value in re.findall(r"\((?:RUNPATH|RPATH)\).*\[([^\]]*)\]", dynamic):
@@ -146,7 +188,7 @@ def elf(path: Path) -> dict:
             if not item.startswith("/") or "$" in item:
                 raise ValueError(f"unsupported loader search path: {path}: {item}")
             paths.append(Path(item))
-    versions = output("readelf", "--version-info", str(path))
+    versions = output("llvm-readelf", "--version-info", str(path))
     provider = None
     version_providers = {}
     in_needs = False
@@ -171,9 +213,9 @@ def elf(path: Path) -> dict:
                 value = version.removeprefix("GLIBC_")
                 if value[0].isdigit() and tuple(map(int, value.split("."))) > (2, 36):
                     raise ValueError(f"newer glibc requirement: {path}: {version}")
-    dynamic_symbols = output("readelf", "--dyn-syms", "--wide", str(path))
+    dynamic_symbols = output("llvm-readelf", "--dyn-syms", "--wide", str(path))
     defined, required = symbols(dynamic_symbols)
-    required_providers = symbol_providers(dynamic_symbols, version_providers)
+    required_providers = symbol_providers(dynamic_symbols, version_providers, version_symbol_indices(versions))
     return dict(needed=needed, paths=paths, defined=defined, required=required,
                 required_providers=required_providers, dlopen=loaders, gnu_property_present=bool(properties))
 

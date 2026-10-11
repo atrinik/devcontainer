@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "scope": "Cross compilation and PE inspection; native decoding/Python execution require Windows qualification.",
+  "worker_image": "ghcr.io/atrinik/classic-build@sha256:e1c366dbf83ef987765ff913bbb193868314a139ae1e00cc134b22a3159464f2",
+  "compiler": "LLVM 23.1.3",
+  "llvm_mingw_archive_sha256": "5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4",
+  "target": "x86_64-w64-mingw32",
+  "crt": "ucrt",
+  "worker_exit_code": 0,
+  "sdl_version": "3.4.0",
+  "sdl_mixer_version": "3.2.4",
+  "audio_manifest_sha256": "b95ebb5de4805c2010c394b0ebe63598a5a575030ae3d821b14f3aac5d2c0ffc",
+  "python_embed_sha256": "df901e84a896ff1ee720ad03377e0c8d8c2244fda79808aeeaff6316df1cb75c",
+  "python_import_library_generator_sha256": "73e985c71d2934e17755aa636ea9504e8b0a0f560cefb5d8c61a874424572056",
+  "mixer_imports": [
+    "KERNEL32.dll",
+    "SDL3.dll",
+    "api-ms-win-crt-heap-l1-1-0.dll",
+    "api-ms-win-crt-math-l1-1-0.dll",
+    "api-ms-win-crt-private-l1-1-0.dll",
+    "api-ms-win-crt-runtime-l1-1-0.dll",
+    "api-ms-win-crt-stdio-l1-1-0.dll",
+    "api-ms-win-crt-string-l1-1-0.dll",
+    "api-ms-win-crt-utility-l1-1-0.dll"
+  ],
+  "python_probe_imports": [
+    "KERNEL32.dll",
+    "api-ms-win-crt-environment-l1-1-0.dll",
+    "api-ms-win-crt-heap-l1-1-0.dll",
+    "api-ms-win-crt-locale-l1-1-0.dll",
+    "api-ms-win-crt-math-l1-1-0.dll",
+    "api-ms-win-crt-private-l1-1-0.dll",
+    "api-ms-win-crt-runtime-l1-1-0.dll",
+    "api-ms-win-crt-stdio-l1-1-0.dll",
+    "api-ms-win-crt-string-l1-1-0.dll",
+    "python314.dll"
+  ],
+  "python_data_export": "PyExc_RuntimeError DATA",
+  "build_type": "Release"
+}

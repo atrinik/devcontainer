@@ -3,7 +3,7 @@
 - This repository owns reusable Linux and Windows build-toolchain images. The
   workspace wrapper owns checkout composition and VS Code launch configuration;
   component repositories own their source builds.
-- Keep Linux and MXE/Windows toolchains coherent for supported client/server
+- Keep Linux and LLVM/Windows toolchains coherent for supported client/server
   releases. Pin base images and downloaded toolchains according to project
   policy, preserve non-root usage, and avoid embedding credentials or mutable
   workspace state.
@@ -11,7 +11,7 @@
   contract. Keep its Go, Rust, Protobuf, Buf, Node, pnpm, SBOM, vulnerability,
   target, and graphics declarations synchronized with the Linux Dockerfile and
   smoke checks. Native Windows Rust/D3D12 validation belongs on Windows
-  runners; the MXE image remains the explicit classic cross-build owner.
+  runners; the LLVM MinGW image remains the explicit classic cross-build owner.
 - Treat Dockerfile inputs, `.dockerignore`, cache scopes, build arguments,
   published tags, and workflow path filters as one contract. If a relevant file
   changes, the required aggregate validation must still run.
@@ -21,20 +21,34 @@
   `classic-portable-build` publication contracts synchronized. Generate shaders
   with the unchanged canonical tools in the build-only Ubuntu stage; copy only
   canonical-manifest-verified data into Debian. The consumer rejects changed
-  source commits or shader inputs. Never repurpose this target as a coordinator.
+  source commits or shader inputs. Schema 2 compiler evidence requires every
+  selected LLVM utility, including separate Clang C/C++ drivers and
+  archiver/ranlib, with canonical paths, versions and hashes; rehash before
+  consumer builds and publication. Portable curl is an LLVM rebuild of
+  security-patched Debian `7.88.1-10+deb12u15` with c-ares 1.34.6, retaining
+  existing features including LDAP/LDAPS, RTMP, SCP and SFTP. Its separate
+  `portable/curl-toolchain.json`, `portable/build-curl.py`,
+  `portable/curl_evidence.py` and `portable/curl-runtime-probe.c` contract
+  consumes c-ares pins from `classic-curl-toolchain.json`; every portable change
+  filter must include that shared input. Portable validation and publication
+  must run the loaded candidate's own public-CA probe with the pinned Classic
+  bundle before the offline consumer and publication, retaining normal TLS
+  verification and the unrelated-CA negative check. Never repurpose this target as a coordinator.
 - `classic-final` is the slim Classic Check target. Keep its Ubuntu snapshot,
   direct package lock, tool inventory, non-root ccache mount, Classic validation
   revision, shader-toolchain inventory, GPU runtime, smoke/SBOM checks, and
   published tags synchronized. Do not make it inherit the broad
   replacement/development toolchain.
-- `classic-curl-toolchain.json` pins the Classic c-ares resolver producer. Both
-  Linux images install its curl/c-ares closure in `/usr/local` without replacing
-  system OpenSSL 3.5.5; both MXE images explicitly pin OpenSSL 3.5.5 and compile
-  curl with c-ares and no threaded resolver. Preserve generated configuration,
-  header/runtime/license closure and native cancellation qualification; ASYNCHDNS
+- `classic-curl-toolchain.json` pins the Classic c-ares resolver producer. The
+  broad and slim Linux images retain curl 8.18.0 and their explicit LDAP/LDAPS
+  and RTMP exclusions, installing its curl/c-ares closure in `/usr/local`
+  without replacing system OpenSSL 3.5.5; both LLVM Windows images explicitly
+  pin OpenSSL 3.5.5 and compile curl with c-ares and no threaded resolver.
+  Preserve generated configuration, header/runtime/license closure and native
+  cancellation qualification; ASYNCHDNS
   or a non-null c-ares field alone does not prove the selected backend.
-  Both Linux publication paths must run `tools/smoke-classic-curl.sh` against
-  their actual loaded candidate before publication; `candidate_only` retains
+  Broad and slim Linux publication paths must run `tools/smoke-classic-curl.sh`
+  against their actual loaded candidate before publication; `candidate_only` retains
   this gate. Windows validation/measurement/publication share the bundled
   native runner, including cancellation, QUIC and pinned public-CA checks.
 - The broad Linux and `classic-final` images include the snapshot-pinned Git LFS
@@ -52,15 +66,27 @@
 - Keep a stable numeric runner UID when restoring a Classic ccache directory;
   the mode-1777 mount root supports non-root initialization but does not make
   ccache's owner-writable nested directories reusable across different UIDs.
-- A Linux `candidate_only` dispatch is the pre-merge Classic review path. It
-  must publish only `classic-build:candidate-sha-<commit>` after validation and
-  must never move a rolling, platform, or version tag.
-- Every semantic release publishes the broad Linux, slim Linux Classic,
+- A `candidate_only` dispatch is the pre-merge image review path. Linux must
+  qualify and publish broad, slim Classic, and portable Classic targets only as
+  `candidate-sha-<commit>`. Windows publishes `candidate-sha-<commit>` and
+  `classic-check-candidate-sha-<commit>` with cross-build and native Windows
+  tests intact. Neither path may move rolling, platform, or version aliases.
+- `llvm-toolchain.json`, `llvm-bootstrap-packages.lock`, and the shared LLVM
+  installer/validator own LLVM 23.1.3 Clang/LLD/compiler-rt/libunwind source,
+  licensing, installed metadata, and target contracts. Every affected input
+  must select all image validations. GCC is bootstrap-only; application builds
+  use Clang and LLD. Keep LLVM-versioned image cache scopes and two-job hosted
+  compiler limits separate from model-worker concurrency. Build the shared
+  `llvm-toolchain` stage once before parallel PR target validation; selected
+  image jobs and the required aggregate retain that dependency. Cold source builds
+  may use the supported six-hour hosted-job timeout.
+- Every semantic release publishes the broad Linux, slim and portable Linux Classic,
   general Windows, and task-focused Windows Classic images with their
   supported tags. The Linux publisher owns `linux-build`, `classic-build`, and
   `classic-portable-build`;
-  the Windows publisher owns both `windows-build` variants. Keep the
-  `classic-check` target branched from the expensive shared MXE foundation
+  the Windows publisher owns both `windows-build` variants and their `llvm` and
+  `classic-check-llvm` platform aliases. Keep the
+  `classic-check` target branched from the expensive shared LLVM foundation
   before general-image Python/worldmaker additions, preserve the general
   Windows image as the default Dockerfile result, validate immutable SHA
   candidates before promoting rolling/version aliases, and recover partial
@@ -69,7 +95,7 @@
 - Validate Dockerfiles with `docker build --check`. Build and smoke-test each
   affected image, including `classic-validation` before `classic-final` and the
   Windows `classic-check` target plus native bundle; note that a cold
-  Windows/MXE build is expensive and may rely on CI cache for final
+  Windows/LLVM build is expensive and may rely on CI cache for final
   verification.
 - Workflow changes also require actionlint and Atrinik GitHub-governance review
   for permissions, pinned actions, check names, and ruleset compatibility.
