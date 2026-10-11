@@ -122,7 +122,8 @@
       "libidn2.so.0",
       "libxml2.so.2",
       "libz.so.1",
-      "libdbus-1.so.3"
+      "libdbus-1.so.3",
+      "libcrypt.so.1"
     ],
     "graphics_backend": "SDL_GPU Vulkan; unused OpenGL/OpenGL ES backends disabled to avoid Debian Mesa-driver package dependencies",
     "unsupported_dlopen_features": [
