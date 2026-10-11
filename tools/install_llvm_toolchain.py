@@ -234,6 +234,10 @@ def build(source: Path, work: Path, prefix: Path, manifest: dict, jobs: int) -> 
          "-DCMAKE_EXE_LINKER_FLAGS=-Wl,--build-id=sha1"])
     run(["cmake", "--build", str(llvm), "--parallel", str(jobs)])
     run(["cmake", "--install", str(llvm), "--strip"])
+    build_runtimes(source, work, prefix, jobs)
+
+
+def build_runtimes(source: Path, work: Path, prefix: Path, jobs: int) -> None:
     runtime = work / "runtime-build"
     # The just-built Clang compiles its own runtimes. Defaults are installed
     # only after this step, avoiding a circular dependency on compiler-rt.
@@ -243,10 +247,10 @@ def build(source: Path, work: Path, prefix: Path, manifest: dict, jobs: int) -> 
          f"-DCMAKE_STRIP={prefix}/bin/llvm-strip", f"-DCMAKE_AR={prefix}/bin/llvm-ar", f"-DCMAKE_RANLIB={prefix}/bin/llvm-ranlib",
          f"-DCMAKE_C_COMPILER_TARGET=x86_64-unknown-linux-gnu",
          f"-DCMAKE_CXX_COMPILER_TARGET=x86_64-unknown-linux-gnu",
-         "-DCMAKE_C_FLAGS=--rtlib=libgcc --unwindlib=libgcc -fuse-ld=lld",
-         "-DCMAKE_CXX_FLAGS=--rtlib=libgcc --unwindlib=libgcc -fuse-ld=lld",
+         "-DCMAKE_C_FLAGS=--no-default-config --rtlib=libgcc --unwindlib=libgcc -fuse-ld=lld",
+         "-DCMAKE_CXX_FLAGS=--no-default-config --rtlib=libgcc --unwindlib=libgcc -fuse-ld=lld",
          "-DCMAKE_INSTALL_LIBDIR=lib", "-DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=OFF",
-         "-DCOMPILER_RT_INSTALL_PATH=lib/clang/23",
+         f"-DCOMPILER_RT_INSTALL_PATH={prefix}/lib/clang/23",
          "-DLLVM_ENABLE_RUNTIMES=compiler-rt;libunwind", "-DLLVM_INCLUDE_TESTS=OFF",
          "-DCOMPILER_RT_BUILD_TESTS=OFF", "-DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON",
          "-DCOMPILER_RT_BUILD_XRAY=OFF", "-DCOMPILER_RT_BUILD_ORC=OFF",

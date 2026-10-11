@@ -130,6 +130,7 @@ class LLVMToolchainTests(unittest.TestCase):
         self.assertIn("-DCMAKE_C_COMPILER=/opt/llvm-23.1.3/bin/clang", commands[3])
         self.assertIn("-DCMAKE_AR=/opt/llvm-23.1.3/bin/llvm-ar", commands[3])
         self.assertIn("-DLIBUNWIND_ENABLE_SHARED=OFF", commands[3])
+        self.assertIn("-DCOMPILER_RT_INSTALL_PATH=/opt/llvm-23.1.3/lib/clang/23", commands[3])
         self.assertFalse(any("gcc" in flag for flag in commands[0]))
 
 

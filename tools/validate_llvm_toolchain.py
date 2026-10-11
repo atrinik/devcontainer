@@ -56,7 +56,14 @@ def validate(manifest_path: Path, prefix: Path) -> None:
         subprocess.run(command, check=True)
         subprocess.run([str(work / "probe")], check=True)
         cpp = work / "exception.cpp"
-        cpp.write_text("int main() { try { throw 42; } catch (int n) { return n != 42; } }\n")
+        cpp.write_text(
+            "#include <vector>\n#include <string>\n"
+            "#ifdef _LIBCPP_VERSION\n#error unexpected libc++ provider\n#endif\n"
+            "int main() { std::vector<std::string> words{\"LLVM\"}; "
+            "try { throw words.at(0); } catch (const std::string& value) { return value != \"LLVM\"; } }\n")
+        cpp_driver = output([str(prefix / "bin/clang++"), str(cpp), "-o", str(work / "exception"), "-###"])
+        if '\"-lstdc++\"' not in cpp_driver or '\"-lc++\"' in cpp_driver:
+            raise RuntimeError("Clang++ did not select the distribution libstdc++ provider")
         subprocess.run([str(prefix / "bin/clang++"), str(cpp), "-o", str(work / "exception")], check=True)
         subprocess.run([str(work / "exception")], check=True)
         # Exercise LLVM instrumentation and the actual coverage readers. Tool
