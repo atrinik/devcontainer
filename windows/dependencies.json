@@ -92,6 +92,16 @@
       "depends": [],
       "options": [
         "--disable-nls"
+      ],
+      "shared_artifacts": [
+        {
+          "dll": "libiconv-*.dll",
+          "import_library": "libiconv.dll.a"
+        },
+        {
+          "dll": "libcharset-*.dll",
+          "import_library": "libcharset.dll.a"
+        }
       ]
     },
     {
@@ -112,6 +122,12 @@
       "options": [
         "--enable-threads=win32",
         "--with-libiconv-prefix={prefix}"
+      ],
+      "shared_artifacts": [
+        {
+          "dll": "libunistring-*.dll",
+          "import_library": "libunistring.dll.a"
+        }
       ]
     },
     {
@@ -136,6 +152,12 @@
         "--disable-doc",
         "--with-libiconv-prefix={prefix}",
         "--with-libunistring-prefix={prefix}"
+      ],
+      "shared_artifacts": [
+        {
+          "dll": "libidn2-*.dll",
+          "import_library": "libidn2.dll.a"
+        }
       ]
     },
     {
@@ -154,7 +176,13 @@
         "--disable-threads",
         "--disable-nls"
       ],
-      "make_subdir": "src/liblzma"
+      "make_subdir": "src/liblzma",
+      "shared_artifacts": [
+        {
+          "dll": "liblzma-*.dll",
+          "import_library": "liblzma.dll.a"
+        }
+      ]
     },
     {
       "name": "libxml2",
@@ -191,7 +219,13 @@
         "noinst_PROGRAMS=",
         "man_MANS="
       ],
-      "recipe_notes": "The old xml2-config.in uname substitution is already obsolete in 2.15.3: pinned source has no uname invocation."
+      "recipe_notes": "The old xml2-config.in uname substitution is already obsolete in 2.15.3: pinned source has no uname invocation.",
+      "shared_artifacts": [
+        {
+          "dll": "libxml2-*.dll",
+          "import_library": "libxml2.dll.a"
+        }
+      ]
     },
     {
       "name": "brotli",
@@ -264,7 +298,13 @@
       ],
       "build_system": "autotools",
       "depends": [],
-      "options": []
+      "options": [],
+      "shared_artifacts": [
+        {
+          "dll": "libcares-*.dll",
+          "import_library": "libcares.dll.a"
+        }
+      ]
     },
     {
       "name": "libssh2",
@@ -284,6 +324,12 @@
         "--disable-examples-build",
         "--disable-rpath",
         "--with-crypto=wincng"
+      ],
+      "shared_artifacts": [
+        {
+          "dll": "libssh2-*.dll",
+          "import_library": "libssh2.dll.a"
+        }
       ]
     },
     {
@@ -302,6 +348,12 @@
         "--enable-lib-only",
         "--without-jemalloc",
         "--without-libxml2"
+      ],
+      "shared_artifacts": [
+        {
+          "dll": "libnghttp2-*.dll",
+          "import_library": "libnghttp2.dll.a"
+        }
       ]
     },
     {
@@ -330,6 +382,12 @@
         "sbin_PROGRAMS=",
         "noinst_PROGRAMS=",
         "man_MANS="
+      ],
+      "shared_artifacts": [
+        {
+          "dll": "libjpeg-*.dll",
+          "import_library": "libjpeg.dll.a"
+        }
       ]
     },
     {
@@ -350,6 +408,12 @@
         "bin_PROGRAMS=",
         "sbin_PROGRAMS=",
         "noinst_PROGRAMS="
+      ],
+      "shared_artifacts": [
+        {
+          "dll": "libpng16-*.dll",
+          "import_library": "libpng16.dll.a"
+        }
       ]
     },
     {
@@ -373,6 +437,28 @@
         "sbin_PROGRAMS=",
         "noinst_PROGRAMS=",
         "man_MANS="
+      ],
+      "shared_artifacts": [
+        {
+          "dll": "libwebp-*.dll",
+          "import_library": "libwebp.dll.a"
+        },
+        {
+          "dll": "libwebpdecoder-*.dll",
+          "import_library": "libwebpdecoder.dll.a"
+        },
+        {
+          "dll": "libwebpdemux-*.dll",
+          "import_library": "libwebpdemux.dll.a"
+        },
+        {
+          "dll": "libwebpmux-*.dll",
+          "import_library": "libwebpmux.dll.a"
+        },
+        {
+          "dll": "libsharpyuv-*.dll",
+          "import_library": "libsharpyuv.dll.a"
+        }
       ]
     },
     {
@@ -457,7 +543,13 @@
         "sbin_PROGRAMS=",
         "noinst_PROGRAMS="
       ],
-      "upstream_url": "https://www.mega-nerd.com/SRC/libsamplerate-0.1.9.tar.gz"
+      "upstream_url": "https://www.mega-nerd.com/SRC/libsamplerate-0.1.9.tar.gz",
+      "shared_artifacts": [
+        {
+          "dll": "libsamplerate-*.dll",
+          "import_library": "libsamplerate.dll.a"
+        }
+      ]
     },
     {
       "name": "libffi",
@@ -471,7 +563,13 @@
       ],
       "build_system": "autotools",
       "depends": [],
-      "options": []
+      "options": [],
+      "shared_artifacts": [
+        {
+          "dll": "libffi-*.dll",
+          "import_library": "libffi.dll.a"
+        }
+      ]
     },
     {
       "name": "pcre2",
@@ -492,6 +590,20 @@
         "--disable-pcre2grep-libz",
         "--disable-pcre2grep-libbz2",
         "--disable-pcre2test-libreadline"
+      ],
+      "shared_artifacts": [
+        {
+          "dll": "libpcre2-8-*.dll",
+          "import_library": "libpcre2-8.dll.a"
+        },
+        {
+          "dll": "libpcre2-16-*.dll",
+          "import_library": "libpcre2-16.dll.a"
+        },
+        {
+          "dll": "libpcre2-posix-*.dll",
+          "import_library": "libpcre2-posix.dll.a"
+        }
       ]
     },
     {
@@ -545,6 +657,12 @@
         {
           "file": "src/dbus-1-fixes.patch",
           "sha256": "16178004221e256d65caed535b31dec3fbeb9185d6ef0a51f526165ff1225da6"
+        }
+      ],
+      "shared_artifacts": [
+        {
+          "dll": "libdbus-1-*.dll",
+          "import_library": "libdbus-1.dll.a"
         }
       ]
     },
@@ -674,7 +792,13 @@
         "--without-libxml2-prefix"
       ],
       "source_subdir": "gettext-runtime",
-      "make_subdir": "intl"
+      "make_subdir": "intl",
+      "shared_artifacts": [
+        {
+          "dll": "libintl-*.dll",
+          "import_library": "libintl.dll.a"
+        }
+      ]
     },
     {
       "name": "host-glib",
@@ -769,6 +893,12 @@
         "--with-bzip2=yes",
         "--with-png=yes",
         "--with-zlib=yes"
+      ],
+      "shared_artifacts": [
+        {
+          "dll": "libfreetype-*.dll",
+          "import_library": "libfreetype.dll.a"
+        }
       ]
     },
     {
@@ -820,6 +950,12 @@
         "sbin_PROGRAMS=",
         "noinst_PROGRAMS=",
         "LDFLAGS=-no-undefined"
+      ],
+      "shared_artifacts": [
+        {
+          "dll": "liblzo2-*.dll",
+          "import_library": "liblzo2.dll.a"
+        }
       ]
     },
     {
@@ -950,6 +1086,28 @@
       "make_options": [
         "VERBOSE=1",
         "SO_TARGET_VERSION_SUFFIX="
+      ],
+      "shared_artifacts": [
+        {
+          "dll": "icuuc*.dll",
+          "import_library": "libicuuc.dll.a"
+        },
+        {
+          "dll": "icuin*.dll",
+          "import_library": "libicuin.dll.a"
+        },
+        {
+          "dll": "icuio*.dll",
+          "import_library": "libicuio.dll.a"
+        },
+        {
+          "dll": "icutu*.dll",
+          "import_library": "libicutu.dll.a"
+        },
+        {
+          "dll": "icudt*.dll",
+          "import_library": "libicudt.dll.a"
+        }
       ]
     },
     {
@@ -1016,6 +1174,12 @@
         "--with-bzip2=yes",
         "--with-png=yes",
         "--with-zlib=yes"
+      ],
+      "shared_artifacts": [
+        {
+          "dll": "libfreetype-*.dll",
+          "import_library": "libfreetype.dll.a"
+        }
       ]
     },
     {
@@ -1052,7 +1216,13 @@
       ],
       "environment": {
         "CFLAGS": "-Os -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_COLUMN_METADATA -DSQLITE_ENABLE_RTREE"
-      }
+      },
+      "shared_artifacts": [
+        {
+          "dll": "libsqlite3-*.dll",
+          "import_library": "libsqlite3.dll.a"
+        }
+      ]
     },
     {
       "name": "libpsl",
@@ -1123,7 +1293,13 @@
         "CPPFLAGS": "-I{prefix}/include",
         "LDFLAGS": "-L{prefix}/lib",
         "LIBS": "-lpsl -lbrotlidec -lwinpthread -lnetio"
-      }
+      },
+      "shared_artifacts": [
+        {
+          "dll": "libcurl-*.dll",
+          "import_library": "libcurl.dll.a"
+        }
+      ]
     },
     {
       "name": "sdl3",

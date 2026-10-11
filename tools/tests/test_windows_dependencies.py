@@ -62,6 +62,81 @@ class WindowsDependenciesTests(unittest.TestCase):
             for override in ("bin_PROGRAMS=", "sbin_PROGRAMS=", "noinst_PROGRAMS="):
                 self.assertIn(override, command)
 
+    def test_shared_configuration_requires_actual_resolved_settings(self):
+        formats = [("libpng", "libtool", "build_libtool_libs=yes\nbuild_old_libs=no\n"),
+                   ("freetype", "builds/unix/libtool", "build_libtool_libs=yes\nbuild_old_libs=no\n"),
+                   ("icu4c", "icudefs.mk", "ENABLE_SHARED = YES\nENABLE_STATIC =\n"),
+                   ("sqlite", "Makefile", "ENABLE_LIB_SHARED = 1\nENABLE_LIB_STATIC = 0\n")]
+        for name, relative, valid in formats:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                build, evidence = root / "build", root / "evidence"
+                path = build / relative
+                path.parent.mkdir(parents=True)
+                evidence.mkdir()
+                with self.assertRaisesRegex(ValueError, "missing"):
+                    BUILDER.require_shared_configuration({"name": name}, build, evidence)
+                path.write_text(valid)
+                BUILDER.require_shared_configuration({"name": name}, build, evidence)
+                self.assertEqual((evidence / "shared" / relative).read_text(), valid)
+                for invalid in (valid.replace("=yes", "=no").replace("= YES", "= NO").replace("= 1", "= 0"),
+                                valid.replace("=no", "=yes").replace("ENABLE_STATIC =", "ENABLE_STATIC = YES").replace("= 0", "= 1"),
+                                valid.splitlines()[0] + "\n", valid + valid):
+                    path.write_text(invalid)
+                    with self.assertRaisesRegex(ValueError, "configuration absent"):
+                        BUILDER.require_shared_configuration({"name": name}, build, evidence)
+
+    def test_import_archive_must_identify_the_required_component_dll(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            prefix = Path(temporary)
+            (prefix / "bin").mkdir()
+            (prefix / "lib").mkdir()
+            evidence = prefix / "evidence"
+            evidence.mkdir()
+            dll = prefix / "bin/libpng16-16.dll"
+            archive = prefix / "lib/libpng16.dll.a"
+            item = {"name": "libpng", "shared_artifacts": [{"dll": "libpng16-*.dll", "import_library": archive.name}]}
+            receipt = {"dlls": {}}
+            with self.assertRaisesRegex(ValueError, "shared DLL absent"):
+                BUILDER.require_shared_artifacts(item, prefix, Path("/llvm"), evidence, receipt)
+            dll.write_bytes(b"actual DLL")
+            receipt["dlls"][dll.name] = {"owner": "libpng", "sha256": BUILDER.file_hash(dll)}
+            with self.assertRaisesRegex(ValueError, "import library absent"):
+                BUILDER.require_shared_artifacts(item, prefix, Path("/llvm"), evidence, receipt)
+            archive.write_bytes(b"archive bytes")
+            for invalid in ("", "different.dll\n", "libpng16-16.dll\ndifferent.dll\n"):
+                with patch.object(BUILDER.subprocess, "run", return_value=SimpleNamespace(stdout=invalid)):
+                    with self.assertRaisesRegex(ValueError, "does not identify"):
+                        BUILDER.require_shared_artifacts(item, prefix, Path("/llvm"), evidence, receipt)
+            with patch.object(BUILDER.subprocess, "run", return_value=SimpleNamespace(stdout=dll.name + "\n")) as run:
+                BUILDER.require_shared_artifacts(item, prefix, Path("/llvm"), evidence, receipt)
+                self.assertEqual(run.call_args.args[0], ["/llvm/bin/llvm-dlltool", "-I", str(archive)])
+                self.assertEqual(json.loads((evidence / "shared-artifacts.json").read_text())[0]["dll_sha256"], BUILDER.file_hash(dll))
+            (prefix / "bin/libpng16-17.dll").write_bytes(b"ambiguous old DLL")
+            with self.assertRaisesRegex(ValueError, "ambiguous"):
+                BUILDER.require_shared_artifacts(item, prefix, Path("/llvm"), evidence, receipt)
+
+    def test_every_target_autotools_recipe_requires_shared_components(self):
+        lock = BUILDER.load_lock(ROOT / "windows/dependencies.json")
+        recipes = {item["name"]: item for item in lock["dependencies"]}
+        self.assertEqual(len(recipes["libwebp"]["shared_artifacts"]), 5)
+        self.assertEqual(len(recipes["icu4c"]["shared_artifacts"]), 5)
+        self.assertEqual(len(recipes["pcre2"]["shared_artifacts"]), 3)
+        for item in recipes.values():
+            if item["build_system"] == "autotools" and not item.get("host"):
+                self.assertTrue(item["shared_artifacts"])
+
+    def test_full_freetype_cannot_reuse_bootstrap_runtime_ownership(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            prefix = Path(temporary)
+            (prefix / "bin").mkdir()
+            dll = prefix / "bin/libfreetype-6.dll"
+            dll.write_bytes(b"unchanged bootstrap runtime")
+            item = {"name": "freetype", "shared_artifacts": [{"dll": dll.name, "import_library": "libfreetype.dll.a"}]}
+            receipt = {"dlls": {dll.name: {"owner": "freetype-bootstrap", "sha256": BUILDER.file_hash(dll)}}}
+            with self.assertRaisesRegex(ValueError, "not owned by this recipe"):
+                BUILDER.require_shared_artifacts(item, prefix, Path("/llvm"), prefix, receipt)
+
     def test_checksum_mismatch_prevents_extraction(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary)

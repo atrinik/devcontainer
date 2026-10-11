@@ -9,6 +9,7 @@ not shell fragments; host and target compiler environments are kept separate.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import hashlib
 import io
 import json
@@ -117,6 +118,14 @@ def load_lock(path: Path) -> dict:
             raise ValueError(f"dependencies must precede {name}")
         if item["build_system"] not in {"cmake", "autotools", "openssl", "make", "custom", "meson"}:
             raise ValueError(f"unsupported build system: {name}")
+        if item["build_system"] == "autotools" and not item.get("host"):
+            if not item.get("shared_artifacts"):
+                raise ValueError(f"missing expected shared artifacts: {name}")
+            for artifact in item["shared_artifacts"]:
+                if (set(artifact) != {"dll", "import_library"}
+                        or not re.fullmatch(r"[A-Za-z0-9_.*-]+\.dll", artifact["dll"])
+                        or not re.fullmatch(r"[A-Za-z0-9_.-]+\.dll\.a", artifact["import_library"])):
+                    raise ValueError(f"unsafe shared artifact contract: {name}")
         names.add(name)
     return lock
 
@@ -560,6 +569,61 @@ def retain_configuration(item: dict, build: Path, destination: Path) -> None:
             raise ValueError(f"required resolved backends absent: {item['name']}: {sorted(required)}")
 
 
+def require_shared_configuration(item: dict, build: Path, destination: Path) -> None:
+    """Reject a requested shared build that configuration silently disabled."""
+    if item["name"] == "icu4c":
+        candidates = [Path("icudefs.mk")]
+        required = {"ENABLE_SHARED": "YES", "ENABLE_STATIC": ""}
+    elif item["name"] == "sqlite":
+        candidates = [Path("Makefile")]
+        required = {"ENABLE_LIB_SHARED": "1", "ENABLE_LIB_STATIC": "0"}
+    else:
+        candidates = [Path("libtool"), Path("builds/unix/libtool")]
+        required = {"build_libtool_libs": "yes", "build_old_libs": "no"}
+    found = [relative for relative in candidates if (build / relative).exists()]
+    if not found:
+        raise ValueError(f"missing resolved shared configuration: {item['name']}")
+    settings = {}
+    for relative in found:
+        path = build / relative
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"unsafe resolved shared configuration: {item['name']}/{relative}")
+        text = path.read_text()
+        for key, expected in required.items():
+            values = re.findall(r"^" + re.escape(key) + r"[ \t]*=[ \t]*([^\n]*)$", text, re.MULTILINE)
+            if len(values) != 1 or values[0].strip() != expected:
+                raise ValueError(f"required shared/static configuration absent: {item['name']}: {key}")
+        target = destination / "shared" / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+        settings[relative.as_posix()] = {"sha256": file_hash(path), "settings": required}
+    (destination / "shared-settings.json").write_text(json.dumps(settings, indent=2) + "\n")
+
+
+def require_shared_artifacts(item: dict, prefix: Path, llvm: Path, destination: Path, receipt: dict) -> None:
+    """Pair each expected DLL role with a real LLVM-identified import archive."""
+    dlls, _ = provider_paths(prefix)
+    records = []
+    for artifact in item["shared_artifacts"]:
+        matches = [name for name in dlls if fnmatch.fnmatchcase(name.lower(), artifact["dll"].lower())]
+        if len(matches) != 1:
+            raise ValueError(f"required shared DLL absent or ambiguous: {item['name']}: {artifact['dll']}")
+        record = receipt.get("dlls", {}).get(matches[0], {})
+        if record.get("owner") != item["name"] or record.get("sha256") != file_hash(dlls[matches[0]]):
+            raise ValueError(f"required shared DLL not owned by this recipe: {item['name']}: {matches[0]}")
+        library = prefix / "lib" / artifact["import_library"]
+        if library.is_symlink() or not library.is_file():
+            raise ValueError(f"required normal import library absent: {item['name']}: {library.name}")
+        result = subprocess.run([str(llvm / "bin/llvm-dlltool"), "-I", str(library)],
+                                capture_output=True, text=True, check=True)
+        identified = {line.strip().lower() for line in result.stdout.splitlines() if line.strip()}
+        if identified != {matches[0].lower()}:
+            raise ValueError(f"import library does not identify expected DLL: {item['name']}: {library.name}")
+        records.append({"dll": matches[0], "dll_sha256": file_hash(dlls[matches[0]]),
+                        "import_library": library.name, "import_library_sha256": file_hash(library)})
+    (destination / "shared-artifacts.json").write_text(json.dumps(records, indent=2) + "\n")
+
+
 def run(lock: dict, prefix: Path, work: Path, llvm: Path, jobs: int, dry_run: bool, host_llvm: Path | None = None) -> None:
     host_prefix = work / "host"
     inventory = prefix / "share/atrinik/windows-dependencies"
@@ -635,6 +699,8 @@ def run(lock: dict, prefix: Path, work: Path, llvm: Path, jobs: int, dry_run: bo
                 if result.returncode:
                     print((configuration / f"command-{index}.log").read_text()[-12000:], flush=True)
                     result.check_returncode()
+                if index == 0 and not host and item["build_system"] == "autotools":
+                    require_shared_configuration(item, build, configuration)
         if not dry_run:
             retain_configuration(item, build, configuration)
             receipt["notices"][item["name"]] = {item["name"] + "/" + notice.replace("/", "_"):
@@ -650,6 +716,8 @@ def run(lock: dict, prefix: Path, work: Path, llvm: Path, jobs: int, dry_run: bo
                     if host:
                         raise ValueError(f"host recipe wrote target PE module: {item['name']}/{name}")
                     receipt["modules"][name] = {"sha256": digest, "owner": item["name"], "source_sha256": item["sha256"]}
+            if not host and item["build_system"] == "autotools":
+                require_shared_artifacts(item, prefix, llvm, configuration, receipt)
             save_ownership(prefix, receipt)
         if not dry_run and item["name"] == "curl":
             config = inventory.parent / "curl"
