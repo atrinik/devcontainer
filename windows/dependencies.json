@@ -887,7 +887,7 @@
         }
       ],
       "environment": {
-        "CFLAGS": "-O2 -Wno-incompatible-pointer-types"
+        "CFLAGS": "-Wno-incompatible-pointer-types"
       }
     },
     {

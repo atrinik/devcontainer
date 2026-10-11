@@ -120,9 +120,12 @@ def load_lock(path: Path) -> dict:
     return lock
 
 
-def environment(prefix: Path, host_prefix: Path, llvm: Path, host: bool = False, host_llvm: Path | None = None) -> dict:
+def environment(prefix: Path, host_prefix: Path, llvm: Path, host: bool = False, host_llvm: Path | None = None,
+                build_system: str | None = None) -> dict:
     env = os.environ.copy()
     native_path = f"{host_llvm}/bin:" if host_llvm else ""
+    # Meson's release profile owns optimization; external -O2 would override -O3.
+    default_flags = "" if build_system == "meson" else "-O2"
     env.update({"PATH": f"{native_path}{llvm}/bin:{host_prefix}/bin:{env.get('PATH', '')}",
                 "CC": "clang" if host else f"{TARGET}-clang",
                 "CXX": "clang++" if host else f"{TARGET}-clang++",
@@ -132,7 +135,7 @@ def environment(prefix: Path, host_prefix: Path, llvm: Path, host: bool = False,
                 "BUILD_CC": "clang", "HOSTCC": "clang",
                 "PKG_CONFIG": "pkg-config" if host else f"{TARGET}-pkg-config",
                 "PKG_CONFIG_PATH": "", "PKG_CONFIG_LIBDIR": os.pathsep.join(str((host_prefix if host else prefix) / path) for path in ("lib/pkgconfig", "share/pkgconfig")),
-                "CFLAGS": "-O2", "CXXFLAGS": "-O2",
+                "CFLAGS": default_flags, "CXXFLAGS": default_flags,
                 "CPPFLAGS": f"-I{host_prefix if host else prefix}/include",
                 "LDFLAGS": f"-L{host_prefix if host else prefix}/lib",
                 "CMAKE_PREFIX_PATH": str(host_prefix if host else prefix),
@@ -458,7 +461,7 @@ def run(lock: dict, prefix: Path, work: Path, llvm: Path, jobs: int, dry_run: bo
                 if not path.is_file():
                     raise ValueError(f"missing upstream license {item['name']}: {notice}")
                 shutil.copy2(path, notices / notice.replace("/", "_"))
-        env = environment(prefix, host_prefix, llvm, host, host_llvm)
+        env = environment(prefix, host_prefix, llvm, host, host_llvm, item["build_system"])
         for key, value in item.get("environment", {}).items():
             env[key] = value.replace("{prefix}", str(prefix)).replace("{host_prefix}", str(host_prefix))
         recipe = commands(item, source, build, selected_prefix, jobs, host, env)
@@ -468,7 +471,7 @@ def run(lock: dict, prefix: Path, work: Path, llvm: Path, jobs: int, dry_run: bo
         for index, command in enumerate(recipe):
             if dry_run:
                 print(json.dumps({"dependency": item["name"], "command": command,
-                                  "environment": {key: env[key] for key in ("CC", "CXX", "AR", "PKG_CONFIG")}}))
+                                  "environment": {key: env[key] for key in ("CC", "CXX", "AR", "PKG_CONFIG", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS")}}))
             else:
                 print(f"{item['name']}: command {index + 1}/{len(recipe)}", flush=True)
                 with (configuration / f"command-{index}.log").open("w") as output:

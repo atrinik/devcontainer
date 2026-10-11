@@ -8,6 +8,7 @@ import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
+from contextlib import redirect_stdout
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -146,6 +147,31 @@ class WindowsDependenciesTests(unittest.TestCase):
             self.assertIn(expected, json.loads(value))
         self.assertIn("-Os", entries["sqlite"]["environment"]["CFLAGS"].split())
         self.assertNotIn("-O2", entries["sqlite"]["environment"]["CFLAGS"].split())
+
+    def test_emitted_meson_release_commands_preserve_original_optimization(self):
+        lock = BUILDER.load_lock(ROOT / "windows/dependencies.json")
+        output = io.StringIO()
+        with redirect_stdout(output):
+            BUILDER.run(lock, Path("/target"), Path("/work"), Path("/llvm"), 2, True)
+        rows = [json.loads(line) for line in output.getvalue().splitlines()]
+        recipes = {item["name"]: item for item in lock["dependencies"]}
+        for row in rows:
+            item = recipes[row["dependency"]]
+            if item["build_system"] == "meson":
+                self.assertNotIn("-O2", row["environment"]["CFLAGS"].split())
+                self.assertNotIn("-O2", row["environment"]["CXXFLAGS"].split())
+                if row["command"][:2] == ["meson", "setup"]:
+                    self.assertIn("--buildtype=release", row["command"])
+                    for flag in row["command"]:
+                        if flag.startswith(("-Dc_args=", "-Dcpp_args=")):
+                            self.assertFalse(any(arg.startswith("-O") for arg in json.loads(flag.split("=", 1)[1])))
+            elif item["build_system"] == "autotools":
+                expected = "-Os" if item["name"] == "sqlite" else "-O2"
+                self.assertIn(expected, row["environment"]["CFLAGS"].split())
+        cairo = next(row for row in rows if row["dependency"] == "cairo")
+        self.assertEqual(cairo["environment"]["CFLAGS"], "-Wno-incompatible-pointer-types")
+        libpsl = next(row for row in rows if row["dependency"] == "libpsl")
+        self.assertIn("-liconv", libpsl["environment"]["LDFLAGS"].split())
 
     def test_meson_quoted_flags_keep_argument_boundaries(self):
         args = BUILDER.meson_flags({"CPPFLAGS": '-I"/target directory/include"', "CFLAGS": "-O2 -Wno-incompatible-pointer-types",
