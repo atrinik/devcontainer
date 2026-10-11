@@ -21,3 +21,22 @@ contracts. Native Windows test execution, shipped-font equivalence, audible
 playback and GPU qualification require separate evidence before release
 acceptance. A private recovered LLVM cohort can diagnose dependency builds;
 canonical publication still requires the production Dockerfile and CI.
+
+GLib's GNU TLS macro retains a callback pointer but does not force the CRT TLS
+registration directory into an LLVM/MinGW link. The target GLib recipe requires
+`_tls_used`; the host recipe and GLib features remain unchanged. `pe_tls.py`
+checks the actual PE TLS directory and callback array against GLib's retained
+symbols. It binds the native probe to that exact DLL's callback and process
+attach flag. The producer's native bundle verifies the DLL hash, observes the
+callback flag, exercises a real GPrivate destructor using the configured POSIX
+thread backend, and explicitly unloads the DLL. Missing registration is also
+fatal through GLib's existing critical diagnostic.
+
+For focused diagnosis, run `qualify-glib-tls.py --work-dir ABSENT_DIRECTORY
+--output ABSENT_DIRECTORY` inside the pinned LLVM SDK, with an optional
+`--source-archive` that must match the locked GLib hash. It rebuilds GLib with
+and without the mandatory TLS reference, preserves linker-map evidence and
+import/export comparison, and stages the original SDK DLL as another negative
+control. Run the resulting `run-glib-tls-qualification.ps1` on native Windows;
+all three lanes must meet their declared outcomes. This focused test does not
+replace complete candidate SDK, consumer, font, media, or GPU qualification.

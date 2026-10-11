@@ -12,6 +12,7 @@ import argparse
 import fnmatch
 import hashlib
 import io
+import importlib.util
 import json
 import math
 import os
@@ -896,6 +897,14 @@ def verify(prefix: Path, llvm: Path, lock: dict | None = None) -> dict:
             reports[kind][name] = {**record, "imports": sorted(names)}
     if not any(name == "ucrtbase.dll" or name.startswith("api-ms-win-crt-") for name in imports):
         raise ValueError("dependency closure does not import UCRT")
+    if "glib" in sources:
+        # The CRT TLS directory must register GLib's actual retained callback.
+        # A .CRT callback pointer or a successful link alone cannot prove this.
+        spec = importlib.util.spec_from_file_location("pe_tls", Path(__file__).with_name("pe_tls.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        tls = module.inspect_glib_file(prefix / "bin/libglib-2.0-0.dll", llvm)
+        reports["dlls"]["libglib-2.0-0.dll"]["tls"] = tls
     report_path = prefix / "share/atrinik/windows-dependencies/pe-closure.json"
     result = {"schema_version": 2, **reports, "notices": receipt["notices"]}
     report_path.write_text(json.dumps(result, indent=2) + "\n")

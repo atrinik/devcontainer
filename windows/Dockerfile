@@ -72,13 +72,27 @@ ENV ATRINIK_WINDOWS_TOOLCHAIN_FILE=/opt/atrinik-windows/share/cmake/llvm-mingw.c
     CC=clang CXX=clang++ AR=llvm-ar RANLIB=llvm-ranlib LD=ld.lld
 COPY --chown=vscode:vscode windows/llvm-mingw-toolchain.cmake ${ATRINIK_WINDOWS_TOOLCHAIN_FILE}
 COPY --chown=vscode:vscode windows/target-pkg-config.sh /opt/atrinik-windows/bin/x86_64-w64-mingw32-pkg-config
-COPY --chown=vscode:vscode windows/build-dependencies.py windows/dependencies.json /tmp/windows-producer/
+COPY --chown=vscode:vscode windows/build-dependencies.py windows/pe_tls.py windows/dependencies.json /tmp/windows-producer/
 USER vscode
 # Fresh target prefix: no binary or archive from the former GCC producer enters it.
 RUN python3 /tmp/windows-producer/build-dependencies.py \
         --lock /tmp/windows-producer/dependencies.json --prefix /opt/atrinik-windows \
         --work-dir /tmp/windows-dependencies --jobs "${WINDOWS_BUILD_JOBS}" \
     && rm -rf /tmp/windows-dependencies
+# Bind the native callback probe to the exact producer DLL's inspected symbols.
+COPY --chown=vscode:vscode windows/glib-tls-probe.c /tmp/windows-producer/
+RUN python3 /tmp/windows-producer/pe_tls.py \
+        --dll /opt/atrinik-windows/bin/libglib-2.0-0.dll \
+        --report /opt/atrinik-windows/share/atrinik/windows-dependencies/glib-tls.json \
+        --header /tmp/windows-producer/glib-tls-rvas.h \
+    && x86_64-w64-mingw32-clang -std=c17 -O2 -Wall -Wextra -Werror \
+        /tmp/windows-producer/glib-tls-probe.c \
+        $(x86_64-w64-mingw32-pkg-config --cflags glib-2.0) \
+        -o /opt/atrinik-windows/bin/atrinik-glib-tls-probe.exe \
+    && python3 /tmp/windows-producer/pe_tls.py \
+        --dll /opt/atrinik-windows/bin/libglib-2.0-0.dll \
+        --report /opt/atrinik-windows/share/atrinik/windows-dependencies/glib-tls.json \
+        --probe /opt/atrinik-windows/bin/atrinik-glib-tls-probe.exe
 COPY --chown=vscode:vscode tools/verify-classic-curl.sh /tmp/verify-classic-curl.sh
 RUN /tmp/verify-classic-curl.sh /opt/atrinik-windows \
     && test "$(x86_64-w64-mingw32-pkg-config --modversion openssl)" = 3.5.5 \
