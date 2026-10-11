@@ -263,8 +263,13 @@ def provider_paths(prefix: Path) -> tuple[dict[str, Path], dict[str, Path]]:
     modules = {}
     folded = set()
     # External Python is sealed separately; target DLL install roots are bin/lib.
-    installed = [path for root in (prefix / "bin", prefix / "lib") for path in root.rglob("*")]
+    roots = (prefix / "bin", prefix / "lib")
+    if any(root.is_symlink() or (root.exists() and not root.is_dir()) for root in roots):
+        raise ValueError("PE provider root must be a normal directory")
+    installed = [path for root in roots for path in root.rglob("*")]
     for path in sorted(installed):
+        if path.is_symlink():
+            raise ValueError("symlink in PE provider tree")
         if path.suffix.lower() != ".dll":
             continue
         if path.is_symlink() or not path.is_file():

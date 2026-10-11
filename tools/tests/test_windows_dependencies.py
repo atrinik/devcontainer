@@ -196,6 +196,22 @@ class WindowsDependenciesTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "changed"):
                 BUILDER.assert_receipt(prefix, receipt)
 
+    def test_linked_provider_directories_and_roots_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prefix = root / "prefix"
+            (prefix / "lib").mkdir(parents=True)
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "unowned.dll").write_bytes(b"unowned provider")
+            (prefix / "lib/ossl-modules").symlink_to(outside, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                BUILDER.provider_paths(prefix)
+            (prefix / "lib/ossl-modules").unlink()
+            (prefix / "bin").symlink_to(outside, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "provider root"):
+                BUILDER.provider_paths(prefix)
+
     def test_resolved_configuration_is_retained_and_required_backends_enforced(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
