@@ -428,6 +428,215 @@ class OfflineTests(unittest.TestCase):
         self.assertFalse(result['image_code_executed'])
         self.assertFalse(result['final_portable_cohort'])
 
+    def portable_fixture(self):
+        """Synthetic file bytes, using the producer's recorded compiler schema."""
+        base = '/opt/atrinik-portable/'
+        data = {path: b'{}' for path in M.COMMON_FILES + M.PORTABLE_FILES}
+        data[M.LLVM_MANIFEST] = (ROOT / 'llvm-toolchain.json').read_bytes()
+        data[base + 'llvm-toolchain.json'] = data[M.LLVM_MANIFEST]
+        manifest = json.loads(data[M.LLVM_MANIFEST])
+        data[M.LLVM_SBOM] = encoded({'spdxVersion': 'SPDX-2.3', 'packages': [{
+            'name': 'LLVM', 'versionInfo': '23.1.3', 'licenseDeclared': manifest['source']['license'],
+            'checksums': [{'algorithm': 'SHA256', 'checksumValue': manifest['source']['sha256']}]}]})
+        for name in ('clang', 'clang++'):
+            data[M.PREFIX + '/bin/' + name + '.cfg'] = M.CFG
+        data[base + 'contract.json'] = (ROOT / 'portable/contract.json').read_bytes()
+        binary = {M.PREFIX + '/' + canonical: b'synthetic tool bytes: ' + canonical.encode()
+                  for _, canonical in M.TOOL_FILES.values()}
+        compiler = json.loads((ROOT / 'portable/fixtures/llvm-readelf-23.1.3/debian-driver.json').read_bytes())
+        for role, (declared, canonical) in M.TOOL_FILES.items():
+            entry = compiler['tools'][role] if role in compiler['tools'] else compiler[role]
+            self.assertEqual(entry['path'], M.PREFIX + '/' + declared)
+            entry['sha256'] = M.hashlib.sha256(binary[M.PREFIX + '/' + canonical]).hexdigest()
+        data[base + 'compiler-evidence.json'] = encoded(compiler)
+        data[base + 'installed.json'] = encoded({
+            'schema_version': 2, 'architecture': 'amd64', 'glibc': 'glibc 2.36',
+            'contract_sha256': M.hashlib.sha256(data[base + 'contract.json']).hexdigest(),
+            'compiler_evidence_sha256': M.hashlib.sha256(data[base + 'compiler-evidence.json']).hexdigest(),
+            'compiler_target': compiler['target'], 'tools': {}, 'pkg_config': {}, 'curl': {}})
+        data[base + 'shaders/SHA256SUMS'] = b'0' * 64 + b'  fixed-shader.bin\n'
+        shader_sha = M.hashlib.sha256(data[base + 'shaders/SHA256SUMS']).hexdigest()
+        data[base + 'shader-generation.json'] = encoded({
+            'schema_version': 1, 'output_manifest_sha256': shader_sha,
+            'expected_manifest_sha256': shader_sha, 'llvm_toolchain_manifest_sha256': M.LLVM_MANIFEST_SHA})
+        return data, binary
+
+    def reseal_compiler_fixture(self, data, compiler):
+        base = '/opt/atrinik-portable/'
+        data[base + 'compiler-evidence.json'] = encoded(compiler)
+        installed = json.loads(data[base + 'installed.json'])
+        installed['compiler_evidence_sha256'] = M.hashlib.sha256(data[base + 'compiler-evidence.json']).hexdigest()
+        data[base + 'installed.json'] = encoded(installed)
+
+    def collect_portable_fixture(self, data, binary):
+        """Mock only transport/lifecycle creation; real HEAD, tar and hash checks."""
+        docker = Mock()
+        docker.negotiate.return_value = {}
+        docker.inspect.return_value = {}
+        docker.pull.return_value = 2
+        verified = self.verified()
+        context = M.runner_context(context_env())
+        owned = M.StoppedImage(docker, 'portable-preliminary', context, verified)
+        owned.identifier, owned.attempted = 'c' * 64, True
+        docker.get.return_value = {
+            'Id': owned.identifier, 'Name': '/' + owned.name,
+            'Config': {'Labels': {M.OWNER_LABEL: owned.owner}, 'Image': owned.reference},
+            'State': {'Status': 'created', 'Running': False, 'Pid': 0}, 'Mounts': [],
+            'HostConfig': {'ReadonlyRootfs': True, 'NetworkMode': 'none', 'Privileged': False},
+            'Image': verified['config_digest']}
+        files = {**data, **binary}
+        aliases = {M.PREFIX + '/' + declared: M.PREFIX + '/' + canonical
+                   for declared, canonical in M.TOOL_FILES.values() if declared != canonical}
+        parents = {str(parent) for path in files for parent in Path(path).parents}
+        copied = []
+        deleted = []
+        def request(method, path, headers=None, body=None, expected=200):
+            if method == 'DELETE':
+                self.assertEqual(path, '/containers/' + owned.identifier)
+                self.assertEqual(expected, 204)
+                deleted.append(path)
+                return Mock(), Response()
+            self.assertIn(method, ('HEAD', 'GET'))
+            parsed = urllib.parse.urlsplit(path)
+            self.assertEqual(parsed.path, '/containers/' + owned.identifier + '/archive')
+            source = urllib.parse.parse_qs(parsed.query)['path'][0]
+            if source in aliases:
+                info = {'name': Path(source).name, 'mode': M.GO_SYMLINK | 0o777,
+                        'size': 8, 'linkTarget': aliases[source]}
+            elif source in parents:
+                info = {'name': Path(source).name, 'mode': M.GO_DIRECTORY | 0o755, 'size': 4096, 'linkTarget': ''}
+            else:
+                self.assertIn(source, files)
+                mode = 0o755 if source in binary and '/bin/' in source else 0o644
+                info = file_stat(source, files[source], mode)
+            raw = b''
+            if method == 'GET':
+                self.assertNotIn(source, aliases)
+                self.assertIn(source, files)
+                copied.append(source)
+                raw = archive(source, files[source], mode=info['mode'])
+            return Mock(), Response(raw, **{'X-Docker-Container-Path-Stat': base64.b64encode(encoded(info)).decode()})
+        docker.request.side_effect = request
+        with tempfile.TemporaryDirectory() as temp, patch.object(M, 'runner_docker', return_value=docker), \
+             patch.object(M, 'scoped_bearer', return_value=BEARER), \
+             patch.object(M, 'verified_registry', return_value=verified), \
+             patch.object(M, 'StoppedImage', return_value=owned), patch.object(owned, 'create'), \
+             patch.object(M.signal, 'alarm'):
+            result = M.collect('portable-preliminary', context, SECRET, Path(temp))
+            for record in result['artifacts']:
+                raw = (Path(temp) / record['path']).read_bytes()
+                self.assertEqual(M.hashlib.sha256(raw).hexdigest(), record['sha256'])
+                self.assertNotIn(SECRET.encode(), raw)
+                self.assertNotIn(BEARER.encode(), raw)
+                self.assertNotIn(record['path'].removeprefix('files'), binary)
+        self.assertEqual(deleted, ['/containers/' + owned.identifier])
+        self.assertTrue(result['owned_container_removed'])
+        self.assertNotIn(SECRET, json.dumps(result))
+        return result, copied
+
+    def test_portable_collection_checks_all_tool_roles_against_streamed_bytes(self):
+        data, binary = self.portable_fixture()
+        result, copied = self.collect_portable_fixture(data, binary)
+        self.assertEqual(result['status'], 'verified-installed-identity')
+        self.assertEqual(set(result['tool_bytes']), set(M.TOOL_FILES))
+        self.assertEqual(len(json.loads(data['/opt/atrinik-portable/compiler-evidence.json'])['tools']), 10)
+        for role, (declared, canonical) in M.TOOL_FILES.items():
+            identity = result['tool_bytes'][role]
+            expected = binary[M.PREFIX + '/' + canonical]
+            self.assertEqual(identity['path'], M.PREFIX + '/' + declared)
+            self.assertEqual(identity['canonical_path'], M.PREFIX + '/' + canonical)
+            self.assertEqual(identity['sha256'], M.hashlib.sha256(expected).hexdigest())
+            self.assertEqual(identity['size'], len(expected))
+            self.assertTrue(identity['producer_descriptor_verified'])
+        self.assertEqual(set(copied), set(data) | set(binary))
+        self.assertEqual(len(copied), len(data) + len(binary))
+        self.assertFalse(result['image_code_executed'])
+        self.assertFalse(result['final_portable_cohort'])
+
+    def test_portable_contract_and_compiler_receipt_hashes_are_required(self):
+        base = '/opt/atrinik-portable/'
+        for name in ('contract.json', 'compiler-evidence.json'):
+            data, binary = self.portable_fixture()
+            data[base + name] += b' '
+            with self.subTest(name=name):
+                result, copied = self.collect_portable_fixture(data, binary)
+                self.assertEqual(result['status'], 'stopped')
+                self.assertEqual(result['reason'], 'portable-metadata-binding-mismatch')
+                self.assertFalse(set(copied) & set(binary))
+
+    def test_portable_missing_extra_and_misidentified_roles_are_rejected(self):
+        base = '/opt/atrinik-portable/'
+        for change in ('missing', 'extra'):
+            data, binary = self.portable_fixture()
+            compiler = json.loads(data[base + 'compiler-evidence.json'])
+            if change == 'missing':
+                del compiler['tools']['cxx_compiler']
+            else:
+                compiler['tools']['foreign'] = dict(compiler['tools']['compiler'])
+            self.reseal_compiler_fixture(data, compiler)
+            with self.subTest(change=change):
+                result, copied = self.collect_portable_fixture(data, binary)
+                self.assertEqual(result['reason'], 'portable-tool-roles-mismatch')
+                self.assertEqual(result['status'], 'stopped')
+                self.assertFalse(set(copied) & set(binary))
+        # Recompute the enclosing receipt so every mismatch reaches the actual
+        # path/digest comparison after the canonical bytes have been streamed.
+        for role in M.TOOL_FILES:
+            for field in ('path', 'sha256'):
+                data, binary = self.portable_fixture()
+                compiler = json.loads(data[base + 'compiler-evidence.json'])
+                entry = compiler['tools'][role] if role in compiler['tools'] else compiler[role]
+                entry[field] = M.PREFIX + '/bin/clang' if field == 'path' and role == 'cxx_compiler' else (
+                    '/tmp/foreign-tool' if field == 'path' else '0' * 64)
+                self.reseal_compiler_fixture(data, compiler)
+                with self.subTest(role=role, field=field):
+                    result, copied = self.collect_portable_fixture(data, binary)
+                    self.assertEqual(result['status'], 'stopped')
+                    self.assertEqual(result['reason'], 'installed-tool-bytes-mismatch')
+                    self.assertIn(M.PREFIX + '/' + M.TOOL_FILES[role][1], copied)
+                    self.assertNotIn(role, result['tool_bytes'])
+
+    def test_portable_changed_canonical_binary_bytes_are_rejected(self):
+        for canonical in {pair[1] for pair in M.TOOL_FILES.values()}:
+            data, binary = self.portable_fixture()
+            binary[M.PREFIX + '/' + canonical] += b' changed'
+            with self.subTest(canonical=canonical):
+                result, copied = self.collect_portable_fixture(data, binary)
+                self.assertEqual(result['status'], 'stopped')
+                self.assertEqual(result['reason'], 'installed-tool-bytes-mismatch')
+                self.assertIn(M.PREFIX + '/' + canonical, copied)
+
+    def test_portable_shader_manifest_and_generation_bindings_are_required(self):
+        base = '/opt/atrinik-portable/'
+        for change in ('manifest-bytes', 'output_manifest_sha256', 'expected_manifest_sha256',
+                       'llvm_toolchain_manifest_sha256'):
+            data, binary = self.portable_fixture()
+            if change == 'manifest-bytes':
+                data[base + 'shaders/SHA256SUMS'] += b'changed'
+            else:
+                generation = json.loads(data[base + 'shader-generation.json'])
+                generation[change] = '0' * 64
+                data[base + 'shader-generation.json'] = encoded(generation)
+            with self.subTest(change=change):
+                result, copied = self.collect_portable_fixture(data, binary)
+                self.assertEqual(result['status'], 'stopped')
+                self.assertEqual(result['reason'], 'shader-metadata-binding-mismatch')
+                self.assertFalse(set(copied) & set(binary))
+
+    def test_local_image_identity_and_platform_fences(self):
+        verified = self.verified()
+        reference = 'ghcr.io/' + PACKAGE + '@' + INDEX_DIGEST
+        local = {'Id': verified['config_digest'], 'Os': 'linux', 'Architecture': 'amd64',
+                 'RepoDigests': [reference], 'Descriptor': {'digest': INDEX_DIGEST},
+                 'RootFS': {'Type': 'layers', 'Layers': verified['config_object']['rootfs']['diff_ids']},
+                 'Config': verified['config_object']['config']}
+        M.verify_local(local, reference, INDEX_DIGEST, verified)
+        for key, wrong in [('Id', INDEX_DIGEST), ('Os', 'windows'), ('Architecture', 'arm64'),
+                           ('RepoDigests', []), ('Descriptor', {'digest': 'sha256:' + 'c' * 64}),
+                           ('RootFS', {'Type': 'layers', 'Layers': []}), ('Config', {'Labels': {}})]:
+            with self.subTest(key=key), self.assertRaises(M.Stop):
+                M.verify_local(dict(local, **{key: wrong}), reference, INDEX_DIGEST, verified)
+
     def test_access_denial_stops_without_container_or_retry(self):
         docker = Mock()
         docker.negotiate.return_value = {}

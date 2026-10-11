@@ -356,8 +356,8 @@ class Docker:
 
 def verify_local(local, reference, sha, verified):
     # Image-inspect Id is the config ID. Container-inspect Image may be an index
-    # with Docker 29; this helper never creates/inspects a container or equates it
-    # with the config hash. The independent raw registry chain remains mandatory.
+    # with Docker 29; this function checks image-inspect data only. StoppedImage
+    # separately fences container identity. The raw registry chain stays mandatory.
     require(local.get('Id') == verified['config_digest'], 'local-config-id-mismatch')
     require(local.get('Os') == 'linux' and local.get('Architecture') == 'amd64', 'local-platform-mismatch')
     require(reference in (local.get('RepoDigests') or []), 'local-repodigest-mismatch')
