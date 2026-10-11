@@ -2,8 +2,10 @@
 import unittest
 import copy
 import json
+import tempfile
+import hashlib
 from pathlib import Path
-from curl_evidence import configuration, require_features
+from curl_evidence import configuration, require_features, pinned_public_ca, tls_results
 
 
 class CurlConfigurationTests(unittest.TestCase):
@@ -34,6 +36,29 @@ class CurlConfigurationTests(unittest.TestCase):
             altered[key] = changed
             with self.subTest(key=key), self.assertRaises(ValueError):
                 require_features(altered, manifest, cares)
+
+    def test_public_ca_bundle_and_origin_binding(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            bundle = Path(temporary) / "bundle"
+            bundle.write_bytes(b"qualification certificate bytes")
+            manifest = {"public_ca": {"endpoint": "https://curl.se/", "sha256": hashlib.sha256(bundle.read_bytes()).hexdigest()}}
+            pinned_public_ca(bundle, manifest)
+            bundle.write_bytes(b"changed")
+            with self.assertRaises(ValueError): pinned_public_ca(bundle, manifest)
+            manifest["public_ca"]["endpoint"] = "https://foreign.example/"
+            with self.assertRaises(ValueError): pinned_public_ca(bundle, manifest)
+
+    def test_tls_requires_verified_positive_and_actual_untrusted_failure(self):
+        positive = {"origin": "curl.se", "passed": True, "expected_untrusted": False, "result": 0, "verification": 0, "status": 200}
+        negative = {"origin": "curl.se", "passed": True, "expected_untrusted": True, "result": 60, "verification": 18, "status": 0}
+        tls_results(positive, negative)
+        for target, key, changed in ((positive, "verification", 18), (positive, "status", 500),
+                                     (negative, "result", 6), (negative, "result", 0),
+                                     (negative, "verification", 0), (negative, "passed", False)):
+            altered_positive, altered_negative = dict(positive), dict(negative)
+            (altered_positive if target is positive else altered_negative)[key] = changed
+            with self.subTest(key=key, value=changed), self.assertRaises(ValueError):
+                tls_results(altered_positive, altered_negative)
 
 
 if __name__ == '__main__':

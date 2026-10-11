@@ -41,7 +41,22 @@ def require_features(value: dict, manifest: dict, cares: dict) -> None:
             raise ValueError("foreign active portable curl provider: " + key)
 
 
-def record(manifest_path: Path) -> dict:
+def pinned_public_ca(bundle: Path, manifest: dict) -> None:
+    if manifest["public_ca"]["endpoint"] != "https://curl.se/" or digest(bundle) != manifest["public_ca"]["sha256"]:
+        raise ValueError("changed pinned Classic public-CA qualification")
+
+
+def tls_results(positive: dict, negative: dict) -> None:
+    if (positive.get("passed") is not True or positive.get("expected_untrusted") is not False
+            or positive.get("origin") != "curl.se" or positive.get("result") != 0
+            or positive.get("verification") != 0 or not 200 <= positive.get("status", 0) < 400
+            or negative.get("passed") is not True or negative.get("expected_untrusted") is not True
+            or negative.get("origin") != "curl.se" or negative.get("result") != 60
+            or negative.get("verification", 0) == 0):
+        raise ValueError("portable public-CA qualification failed")
+
+
+def record(manifest_path: Path, public_ca: Path | None = None) -> dict:
     root = manifest_path.parent
     manifest = json.loads(manifest_path.read_text())
     shared_path = root / manifest["cares_manifest"]
@@ -55,6 +70,9 @@ def record(manifest_path: Path) -> dict:
         version = subprocess.check_output(["pkg-config", "--modversion", package], text=True).strip()
         if prefix != manifest["prefix"] or version != expected:
             raise ValueError("wrong active portable curl pkg-config: " + package)
+    if public_ca is not None:
+        pinned_public_ca(public_ca, manifest)
+    tls = None
     with tempfile.TemporaryDirectory(prefix="portable-curl-probe-") as temporary:
         binary = Path(temporary) / "probe"
         package_flags = shlex.split(subprocess.check_output(["pkg-config", "--cflags", "--libs", "libcurl", "libcares"], text=True))
@@ -62,6 +80,19 @@ def record(manifest_path: Path) -> dict:
                    str(root / "curl-runtime-probe.c"), "-o", str(binary), *package_flags, "-ldl"]
         subprocess.run(command, check=True)
         value = json.loads(subprocess.check_output([str(binary)], text=True))
+        require_features(value, manifest, shared["cares"])
+        if public_ca is not None:
+            positive = json.loads(subprocess.check_output([str(binary), "--public-ca", str(public_ca)], text=True, timeout=15))
+            # This private self-signed test certificate is unrelated to the public origin.
+            # Its key is generated in this temporary directory and never exported.
+            unrelated = Path(temporary) / "untrusted.pem"
+            subprocess.run(["/usr/local/bin/openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                            "-subj", "/CN=Atrinik qualification unrelated CA", "-keyout", str(Path(temporary) / "test.key"),
+                            "-out", str(unrelated), "-config", "/dev/null"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            negative = json.loads(subprocess.check_output([str(binary), "--untrusted-ca", str(unrelated)], text=True, timeout=15))
+            tls_results(positive, negative)
+            tls = {"endpoint": manifest["public_ca"]["endpoint"], "ca_sha256": digest(public_ca),
+                   "positive": positive, "untrusted_negative": negative}
     require_features(value, manifest, shared["cares"])
     readelf = subprocess.check_output(["/opt/llvm-23.1.3/bin/llvm-readelf", "--version-info", value["curl_path"]], text=True)
     if not re.search(r"Name: CURL_OPENSSL_4(?:\s|$)", readelf):
@@ -73,11 +104,12 @@ def record(manifest_path: Path) -> dict:
             "cares_manifest_sha256": digest(shared_path), "config_sha256": digest(retained / "curl_config.h"),
             "source_receipt_sha256": digest(root / "curl-source-receipt.json"), "runtime_version": value["runtime_version"],
             "header_version": value["header_version"], "features": value["features"], "protocols": value["protocols"],
-            "public_version_node": "CURL_OPENSSL_4", "providers": providers}
+            "public_version_node": "CURL_OPENSSL_4", "providers": providers, "public_ca": tls}
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent)
+    parser.add_argument("--public-ca", type=Path, help="Run mandatory positive and unrelated-CA negative TLS probes using the pinned Classic bundle")
     args = parser.parse_args()
-    print(json.dumps(record(args.root / "curl-toolchain.json"), indent=2))
+    print(json.dumps(record(args.root / "curl-toolchain.json", args.public_ca), indent=2))
