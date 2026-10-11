@@ -128,29 +128,14 @@ jobs:
             echo "windows=${windows}"
           } >> "${GITHUB_OUTPUT}"
 
-      - name: Test producer workflow contracts
-        run: python3 -m unittest tools/tests/test_workflow_contracts.py
-
-      - name: Test LLVM toolchain installer
-        run: python3 -m unittest tools/tests/test_install_llvm_toolchain.py
+      - name: Test all producer Python contracts
+        run: python3 -m unittest discover -s tools/tests -p 'test_*.py'
 
       - name: Test portable ABI checks
         run: python3 -m unittest discover -s portable -p 'test_*.py'
 
       - name: Test required-check aggregation
         run: tools/test-require-image-checks.sh
-
-      - name: Test Classic dependency preflight
-        run: python3 -m unittest tools/tests/test_verify_classic_check_dependencies.py
-
-      - name: Test Classic package runtime closure
-        run: python3 -m unittest tools/tests/test_verify_classic_check_package.py
-
-      - name: Test Classic shader toolchain installer
-        run: python3 -m unittest tools/tests/test_install_classic_shader_toolchain.py
-
-      - name: Test Classic Vulkan toolchain installer
-        run: python3 -m unittest tools/tests/test_install_classic_vulkan_toolchain.py
 
   llvm:
     name: Shared LLVM source toolchain
