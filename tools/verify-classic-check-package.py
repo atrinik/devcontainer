@@ -13,7 +13,7 @@ import tempfile
 import zipfile
 
 
-DLL_NAME = re.compile(r"^\s*Name:\s*(\S+\.(?:dll|drv))\s*$", re.IGNORECASE | re.MULTILINE)
+IMPORT_NAME = re.compile(r"^\s*Name:\s*(\S+)\s*$", re.MULTILINE)
 EXPECTED_RUNTIME_DLLS = {
     "sdl3.dll",
     "sdl3_image.dll",
@@ -22,48 +22,71 @@ EXPECTED_RUNTIME_DLLS = {
 }
 SYSTEM_DLLS = {
     "advapi32.dll",
+    "avrt.dll",
     "bcrypt.dll",
     "cabinet.dll",
+    "cfgmgr32.dll",
     "comctl32.dll",
     "comdlg32.dll",
     "crypt32.dll",
     "d2d1.dll",
     "d3d11.dll",
     "d3d12.dll",
+    "d3d9.dll",
+    "d3dcompiler_47.dll",
     "dbghelp.dll",
     "dinput8.dll",
     "dnsapi.dll",
     "dwmapi.dll",
+    "dwrite.dll",
     "dxgi.dll",
     "gdi32.dll",
+    "gdiplus.dll",
+    "hid.dll",
     "imagehlp.dll",
     "imm32.dll",
     "iphlpapi.dll",
     "kernel32.dll",
+    "ksuser.dll",
+    "mf.dll",
+    "mfplat.dll",
+    "mfreadwrite.dll",
+    "mfuuid.dll",
     "msimg32.dll",
-    "ucrtbase.dll",
+    "mswsock.dll",
     "ncrypt.dll",
+    "netapi32.dll",
+    "netio.dll",
     "normaliz.dll",
+    "ntdll.dll",
     "ole32.dll",
     "oleaut32.dll",
+    "opengl32.dll",
     "powrprof.dll",
+    "propsys.dll",
     "psapi.dll",
     "rpcrt4.dll",
+    "runtimeobject.dll",
     "secur32.dll",
     "setupapi.dll",
     "shell32.dll",
     "shlwapi.dll",
+    "ucrtbase.dll",
+    "uiautomationcore.dll",
     "user32.dll",
     "userenv.dll",
     "usp10.dll",
     "uxtheme.dll",
     "version.dll",
     "winhttp.dll",
+    "wininet.dll",
     "winmm.dll",
     "winspool.drv",
+    "wintrust.dll",
     "wldap32.dll",
     "ws2_32.dll",
     "wsock32.dll",
+    "wtsapi32.dll",
 }
 
 
@@ -152,7 +175,7 @@ def main() -> int:
             if "Format: COFF-x86-64" not in result.stdout:
                 raise RuntimeError(f"packaged runtime is not x86_64 COFF: {basename}")
             inspected.add(basename)
-            for dependency in DLL_NAME.findall(result.stdout):
+            for dependency in IMPORT_NAME.findall(result.stdout):
                 normalized = dependency.lower()
                 if normalized == "msvcrt.dll" or normalized.startswith(("libgcc", "libstdc++", "libssp", "libgomp", "libatomic", "libquadmath")):
                     raise RuntimeError(f"packaged runtime imports forbidden GCC or legacy CRT runtime: {normalized}")

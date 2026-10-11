@@ -98,14 +98,14 @@ class WindowsDependenciesTests(unittest.TestCase):
             BUILDER.ownership_path(prefix).parent.mkdir(parents=True)
             BUILDER.save_ownership(prefix, receipt)
             lock = {"dependencies": [{"name": "test", "sha256": "a" * 64}], "runtime_providers": {}}
-            output = "Machine: IMAGE_FILE_MACHINE_AMD64\n  Name: ucrtbase.dll\n"
+            output = "Machine: IMAGE_FILE_MACHINE_AMD64\nImport {\n  Name: ucrtbase.dll\n}\n"
             with patch.object(BUILDER.subprocess, "run", return_value=SimpleNamespace(stdout=output)):
                 self.assertEqual(len(BUILDER.verify(prefix, Path("/llvm"), lock)["dlls"]), 3)
-            with patch.object(BUILDER.subprocess, "run", return_value=SimpleNamespace(stdout=output + "  Name: missing-provider.dll\n")):
+            with patch.object(BUILDER.subprocess, "run", return_value=SimpleNamespace(stdout=output + "Import {\n  Name: missing-provider.dll\n}\n")):
                 with self.assertRaisesRegex(ValueError, "unresolved"):
                     BUILDER.verify(prefix, Path("/llvm"), lock)
             for bad in ("msvcrt.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libssp-0.dll"):
-                with patch.object(BUILDER.subprocess, "run", return_value=SimpleNamespace(stdout=output + "  Name: " + bad + "\n")):
+                with patch.object(BUILDER.subprocess, "run", return_value=SimpleNamespace(stdout=output + "Import {\n  Name: " + bad + "\n}\n")):
                     with self.assertRaisesRegex(ValueError, "runtime"):
                         BUILDER.verify(prefix, Path("/llvm"), lock)
 
@@ -132,6 +132,83 @@ class WindowsDependenciesTests(unittest.TestCase):
             dll.write_bytes(b"replacement binary")
             with self.assertRaisesRegex(ValueError, "changed"):
                 BUILDER.assert_receipt(prefix, receipt)
+
+    def test_meson_recipe_flags_reach_configuration(self):
+        lock = BUILDER.load_lock(ROOT / "windows/dependencies.json")
+        entries = {item["name"]: item for item in lock["dependencies"]}
+        for name, option, expected in (("cairo", "c_args", "-Wno-incompatible-pointer-types"),
+                                       ("libpsl", "c_link_args", "-liconv")):
+            item = entries[name]
+            env = BUILDER.environment(Path("/target"), Path("/host"), Path("/llvm"))
+            env.update({key: value.replace("{prefix}", "/target") for key, value in item["environment"].items()})
+            setup = BUILDER.commands(item, Path("/source"), Path("/work/build") / name, Path("/target"), 2, env=env)[0]
+            value = next(argument.split("=", 1)[1] for argument in setup if argument.startswith("-D" + option + "="))
+            self.assertIn(expected, json.loads(value))
+        self.assertIn("-Os", entries["sqlite"]["environment"]["CFLAGS"].split())
+        self.assertNotIn("-O2", entries["sqlite"]["environment"]["CFLAGS"].split())
+
+    def test_meson_quoted_flags_keep_argument_boundaries(self):
+        args = BUILDER.meson_flags({"CPPFLAGS": '-I"/target directory/include"', "CFLAGS": "-O2 -Wno-incompatible-pointer-types",
+                                    "LDFLAGS": "-L/target/lib -liconv"})
+        values = {argument.split("=", 1)[0]: json.loads(argument.split("=", 1)[1]) for argument in args}
+        self.assertIn("-I/target directory/include", values["-Dc_args"])
+        self.assertIn("-liconv", values["-Dcpp_link_args"])
+
+    def test_every_import_name_is_resolved_or_rejected(self):
+        self.assertEqual(BUILDER.parse_imports("Import {\n Name: WINSPOOL.drv\n}\n"), {"winspool.drv"})
+        self.assertEqual(BUILDER.parse_imports("DelayImport {\n Name: private-provider.pyd\n}\n"), {"private-provider.pyd"})
+        for malformed in ("Import {\n Name: ../outside.dll\n}\n", "Import {\n Name: a.dll\n Name: b.dll\n}\n",
+                          "Import {\n Name: a.dll\n", "Name: private.pyd\n"):
+            with self.assertRaisesRegex(ValueError, "import"):
+                BUILDER.parse_imports(malformed)
+
+    def test_nested_modules_are_owned_and_inspected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            prefix = Path(temporary)
+            for relative in ("bin/SDL3.dll", "bin/SDL3_image.dll", "bin/SDL3_ttf.dll", "lib/ossl-modules/legacy.dll", "bin/engines/capi.dll"):
+                path = prefix / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(relative.encode())
+            notice = prefix / "share/licenses/test/COPYING"
+            notice.parent.mkdir(parents=True)
+            notice.write_text("notice")
+            receipt = {"schema_version": 1, "dlls": {}, "modules": {},
+                       "notices": {"test": {"test/COPYING": BUILDER.file_hash(notice)}}}
+            for kind, paths in zip(("dlls", "modules"), BUILDER.provider_paths(prefix)):
+                receipt[kind] = {name: {"sha256": BUILDER.file_hash(path), "owner": "test", "source_sha256": "a" * 64}
+                                 for name, path in paths.items()}
+            BUILDER.ownership_path(prefix).parent.mkdir(parents=True)
+            BUILDER.save_ownership(prefix, receipt)
+            lock = {"dependencies": [{"name": "test", "sha256": "a" * 64}], "runtime_providers": {}}
+            valid = "Machine: IMAGE_FILE_MACHINE_AMD64\nImport {\n Name: ucrtbase.dll\n}\n"
+            with patch.object(BUILDER.subprocess, "run", return_value=SimpleNamespace(stdout=valid)) as inspect:
+                result = BUILDER.verify(prefix, Path("/llvm"), lock)
+                self.assertEqual(inspect.call_count, 5)
+                self.assertEqual(set(result["modules"]), {"lib/ossl-modules/legacy.dll", "bin/engines/capi.dll"})
+            with patch.object(BUILDER.subprocess, "run", return_value=SimpleNamespace(stdout=valid + "Import {\n Name: private-provider.pyd\n}\n")):
+                with self.assertRaisesRegex(ValueError, "unresolved"):
+                    BUILDER.verify(prefix, Path("/llvm"), lock)
+            (prefix / "lib/ossl-modules/unowned.dll").touch()
+            with self.assertRaisesRegex(ValueError, "unowned PE module"):
+                BUILDER.assert_receipt(prefix, receipt)
+            (prefix / "lib/ossl-modules/unowned.dll").unlink()
+            (prefix / "lib/ossl-modules/legacy.dll").write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "changed"):
+                BUILDER.assert_receipt(prefix, receipt)
+
+    def test_resolved_configuration_is_retained_and_required_backends_enforced(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            build, destination = root / "build", root / "receipt"
+            build.mkdir()
+            destination.mkdir()
+            (build / "CMakeCache.txt").write_text("SDLTTF_HARFBUZZ:BOOL=ON")
+            (destination / "command-0.log").write_text("-- SDL3_ttf backends:\n-- - enabled:  freetype harfbuzz\n-- - disabled: plutosvg\n")
+            BUILDER.retain_configuration({"name": "sdl3-ttf"}, build, destination)
+            self.assertEqual((destination / "CMakeCache.txt").read_text(), "SDLTTF_HARFBUZZ:BOOL=ON")
+            (destination / "command-0.log").write_text("-- SDL3_ttf backends:\n-- - enabled: freetype\n")
+            with self.assertRaisesRegex(ValueError, "required resolved backends"):
+                BUILDER.retain_configuration({"name": "sdl3-ttf"}, build, destination)
 
     def test_invalid_graph_and_pins_fail_closed(self):
         item = {"name": "curl", "archive": "curl.tar.gz", "sha256": "a" * 64, "url": "https://example.test/source", "licenses": ["COPYING"],

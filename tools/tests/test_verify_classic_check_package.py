@@ -68,6 +68,11 @@ class PackageClosureTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "libcares-2.dll"):
             self.verify(["D3D12.dll", "SDL3.dll"], ["libcares-2.dll"])
 
+    def test_non_dll_import_is_still_required(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "private-provider.pyd"):
+            self.verify(["SDL3.dll"], ["private-provider.pyd"])
+        self.assertEqual(self.verify(["WINSPOOL.drv", "SDL3.dll"], ["KERNEL32.dll"]), 0)
+
     def test_ucrt_is_inbox(self) -> None:
         self.assertEqual(self.verify(["ucrtbase.dll", "api-ms-win-crt-runtime-l1-1-0.dll", "SDL3.dll"], ["KERNEL32.dll"]), 0)
 

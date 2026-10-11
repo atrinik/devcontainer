@@ -1052,7 +1052,7 @@
         "--disable-readline"
       ],
       "environment": {
-        "CFLAGS": "-O2 -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_COLUMN_METADATA -DSQLITE_ENABLE_RTREE"
+        "CFLAGS": "-Os -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_COLUMN_METADATA -DSQLITE_ENABLE_RTREE"
       }
     },
     {
