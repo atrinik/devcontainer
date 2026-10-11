@@ -199,7 +199,11 @@ def registry_object(package, kind, sha, bearer):
         dest = urllib.parse.urlsplit(location)
         require(dest.scheme == 'https' and dest.netloc == 'pkg-containers.githubusercontent.com'
                 and not dest.username and not dest.password and not dest.fragment
-                and dest.path.startswith('/ghcr1/blobs/'), 'blob-redirect-denied')
+                # Public GHCR config retrieval observed ghcrblobs15. Accept only
+                # this numbered storage family (1..999) or the legacy namespace,
+                # and bind the object path to the exact requested config digest.
+                and re.fullmatch(r'/(?:ghcr1|ghcrblobs[1-9][0-9]{0,2})/blobs/' +
+                                 re.escape(sha), dest.path), 'blob-redirect-denied')
         status, _, raw = https_get(dest.hostname, dest.path + ('?' + dest.query if dest.query else ''),
                                    {'Accept-Encoding': 'identity'})
         require(status == 200, 'blob-redirect-chain-denied')

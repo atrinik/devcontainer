@@ -162,27 +162,66 @@ class OfflineTests(unittest.TestCase):
 
     def test_blob_redirect_has_no_credentials_and_verifies_bytes(self):
         raw = b'public config'
-        location = 'https://pkg-containers.githubusercontent.com/ghcr1/blobs/x?sig=FAKE_PRIVATE_URL'
-        with patch.object(M, 'https_get', side_effect=[(307, location, b''), (200, None, raw)]) as http:
-            self.assertEqual(M.registry_object(PACKAGE, 'blobs', M.digest(raw), BEARER), raw)
-        self.assertEqual(http.call_args_list[1].args[2], {'Accept-Encoding': 'identity'})
+        sha = M.digest(raw)
+        for namespace in ('ghcr1', 'ghcrblobs15', 'ghcrblobs1', 'ghcrblobs99', 'ghcrblobs999'):
+            location = 'https://pkg-containers.githubusercontent.com/' + namespace + '/blobs/' + sha + '?sig=FAKE_PRIVATE_URL'
+            with self.subTest(namespace=namespace), patch.object(M, 'https_get', side_effect=[
+                    (307, location, b''), (200, None, raw)]) as http:
+                self.assertEqual(M.registry_object(PACKAGE, 'blobs', sha, BEARER), raw)
+                self.assertEqual(http.call_args_list[1].args[2], {'Accept-Encoding': 'identity'})
+                self.assertNotIn(BEARER, str(http.call_args_list[1]))
+                self.assertNotIn(SECRET, str(http.call_args_list[1]))
         with patch.object(M, 'https_get', return_value=(200, None, b'altered')):
             with self.assertRaisesRegex(M.Stop, 'registry-digest-mismatch'):
                 M.registry_object(PACKAGE, 'manifests', INDEX_DIGEST, BEARER)
+        location = 'https://pkg-containers.githubusercontent.com/ghcrblobs15/blobs/' + sha
+        with patch.object(M, 'https_get', side_effect=[(307, location, b''), (200, None, b'altered')]):
+            with self.assertRaisesRegex(M.Stop, 'registry-digest-mismatch'):
+                M.registry_object(PACKAGE, 'blobs', sha, BEARER)
 
     def test_manifest_redirect_and_untrusted_blob_redirect_rejected(self):
-        good = 'https://pkg-containers.githubusercontent.com/ghcr1/blobs/x'
-        bad = ['http://pkg-containers.githubusercontent.com/ghcr1/blobs/x',
-               'https://evil/ghcr1/blobs/x', good.replace('.com/', '.com:443/'),
-               good.replace('https://', 'https://user@'), good + '#fragment', ' ' + good, good + '\n']
+        good = 'https://pkg-containers.githubusercontent.com/ghcrblobs15/blobs/' + INDEX_DIGEST
+        bad = [good.replace('https://', 'http://'), good.replace('pkg-containers.githubusercontent.com', 'evil'),
+               good.replace('.com/', '.com:443/'), good.replace('https://', 'https://user@'),
+               good.replace('https://', 'https://user:password@'),
+               good.replace('.com/', '.com.evil/'), good.replace('.com/', '.com./'),
+               good + '#fragment', ' ' + good, good + '\n']
         for kind, location in [('manifests', good)] + [('blobs', url) for url in bad]:
             with patch.object(M, 'https_get', return_value=(307, location, b'')) as http:
                 with self.assertRaises(M.Stop):
                     M.registry_object(PACKAGE, kind, INDEX_DIGEST, BEARER)
                 self.assertEqual(http.call_count, 1)
-        with patch.object(M, 'https_get', side_effect=[(307, good, b''), (307, good, b'')]):
+        with patch.object(M, 'https_get', side_effect=[(307, good, b''), (307, good, b'')]) as http:
             with self.assertRaisesRegex(M.Stop, 'blob-redirect-chain-denied'):
                 M.registry_object(PACKAGE, 'blobs', INDEX_DIGEST, BEARER)
+            self.assertEqual(http.call_count, 2)
+            self.assertEqual(http.call_args_list[1].args[2], {'Accept-Encoding': 'identity'})
+
+    def test_blob_redirect_binds_exact_object_and_bounded_storage_namespace(self):
+        prefix = 'https://pkg-containers.githubusercontent.com'
+        valid = '/ghcrblobs15/blobs/' + INDEX_DIGEST
+        paths = [valid.replace(INDEX_DIGEST, 'sha256:' + '0' * 64),
+                 valid + '/suffix', valid + '/', valid.replace('/blobs/', '/blobs/../blobs/'),
+                 valid.replace('/blobs/', '/blobs/%2e%2e/blobs/'),
+                 valid.replace('sha256:', 'sha256%3A'), valid.replace('/blobs/', '/blobs%2F'),
+                 valid.replace('/ghcrblobs15/', '/ghcrblobs15//'),
+                 valid.replace('/blobs/', '/objects/'), valid.replace('/blobs/', '/blobs/./'),
+                 valid.replace('/ghcrblobs15/', '/ghcrblobs0/'),
+                 valid.replace('/ghcrblobs15/', '/ghcrblobs015/'),
+                 valid.replace('/ghcrblobs15/', '/ghcrblobs1000/'),
+                 valid.replace('/ghcrblobs15/', '/ghcrblobs-1/'),
+                 valid.replace('/ghcrblobs15/', '/ghcrblobsA/'),
+                 valid.replace('/ghcrblobs15/', '/ghcr2/'),
+                 valid.replace('/ghcrblobs15/', '/arbitrary/'),
+                 '/ghcr1/blobs/not-the-requested-digest']
+        for path in paths:
+            with self.subTest(path=path), patch.object(M, 'https_get', return_value=(
+                    307, prefix + path + '?sig=FAKE_PRIVATE_URL', b'')) as http:
+                with self.assertRaisesRegex(M.Stop, 'blob-redirect-denied') as error:
+                    M.registry_object(PACKAGE, 'blobs', INDEX_DIGEST, BEARER)
+                self.assertEqual(http.call_count, 1)
+                self.assertNotIn('FAKE_PRIVATE_URL', str(error.exception))
+                self.assertNotIn(path, str(error.exception))
 
     def test_registry_chain_ignores_attestation_and_rejects_ambiguity(self):
         result = self.verified()
