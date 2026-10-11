@@ -1,0 +1,186 @@
+# Copyright (c) 2026 Atrinik contributors
+# SPDX-License-Identifier: MIT
+name: Qualify Windows GLib TLS repair
+
+on:
+  pull_request:
+    paths:
+      - 'windows/**'
+      - 'llvm-toolchain.json'
+      - 'tools/tests/test_windows_glib_workflow.py'
+      - '.github/workflows/windows-glib-qualification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-glib-qualification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# This scoped proof never publishes or promotes an SDK. Full image qualification
+# remains owned by validate.yml and publish-windows.yml.
+jobs:
+  cross-build:
+    name: Build scoped GLib TLS qualification bundle
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    env:
+      SDK_IMAGE: ghcr.io/atrinik/windows-build:candidate-sha-1d82af6036b831d97cc470e2230357047e4c78f8@sha256:914acf5c3c05546ca4fb45e47362d754ec717a9062f6ebcc1b81b3ab7d0ad325
+    steps:
+      - name: Check out qualification sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Stage and verify immutable GLib source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/glib-qualification/{source,downloads,provenance}
+          git archive HEAD | tar -x -C build/glib-qualification/source
+          # Only this pinned archive is fetched on the host; the build worker
+          # has neither registry credentials nor network access.
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          records = json.loads(Path('windows/dependencies.json').read_text())['dependencies']
+          package, = [item for item in records if item['name'] == 'glib']
+          expected = {
+              'version': '2.89.3',
+              'url': 'https://download.gnome.org/sources/glib/2.89/glib-2.89.3.tar.xz',
+              'archive': 'glib-2.89.3.tar.xz',
+              'sha256': '09fd1e99f991067749ad66090e482ec4bd6514ad53abb4e9fbbdc2a4d2753532',
+          }
+          if any(package.get(key) != value for key, value in expected.items()):
+              raise SystemExit('GLib source differs from the scoped qualification input')
+          Path('build/glib-qualification/provenance/glib-source.json').write_text(
+              json.dumps(expected, indent=2) + '\n')
+          PY
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --connect-timeout 15 --max-time 120 \
+            https://download.gnome.org/sources/glib/2.89/glib-2.89.3.tar.xz \
+            -o build/glib-qualification/downloads/glib-2.89.3.tar.xz
+          printf '%s  %s\n' \
+            09fd1e99f991067749ad66090e482ec4bd6514ad53abb4e9fbbdc2a4d2753532 \
+            build/glib-qualification/downloads/glib-2.89.3.tar.xz | sha256sum --check --strict
+          git rev-parse HEAD > build/glib-qualification/provenance/source-commit.txt
+          git rev-parse 'HEAD^{tree}' > build/glib-qualification/provenance/source-tree.txt
+          printf '%s\n' "${SDK_IMAGE}" > build/glib-qualification/provenance/sdk-image.txt
+          sha256sum windows/qualify-glib-tls.py windows/run-glib-tls-qualification.ps1 \
+            > build/glib-qualification/provenance/qualification-scripts.sha256
+
+      - name: Cross-build in an isolated LLVM SDK worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Anonymous public digest access only; no login or package permissions.
+          timeout 120s docker pull "${SDK_IMAGE}"
+          cpuset=$(python3 - <<'PY'
+          import os
+          cpus = sorted(os.sched_getaffinity(0))
+          if len(cpus) < 2:
+              raise SystemExit('Qualification requires two available runner CPUs')
+          print(','.join(map(str, cpus[:2])))
+          PY
+          )
+          printf 'cpuset=%s\ncpus=2\nmemory=8g\nmemory-swap=8g\npids=512\nnofile=4096\n' \
+            "${cpuset}" > build/glib-qualification/provenance/worker-limits.txt
+          worker=$(docker create --network none --user 1000:1000 \
+            --cpuset-cpus "${cpuset}" --cpus 2 --memory 8g --memory-swap 8g \
+            --pids-limit 512 --ulimit nofile=4096:4096 --cap-drop ALL \
+            --security-opt no-new-privileges --env HOME=/tmp/glib-home \
+            --workdir /tmp/qualification/source "${SDK_IMAGE}" \
+            python3 windows/qualify-glib-tls.py \
+            --source-archive /tmp/qualification/downloads/glib-2.89.3.tar.xz \
+            --work-dir /tmp/qualification/work --output /tmp/qualification/bundle)
+          cleanup() { docker rm --force "${worker}" >/dev/null; }
+          trap cleanup EXIT
+          # Preserve the fixed worker UID without mounting the runner workspace.
+          tar --owner=1000 --group=1000 --transform='s,^glib-qualification,qualification,' \
+            -c -C build glib-qualification | docker cp --archive - "${worker}:/tmp"
+          status=0
+          timeout 300s docker start --attach "${worker}" \
+            > build/glib-cross-build.log 2>&1 || status=$?
+          cat build/glib-cross-build.log
+          if [[ "${status}" -eq 0 ]]; then
+            status=$(docker inspect --format '{{.State.ExitCode}}' "${worker}")
+          fi
+          if [[ "${status}" -ne 0 ]]; then
+            exit "${status}"
+          fi
+          docker cp "${worker}:/tmp/qualification/bundle" build/glib-native-bundle
+          cp -R build/glib-qualification/provenance build/glib-native-bundle/provenance
+          cp windows/qualify-glib-tls.py windows/run-glib-tls-qualification.ps1 \
+            build/glib-native-bundle/provenance/
+          cp build/glib-qualification/downloads/glib-2.89.3.tar.xz \
+            build/glib-native-bundle/provenance/
+          # Bound artifact size and reject links before uploading executable input.
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path('build/glib-native-bundle')
+          files = list(root.rglob('*'))
+          if any(item.is_symlink() for item in files):
+              raise SystemExit('Native bundle contains a link')
+          if sum(item.stat().st_size for item in files if item.is_file()) > 100 * 1024 * 1024:
+              raise SystemExit('Native bundle exceeds 100 MiB')
+          for lane in ('candidate', 'original', 'relinked'):
+              if not (root / lane).is_dir():
+                  raise SystemExit(f'Missing qualification lane: {lane}')
+          for name in ('qualification.json', 'run-glib-tls-qualification.ps1'):
+              if not (root / name).is_file():
+                  raise SystemExit(f'Missing qualification artifact: {name}')
+          PY
+
+      - name: Upload bounded native GLib bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-glib-tls-native-bundle
+          path: build/glib-native-bundle
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Retain cross-build evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-glib-tls-cross-build-evidence
+          path: |
+            build/glib-cross-build.log
+            build/glib-qualification/provenance
+          if-no-files-found: warn
+          retention-days: 3
+
+  native-windows:
+    name: Verify GLib TLS repair and negative controls on Windows
+    needs: cross-build
+    permissions: {}
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Download scoped native GLib bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: windows-glib-tls-native-bundle
+          path: build/glib-native-bundle
+
+      - name: Require native TLS lifecycle and negative controls
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path (Resolve-Path 'build/glib-native-bundle').Path 'run-glib-tls-qualification.ps1')
+          if ($LASTEXITCODE -ne 0) { throw "Native GLib qualification failed: $LASTEXITCODE" }
+
+      - name: Retain native GLib qualification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-glib-tls-native-evidence
+          path: |
+            build/glib-native-bundle/qualification.json
+            build/glib-native-bundle/provenance
+            build/glib-native-bundle/**/*.json
+            build/glib-native-bundle/**/*.stdout.txt
+            build/glib-native-bundle/**/*.stderr.txt
+          if-no-files-found: error
+          retention-days: 3
