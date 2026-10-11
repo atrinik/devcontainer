@@ -62,6 +62,17 @@ class WindowsDependenciesTests(unittest.TestCase):
             for override in ("bin_PROGRAMS=", "sbin_PROGRAMS=", "noinst_PROGRAMS="):
                 self.assertIn(override, command)
 
+    def test_libffi_uses_mingw_exports_without_elf_symbol_versions(self):
+        lock = BUILDER.load_lock(ROOT / "windows/dependencies.json")
+        item = next(item for item in lock["dependencies"] if item["name"] == "libffi")
+        configure = BUILDER.commands(item, Path("/source"), Path("/build"), Path("/target"), 2)[0]
+        self.assertIn("--host=x86_64-w64-mingw32", configure)
+        self.assertIn("--enable-shared", configure)
+        self.assertIn("--disable-static", configure)
+        self.assertIn("--disable-symvers", configure)
+        self.assertFalse(any(option.startswith("--disable-") and option != "--disable-symvers"
+                             for option in item["options"]))
+
     def test_shared_configuration_requires_actual_resolved_settings(self):
         libtool = ("# ### BEGIN LIBTOOL CONFIG\nbuild_libtool_libs=yes\nbuild_old_libs=no\n# ### END LIBTOOL CONFIG\n"
                    "# ### BEGIN LIBTOOL TAG CONFIG: disable-shared\nbuild_libtool_libs=no\nbuild_old_libs=yes\n"

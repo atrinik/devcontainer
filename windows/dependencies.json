@@ -563,7 +563,9 @@
       ],
       "build_system": "autotools",
       "depends": [],
-      "options": [],
+      "options": [
+        "--disable-symvers"
+      ],
       "shared_artifacts": [
         {
           "dll": "libffi-*.dll",
