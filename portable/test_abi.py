@@ -11,6 +11,43 @@ spec.loader.exec_module(abi)
 
 
 class Symbols(unittest.TestCase):
+    def test_actual_llvm_readelf_23_baseline_elf_output(self):
+        fixtures = Path(__file__).parent / "fixtures/llvm-readelf-23.1.3"
+        names = {"-h": "header", "-SW": "sections", "-x": "gnu-property",
+                 "-d": "dynamic", "--version-info": "versions", "--dyn-syms": "symbols"}
+        def inspect(*args):
+            self.assertEqual(args[0], "llvm-readelf")
+            return (fixtures / (names[args[1]] + ".txt")).read_text()
+        with patch.object(abi, "output", side_effect=inspect):
+            value = abi.elf(Path("/fixture"))
+        self.assertTrue(value["gnu_property_present"])
+        self.assertEqual(value["needed"], ["libc.so.6"])
+        self.assertEqual(value["required_providers"]["__libc_start_main@GLIBC_2.34"],
+                         {"version_index": 4, "provider": "libc.so.6"})
+        self.assertEqual(len(value["required"]), 34)
+        self.assertEqual(len(value["required_providers"]), 34)
+
+    def test_actual_llvm_hidden_and_default_symbol_versions(self):
+        fixtures = Path(__file__).parent / "fixtures/llvm-readelf-23.1.3"
+        indices = abi.version_symbol_indices((fixtures / "shared-versions.txt").read_text())
+        self.assertEqual(indices, {0: 0, 1: 1, 2: 1, 3: 2, 4: 3})
+        exported, imported = abi.symbols((fixtures / "shared-symbols.txt").read_text())
+        self.assertFalse(imported)
+        self.assertEqual(exported, {"old_copy", "new_copy", "copy@ABI_1", "copy@ABI_2", "copy"})
+
+    def test_llvm_symbols_use_ordinal_not_duplicate_namespace(self):
+        versions = "Version symbols section '.gnu.version' contains 3 entries:\n  000: 0 (*local*) 5 (GLIBC_PRIVATE) 7 (GLIBC_PRIVATE)\n"
+        symbols = """
+  1: 0000 0 OBJECT GLOBAL DEFAULT UND loader_symbol@GLIBC_PRIVATE
+  2: 0000 0 FUNC GLOBAL DEFAULT UND libc_symbol@GLIBC_PRIVATE
+"""
+        indices = abi.version_symbol_indices(versions)
+        self.assertEqual(abi.symbol_providers(symbols, {5: "loader.so", 7: "libc.so"}, indices), {
+            "loader_symbol@GLIBC_PRIVATE": {"version_index": 5, "provider": "loader.so"},
+            "libc_symbol@GLIBC_PRIVATE": {"version_index": 7, "provider": "libc.so"}})
+        with self.assertRaisesRegex(ValueError, "missing ELF symbol version provider"):
+            abi.symbol_providers(symbols, {5: "loader.so", 7: "libc.so"}, {1: 5})
+
     def test_default_and_nondefault_versions_and_weak_imports(self):
         text = """
   1: 0000 0 FUNC GLOBAL DEFAULT UND memcpy@GLIBC_2.14 (2)

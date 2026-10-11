@@ -5,7 +5,7 @@ test "$(id -u)" != 0
 python3 - <<'READABLE'
 import os
 from pathlib import Path
-for root in (Path("/opt/atrinik-portable"), Path("/usr/local/share/licenses")):
+for root in (Path("/opt/atrinik-portable"), Path("/usr/local/share/licenses"), Path("/opt/llvm-23.1.3")):
     for path in (root, *root.rglob("*")):
         if path.is_dir():
             if not os.access(path, os.R_OK | os.X_OK):
@@ -24,6 +24,8 @@ test ! -e /usr/local/bin/dxc
 test ! -e /usr/local/lib/libdxcompiler.so
 test ! -e /usr/local/lib/libdxil.so
 test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.36'
+python3 "${root}/tools/validate_llvm_toolchain.py" --manifest "${root}/llvm-toolchain.json" --prefix /opt/llvm-23.1.3
+python3 "${root}/compiler_evidence.py" --verify "${root}/compiler-evidence.json"
 work=$(mktemp -d)
 trap 'rm -rf -- "${work}"' EXIT
 cd "${work}"
@@ -31,7 +33,7 @@ python3 "${root}/abi.py" --output abi.json
 "${root}/audio/sdl3-mixer-probe" "${root}/audio/opus-probe.opus"
 # pkg-config emits flags for the pinned build inputs; no user-provided shell code.
 read -r -a media_flags <<< "$(pkg-config --cflags --libs sdl3-image sdl3-ttf)"
-cc -O2 -march=x86-64 -mtune=generic "${root}/media-smoke.c" \
+clang -O2 -march=x86-64 -mtune=generic "${root}/media-smoke.c" \
   -o media-smoke "${media_flags[@]}"
 ./media-smoke /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
 openssl list -providers -provider default -provider legacy > providers.txt
