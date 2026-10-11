@@ -12,16 +12,14 @@ spec.loader.exec_module(evidence)
 
 class CompilerEvidence(unittest.TestCase):
     def setUp(self):
-        prefix = "/opt/llvm-23.1.3/"
-        self.value = {"schema_version": 2, "toolchain_version": "23.1.3", "flags": evidence.FLAGS,
-                      "tools": {name: {"path": prefix + "bin/" + command, "version": "LLVM 23.1.3", "sha256": "a" * 64}
-                                for name, command in {"compiler": "clang", "linker": "ld.lld", "readelf": "llvm-readelf"}.items()},
-                      "runtime": {"path": prefix + "lib/clang/23/lib/linux/libclang_rt.builtins-x86_64.a", "sha256": "b" * 64},
-                      "unwinder": {"path": prefix + "lib/libunwind.a", "sha256": "c" * 64}}
-        command = [prefix + "bin/clang", *evidence.FLAGS, "/tmp/probe.c", "-o", "/tmp/probe"]
-        self.value["compile"] = {"command": command, "driver_command": [command[0], "-###", *command[1:]],
-                                 "driver_output": f'"{evidence.CC1_EXECUTABLE}" "-cc1" "-target-cpu" "x86-64" "-tune-cpu" "generic" "-O2"\n'
-                                 f'"{prefix}bin/ld.lld" "{self.value["runtime"]["path"]}" "-L/opt/llvm-23.1.3/lib" "-lunwind"\n'}
+        fixture = Path(__file__).parent / "fixtures/llvm-readelf-23.1.3/debian-driver.json"
+        self.value = json.loads(fixture.read_text())
+
+    def mutate_invocation(self, value, index, extra):
+        lines = value["compile"]["driver_output"].splitlines()
+        quoted = [i for i, line in enumerate(lines) if line.strip().startswith('"')]
+        lines[quoted[index]] += " " + extra
+        value["compile"]["driver_output"] = "\n".join(lines) + "\n"
 
     def test_baseline_invocations(self):
         evidence.validate(self.value)
@@ -70,14 +68,65 @@ class CompilerEvidence(unittest.TestCase):
             with self.subTest(option=option), self.assertRaises(ValueError):
                 evidence.validate(value)
 
-    def test_authentic_debian_driver_multilib_paths_and_sdk_prefix(self):
+    def test_library_paths_allow_only_observed_raw_spellings(self):
         value = copy.deepcopy(self.value)
-        value["compile"]["driver_output"] = value["compile"]["driver_output"].rstrip() + (
-            ' "-L/opt/llvm-23.1.3/bin/../lib" "-L/usr/lib/gcc/x86_64-linux-gnu/12"'
-            ' "-L/usr/lib/gcc/x86_64-linux-gnu/12/../../../../lib64" "-L/lib/x86_64-linux-gnu"'
-            ' "-L/lib/../lib64" "-L/usr/lib/x86_64-linux-gnu" "-L/usr/lib64" "-L/lib" "-L/usr/lib"'
-            ' "-L" "/usr/local/lib"\n')
+        value["compile"]["driver_output"] = value["compile"]["driver_output"].replace(
+            '"-L/opt/llvm-23.1.3/bin/../lib"', '"-L/opt/llvm-23.1.3/lib" "-L" "/usr/local/lib"')
         evidence.validate(value)
+        value["compile"]["driver_output"] = value["compile"]["driver_output"].replace(
+            '"-L/opt/llvm-23.1.3/lib"', '"-L/tmp/foreign-link/../../opt/llvm-23.1.3/lib"')
+        with self.assertRaisesRegex(ValueError, "foreign LLD library"):
+            evidence.validate(value)
+
+    def test_later_cpu_optimization_features_and_extra_subprocess_are_rejected(self):
+        for extra in ('"-target-cpu" "x86-64-v3"', '"-tune-cpu" "native"',
+                      '"-triple" "aarch64-linux-gnu"', '"-target-feature" "+avx2"',
+                      '"-O0"', '"-O2"', '"-load" "/tmp/plugin.so"',
+                      '"-include" "/tmp/foreign.h"'):
+            value = copy.deepcopy(self.value)
+            self.mutate_invocation(value, 0, extra)
+            with self.subTest(extra=extra), self.assertRaises(ValueError):
+                evidence.validate(value)
+        self.value["compile"]["driver_output"] += '\n"/tmp/subprocess" "--run"\n'
+        with self.assertRaises(ValueError):
+            evidence.validate(self.value)
+
+    def test_foreign_linker_inputs_and_role_traversal_are_rejected(self):
+        for extra in ('"-L/tmp/foreign-link/../../usr/lib"', '"/tmp/foreign.a"',
+                      '"@/tmp/foreign.rsp"', '"--script=/tmp/foreign.ld"', '"-T" "/tmp/foreign.ld"',
+                      '"-lc"', '"/tmp/foreign.o"'):
+            value = copy.deepcopy(self.value)
+            self.mutate_invocation(value, 1, extra)
+            with self.subTest(extra=extra), self.assertRaises(ValueError):
+                evidence.validate(value)
+        for role in evidence.IDENTITY_PATHS:
+            value = copy.deepcopy(self.value)
+            entry = value["tools"][role] if role in value["tools"] else value[role]
+            original = entry["path"]
+            entry["path"] = "/opt/llvm-23.1.3/../../tmp/foreign"
+            value["compile"]["driver_output"] = value["compile"]["driver_output"].replace(original, entry["path"])
+            with self.subTest(role=role), self.assertRaises(ValueError):
+                evidence.validate(value)
+
+    def test_probe_source_output_and_temporary_object_are_bound(self):
+        for field in ("source_sha256", "command"):
+            value = copy.deepcopy(self.value)
+            if field == "source_sha256":
+                value["compile"][field] = "0" * 64
+            else:
+                value["compile"][field][9] = "/tmp/foreign-output"
+                value["compile"]["driver_command"] = [value["compile"][field][0], "-###", *value["compile"][field][1:]]
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                evidence.validate(value)
+        import shlex
+        line = next(line for line in self.value["compile"]["driver_output"].splitlines() if '"-cc1"' in line)
+        args = shlex.split(line)
+        object_path = args[args.index("-o") + 1]
+        lines = self.value["compile"]["driver_output"].splitlines()
+        lines[-1] = lines[-1].replace(object_path, "/tmp/foreign.o")
+        self.value["compile"]["driver_output"] = "\n".join(lines)
+        with self.assertRaises(ValueError):
+            evidence.validate(self.value)
 
 
 if __name__ == "__main__":
