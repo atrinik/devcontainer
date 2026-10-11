@@ -12,20 +12,21 @@ Published images:
 
 - `ghcr.io/atrinik/linux-build:ubuntu-26.04`
 - `ghcr.io/atrinik/classic-build:ubuntu-26.04`
-- `ghcr.io/atrinik/windows-build:mxe`
-- `ghcr.io/atrinik/windows-build:classic-check-mxe`
+- `ghcr.io/atrinik/classic-portable-build:debian-12`
+- `ghcr.io/atrinik/windows-build:llvm`
+- `ghcr.io/atrinik/windows-build:classic-check-llvm`
 
 Every non-candidate Linux publication updates `latest`, `ubuntu-26.04`, and a
 `sha-<commit>` tag for both Linux packages. A Windows publication first creates
 immutable `sha-<commit>` and `classic-check-sha-<commit>` candidates in the
 existing private `windows-build` package, preserving its governed Classic
 Actions read access. It smokes the exact published Classic digest and executes
-its six staged tests on Windows before promoting `latest`, `mxe`,
-`classic-check`, and `classic-check-mxe`. Publishing from an image-repository
+its complete staged tests on Windows before promoting `latest`, `llvm`,
+`classic-check`, and `classic-check-llvm`. Publishing from an image-repository
 tag matching `vX.Y.Z` also promotes the corresponding `X.Y.Z` and
 `classic-check-X.Y.Z` aliases.
-Release automation publishes the broad Linux, slim Linux Classic, general
-Windows, and task-focused Windows Classic variants for every version so
+Release automation publishes the broad Linux, slim Linux Classic, portable Linux
+Classic, general Windows, and task-focused Windows Classic variants for every version so
 consumers can pin a matched, verified toolchain release.
 
 GHCR cannot atomically move aliases for two different manifests. The Windows
@@ -48,12 +49,38 @@ Either publisher workflow can also be started manually from the Actions page
 for a reviewed rebuild or recovery of an existing ref. Manual dispatch does not
 create a Git tag or semantic release. Semantic-release alone creates new
 `vX.Y.Z` tags; do not create or push a release tag manually. The Linux
-publisher produces both `linux-build` and `classic-build`. Its
-`candidate_only` input skips the broad image and publishes Classic only as
-`candidate-sha-<commit>` without moving any stable or version tag. When
+publisher produces `linux-build`, `classic-build`, and
+`classic-portable-build`. Its `candidate_only` input qualifies all three targets
+and publishes each only as `candidate-sha-<commit>`. The Windows publisher's
+`candidate_only` input publishes `candidate-sha-<commit>` and
+`classic-check-candidate-sha-<commit>` in `windows-build`, retaining the full
+cross-build and native Windows test gates. Candidate dispatches never move
+rolling, platform, or semantic-version aliases. When
 recovering a versioned release, leave that input disabled and dispatch the
-Linux and Windows publishers against the same existing tag so all three image
-packages and all four variants remain matched.
+Linux and Windows publishers against the same existing tag so all four image
+packages and all five variants remain matched.
+
+## Compiler contract
+
+[`llvm-toolchain.json`](llvm-toolchain.json) pins LLVM 23.1.3 source, checksum,
+license, compiler/runtime selection, and target support for every image. The
+shared installer builds Clang, LLD, clangd, clang-tidy, compiler-rt, and static
+LLVM libunwind on the Debian 12 baseline; the Ubuntu images consume that same
+installed toolchain. GCC remains a build-only bootstrap dependency. Application
+builds select Clang and LLD with compiler-rt, and portable application builds use
+`-O2 -march=x86-64 -mtune=generic`.
+
+Windows builds use the same Clang version with the LLVM MinGW UCRT sysroot and
+LLVM inspection tools. Native Windows execution validates the resulting runtime
+closure separately from the Linux-hosted cross-build. Compiler source, license,
+installed-version, and SPDX evidence travel with the images.
+
+Producer CI gives cold source builds up to the supported six-hour hosted-job
+limit. It keeps LLVM and Windows build concurrency at two jobs each on hosted
+runners. A shared stage cache compiles the source once before parallel PR image
+validation; each target also retains its own LLVM-versioned cache scope.
+Increase build parallelism only for runners with corresponding CPU and memory
+capacity; model-worker concurrency does not set compiler concurrency.
 
 ## Local validation
 
@@ -76,11 +103,13 @@ docker build --file linux/Dockerfile \
   --target classic-final \
   --tag atrinik-classic-build .
 docker build --file windows/Dockerfile \
-  --build-arg MXE_BUILD_JOBS="$(nproc)" \
+  --build-arg LLVM_BUILD_JOBS=2 \
+  --build-arg WINDOWS_BUILD_JOBS=2 \
   --tag atrinik-windows-build .
 docker build --file windows/Dockerfile \
   --target classic-check \
-  --build-arg MXE_BUILD_JOBS="$(nproc)" \
+  --build-arg LLVM_BUILD_JOBS=2 \
+  --build-arg WINDOWS_BUILD_JOBS=2 \
   --tag atrinik-windows-check .
 
 docker run --rm atrinik-linux-build clang --version
@@ -109,7 +138,7 @@ docker run --rm atrinik-linux-build protoc-gen-go --version
 docker run --rm atrinik-linux-build protoc-gen-prost --version
 docker run --rm atrinik-linux-build node --version
 docker run --rm atrinik-linux-build pnpm --version
-docker run --rm atrinik-classic-build gcc --version
+docker run --rm atrinik-classic-build clang --version
 docker run --rm atrinik-classic-build cmake --version
 docker run --rm --user ubuntu --env HOME=/home/ubuntu \
   atrinik-classic-build git lfs version
@@ -129,10 +158,10 @@ docker run --rm atrinik-linux-build \
 docker run --rm atrinik-linux-build \
   syft dir:/ --override-default-catalogers sbom-cataloger -o table
 docker run --rm atrinik-windows-build \
-  x86_64-w64-mingw32.shared-gcc --version
+  x86_64-w64-mingw32-clang --version
 docker run --rm --user vscode atrinik-windows-build ssh -V
 docker run --rm --user vscode atrinik-windows-check \
-  x86_64-w64-mingw32.shared-gcc --version
+  x86_64-w64-mingw32-clang --version
 ```
 
 Run the pinned full Classic contract from this repository root, substituting
@@ -305,8 +334,8 @@ reviewed version, checksum, source, license, and attestation changes; do not run
 
 The Linux image includes the pinned replacement toolchains recorded in
 [`toolchains.json`](toolchains.json): Go, Rust/rustup, Protobuf/protoc, Buf,
-Node.js, pnpm, Syft, and Trivy. It also includes GCC, Clang with compiler-rt,
-LLVM, clangd, clang-tidy, actionlint, the GitHub CLI, the OpenSSH client, and
+Node.js, pnpm, Syft, and Trivy. It also includes Clang 23.1.3 with compiler-rt,
+LLD, LLVM, clangd, clang-tidy, actionlint, the GitHub CLI, the OpenSSH client, and
 the standalone Dev Containers CLI. Standard `zip`/`unzip` archive tooling is
 present for deterministic cross-platform release assembly. SDL3, SDL3_image,
 SDL3_ttf, Vulkan diagnostics, and a pinned source build of SDL3_mixer support
@@ -316,17 +345,15 @@ checksum-pinned libogg, libopus, and libopusfile. MIDI and module decoders are
 intentionally unavailable. Mesa's software Vulkan implementation and Xvfb
 provide repeatable offscreen and SDL window validation without a physical GPU
 or display. Interactive windows still require display forwarding. Native
-Windows D3D12 validation runs on Windows runners rather than pretending the MXE
+Windows D3D12 validation runs on Windows runners rather than pretending the cross-build
 image is a Windows runtime. The image's ccache directory
 defaults to writable container-local storage under `/tmp`; CI can override
 `CCACHE_DIR` with a persistent cache. The Windows image provides the same SDL3
-family and decoder contract through MXE and the same SDL3_mixer source build.
+family and decoder contract through the LLVM MinGW UCRT sysroot and the same SDL3_mixer source build.
 The codec libraries are linked into `SDL3_mixer.dll`, so packaged clients need
-no `libogg`, `libopus`, or `libopusfile` DLLs. The exact additional runtime
-closure is the MXE-provided `libssp-0.dll`, retained for Opus stack-protector
-and fortified-source support; it imports only standard Windows libraries.
-Cross-object inspection enforces both import lists. The image also
-includes the OpenSSH client and exports MXE's compiler-driver directory in
+no `libogg`, `libopus`, or `libopusfile` DLLs. The LLVM compiler-rt and UCRT runtime contract replaces the former GCC/libssp
+closure. Cross-object inspection enforces the declared import lists. The image also
+includes the OpenSSH client and exports LLVM's compiler-driver directory in
 `PATH` for both interactive and non-interactive commands, including Debian
 login shells for both `root` and `vscode`.
 
@@ -337,7 +364,7 @@ exact Windows import contract. The matching
 [`audio-toolchain.spdx.json`](audio-toolchain.spdx.json) records SDL3_mixer and
 all three statically linked codec packages in SPDX 2.3 form, because a scanner
 cannot infer static source dependencies from the resulting shared library.
-All four image variants carry the inventory and SBOM under
+All five image variants carry the inventory and SBOM under
 `/usr/local/share/atrinik/`; Syft's nested-SBOM cataloger incorporates those
 packages in whole-image SBOM output.
 
@@ -346,8 +373,8 @@ variants. Linux validation runs it during the image build, enumerates the
 required `WAV`, `STBVORBIS`, `DRMP3`, and `OPUS` decoders, rejects MIDI and
 module decoders, fully decodes the bundled Opus fixture, and rejects empty PCM.
 The Windows image puts `atrinik-sdl3-mixer-probe.exe` and the fixture under the
-MXE prefix so a clean native Windows package test can copy and run the identical
-contract without installing codecs separately. The MXE build cannot execute a
+LLVM MinGW prefix so a clean native Windows package test can copy and run the identical
+contract without installing codecs separately. The cross-build cannot execute a
 Windows binary, so its image validation instead compiles the probe and verifies
 the exact imports of the self-contained `SDL3_mixer.dll`; native execution
 belongs on a Windows runner.
@@ -358,11 +385,11 @@ then use `ssh-add -l` in the opened container to confirm that its identities are
 available. The images intentionally do not copy or mount the host's private key
 files. SSH host configuration and `known_hosts` remain container-local.
 
-The general Windows image compiles MXE and its dependency stack and can take a
-long time on a genuinely cold build. Its `classic-check` target starts again
-from the pinned base and copies only the completed MXE compiler/sysroot,
+The general Windows image builds the pinned LLVM 23.1.3 compiler, UCRT sysroot,
+and dependency stack. Its `classic-check` target starts again
+from the pinned base and copies only the completed LLVM compiler/sysroot,
 ccache, client DLL closure, and host-side tools used by
-Classic Check. It intentionally excludes MXE source/build caches, the embedded
+Classic Check. It intentionally excludes LLVM source/build caches, the embedded
 Windows Python SDK/runtime, and native Linux worldmaker dependencies required
 only by server packaging. The exact included and excluded contract is recorded
 in [`windows/classic-check-toolchain.json`](windows/classic-check-toolchain.json),
@@ -397,7 +424,7 @@ the JSON plus Markdown evidence is retained as the
 
 Pull requests build each image whose inputs changed. Linux validation also
 runs actionlint over the repository workflows in a dedicated validation stage.
-Windows validation checks that ccache, the MXE compiler, and the CMake wrapper
+Windows validation checks that ccache, the Clang compiler, and the CMake wrapper
 are directly discoverable through the image's default `PATH`, cross-builds and
 stages every native test in the pinned Classic Check contract without network
 access, and executes the complete bundle on `windows-2025`. Linux Classic
@@ -414,7 +441,8 @@ its own upstream license.
 
 `portable/Dockerfile` provides `portable-final` for Linux/amd64. It builds the
 modern SDL3 family and OpenSSL 3.5 against a digest-pinned Debian 12/glibc 2.36
-base and signed package snapshot. The separate contract is
+base and signed package snapshot. Its schema-2 contract records Clang/LLD,
+compiler-rt, static LLVM libunwind, and LLVM ELF inspection evidence. The separate contract is
 [`portable/contract.json`](portable/contract.json). This target does not change
 the canonical Ubuntu coordinator, existing Classic Check, or Windows images.
 
@@ -428,7 +456,8 @@ Changed source inputs require a reviewed image update; the consumer check fails
 rather than silently regenerating with a different compiler.
 
 The image exposes its contract, actual tool/package versions, Debian source
-coordinates, source archives, notices, and shader-generation record under
+coordinates, source archives, notices, `compiler-evidence.json`, and
+shader-generation record under
 `/opt/atrinik-portable`. Shared application libraries live under `/usr/local`;
 Debian packages provide the baseline transitive libraries. Compiler flags use
 `-march=x86-64 -mtune=generic`. Verification checks actual ELF dependency
@@ -457,8 +486,8 @@ After an authorized maintainer merge and semantic release, the Linux publisher
 validates this target and consumer before release aliases move. It publishes
 `classic-portable-build:sha-COMMIT` with SBOM/provenance, then promotes that exact
 digest to `latest`, `debian-12` and the semantic version. Recover a partial
-promotion by rerunning the failed job from the same workflow run. The existing
-`candidate_only` dispatch retains its Classic-only behavior. A dispatch,
+promotion by rerunning the failed job from the same workflow run. The `candidate_only` dispatch qualifies and publishes the same portable target
+under `candidate-sha-COMMIT`, preserving every consumer gate and skipping aliases. A dispatch,
 registry push, merge or release is a separate publication action; PR CI performs
 none of them. Consumers select only the actual published immutable manifest
 digest and retain producer-run/source coordinates.
@@ -477,7 +506,7 @@ CMake and pkg-config use the installed headers and libraries there, and
 remain recorded in the package lock for reproducibility; they are not the
 Classic application's selected resolver provider.
 
-Both MXE Windows images retain curl 8.21.0 in the standard shared target
+Both LLVM Windows images retain curl 8.21.0 in the standard shared target
 prefix, add `libcares-2.dll` to that runtime directory, and explicitly pin
 OpenSSL 3.5.5. The source pins are in `classic-curl-toolchain.json`. LDAP/LDAPS and RTMP are
 excluded explicitly; HTTP/TLS, HTTP2, compression, PSL and IDN remain supported.
@@ -506,6 +535,6 @@ The Windows producer and native qualification bundle retain the exact c-ares
 pins its upstream source, installed path and checksum.
 
 Windows smoke prepares and validates the GPU shader cohort through the pinned
-Classic `tools/ci/prepare_gpu_shaders.sh` workflow before its offline MXE build.
+Classic `tools/ci/prepare_gpu_shaders.sh` workflow before its offline LLVM cross-build.
 The container consumes generated artifacts, so host shader-tool binaries do not
 become container ABI dependencies.

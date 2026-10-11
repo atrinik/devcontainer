@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       candidate_only:
-        description: Publish only a commit-addressed Classic review candidate
+        description: Publish all qualified Linux-owned images as commit-addressed candidates
         required: true
         type: boolean
         default: false
@@ -23,7 +23,7 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-26.04
-    timeout-minutes: 180
+    timeout-minutes: 360
     steps:
       - name: Check out image sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -32,13 +32,19 @@ jobs:
         id: metadata
         env:
           IMAGE_NAME: linux-build
+          CANDIDATE_ONLY: ${{ inputs.candidate_only }}
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME}"
-          tags="${image}:latest
-          ${image}:ubuntu-26.04
-          ${image}:sha-${GITHUB_SHA}"
+          if [[ "${CANDIDATE_ONLY}" == true ]]; then
+            tags="${image}:candidate-sha-${GITHUB_SHA}"
+          else
+            tags="${image}:latest
+            ${image}:ubuntu-26.04
+            ${image}:sha-${GITHUB_SHA}"
+          fi
 
-          if [[ "${GITHUB_REF_TYPE}" == tag ]]; then
+          if [[ "${CANDIDATE_ONLY}" != true \
+              && "${GITHUB_REF_TYPE}" == tag ]]; then
             if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "Invalid image release tag: ${GITHUB_REF_NAME}" >&2
               exit 1
@@ -58,9 +64,10 @@ jobs:
         id: classic-metadata
         env:
           IMAGE_NAME: classic-build
+          CANDIDATE_ONLY: ${{ inputs.candidate_only }}
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME}"
-          if [[ "${{ inputs.candidate_only }}" == true ]]; then
+          if [[ "${CANDIDATE_ONLY}" == true ]]; then
             tags="${image}:candidate-sha-${GITHUB_SHA}"
           else
             tags="${image}:latest
@@ -68,7 +75,7 @@ jobs:
             ${image}:sha-${GITHUB_SHA}"
           fi
 
-          if [[ "${{ inputs.candidate_only }}" != true \
+          if [[ "${CANDIDATE_ONLY}" != true \
               && "${GITHUB_REF_TYPE}" == tag ]]; then
             if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "Invalid image release tag: ${GITHUB_REF_NAME}" >&2
@@ -95,19 +102,33 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Prove both Linux-owned image contracts before moving any release tag.
+      - name: Build shared LLVM source toolchain
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: linux/Dockerfile
+          target: llvm-toolchain
+          build-args: LLVM_BUILD_JOBS=2
+          platforms: linux/amd64
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=llvm-toolchain-23.1.3
+          cache-to: type=gha,mode=max,scope=llvm-toolchain-23.1.3,ignore-error=true
+
+      # Prove every Linux-owned image contract before moving any release tag.
       - name: Build and smoke Classic validation target
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           file: linux/Dockerfile
+          build-args: LLVM_BUILD_JOBS=2
           target: classic-validation
           platforms: linux/amd64
           outputs: type=cacheonly
           cache-from: |
+            type=gha,scope=llvm-toolchain-23.1.3
             type=registry,ref=ghcr.io/atrinik/classic-build:ubuntu-26.04
-            type=gha,scope=classic-build-image
-          cache-to: type=gha,mode=max,scope=classic-build-image,ignore-error=true
+            type=gha,scope=classic-build-image-llvm-23.1.3
+          cache-to: type=gha,mode=max,scope=classic-build-image-llvm-23.1.3,ignore-error=true
 
       - name: Read Classic cancellation qualification consumer
         id: curl-consumer
@@ -126,39 +147,67 @@ jobs:
         with:
           context: .
           file: linux/Dockerfile
+          build-args: LLVM_BUILD_JOBS=2
           target: classic-final
           platforms: linux/amd64
           load: true
           tags: atrinik-classic-curl:qualification
-          cache-from: type=gha,scope=classic-build-image
+          cache-from: |
+            type=gha,scope=llvm-toolchain-23.1.3
+            type=gha,scope=classic-build-image-llvm-23.1.3
 
       - name: Qualify Classic cancellation and public TLS before publication
         run: tools/smoke-classic-curl.sh atrinik-classic-curl:qualification build/curl-classic
 
-      - name: Load broad Linux cancellation qualification image
-        if: ${{ !inputs.candidate_only }}
+      - name: Run Classic client and server checks before publication
+        run: |
+          install -d -m 1777 "${RUNNER_TEMP}/classic-ccache"
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env CCACHE_DIR=/cache/ccache --env HOME=/tmp/classic-home \
+            --volume "${GITHUB_WORKSPACE}:/image-source:ro" \
+            --volume "${GITHUB_WORKSPACE}/build/curl-classic:/workspace" \
+            --volume "${RUNNER_TEMP}/classic-ccache:/cache/ccache" \
+            --workdir /workspace atrinik-classic-curl:qualification \
+            /image-source/tools/validate-classic-check.sh /workspace
+
+      - name: Build and smoke broad Linux validation target
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           file: linux/Dockerfile
+          build-args: LLVM_BUILD_JOBS=2
+          target: validation
+          platforms: linux/amd64
+          outputs: type=cacheonly
+          cache-from: |
+            type=gha,scope=llvm-toolchain-23.1.3
+            type=gha,scope=linux-build-image-llvm-23.1.3
+          cache-to: type=gha,mode=max,scope=linux-build-image-llvm-23.1.3,ignore-error=true
+
+      - name: Load broad Linux cancellation qualification image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: linux/Dockerfile
+          build-args: LLVM_BUILD_JOBS=2
           target: final
           platforms: linux/amd64
           load: true
           tags: atrinik-linux-curl:qualification
-          cache-from: type=gha,scope=linux-build-image
+          cache-from: |
+            type=gha,scope=llvm-toolchain-23.1.3
+            type=gha,scope=linux-build-image-llvm-23.1.3
 
       - name: Qualify broad Linux cancellation and public TLS before publication
-        if: ${{ !inputs.candidate_only }}
         run: tools/smoke-classic-curl.sh atrinik-linux-curl:qualification build/curl-classic
 
       # The portable target has its own ABI and real consumer; validate it before aliases move.
       - name: Read portable consumer revision
-        if: ${{ !inputs.candidate_only }}
         id: portable-consumer
         run: echo "commit=$(jq -er '.consumer.commit' portable/contract.json)" >> "${GITHUB_OUTPUT}"
 
       - name: Check out portable Classic consumer
-        if: ${{ !inputs.candidate_only }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: atrinik/classic
@@ -167,35 +216,37 @@ jobs:
           persist-credentials: false
 
       - name: Check portable Dockerfile
-        if: ${{ !inputs.candidate_only }}
         run: docker build --check --file portable/Dockerfile .
 
       - name: Validate portable baseline
-        if: ${{ !inputs.candidate_only }}
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           file: portable/Dockerfile
+          build-args: LLVM_BUILD_JOBS=2
           target: portable-validation
           platforms: linux/amd64
           outputs: type=cacheonly
-          cache-from: type=gha,scope=classic-portable-build-image
-          cache-to: type=gha,mode=max,scope=classic-portable-build-image,ignore-error=true
+          cache-from: |
+            type=gha,scope=llvm-toolchain-23.1.3
+            type=gha,scope=classic-portable-build-image-llvm-23.1.3
+          cache-to: type=gha,mode=max,scope=classic-portable-build-image-llvm-23.1.3,ignore-error=true
 
       - name: Load portable release candidate
-        if: ${{ !inputs.candidate_only }}
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           file: portable/Dockerfile
+          build-args: LLVM_BUILD_JOBS=2
           target: portable-final
           platforms: linux/amd64
           load: true
           tags: atrinik-classic-portable:release-validation
-          cache-from: type=gha,scope=classic-portable-build-image
+          cache-from: |
+            type=gha,scope=llvm-toolchain-23.1.3
+            type=gha,scope=classic-portable-build-image-llvm-23.1.3
 
       - name: Validate real portable consumer before publication
-        if: ${{ !inputs.candidate_only }}
         run: |
           install -d build/portable-reports
           docker run --rm --network none \
@@ -206,11 +257,11 @@ jobs:
             /opt/atrinik-portable/consumer.sh /classic /reports
 
       - name: Build and publish Linux image
-        if: ${{ !inputs.candidate_only }}
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           file: linux/Dockerfile
+          build-args: LLVM_BUILD_JOBS=2
           platforms: linux/amd64
           pull: true
           push: true
@@ -219,17 +270,19 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: |
+            type=gha,scope=llvm-toolchain-23.1.3
             type=registry,ref=ghcr.io/atrinik/linux-build:ubuntu-26.04
-            type=gha,scope=linux-build-image
+            type=gha,scope=linux-build-image-llvm-23.1.3
           cache-to: |
             type=inline
-            type=gha,mode=max,scope=linux-build-image,ignore-error=true
+            type=gha,mode=max,scope=linux-build-image-llvm-23.1.3,ignore-error=true
 
       - name: Build and publish Classic image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           file: linux/Dockerfile
+          build-args: LLVM_BUILD_JOBS=2
           target: classic-final
           platforms: linux/amd64
           pull: true
@@ -241,29 +294,44 @@ jobs:
           sbom: true
           provenance: mode=max
           cache-from: |
+            type=gha,scope=llvm-toolchain-23.1.3
             type=registry,ref=ghcr.io/atrinik/classic-build:ubuntu-26.04
-            type=gha,scope=classic-build-image
+            type=gha,scope=classic-build-image-llvm-23.1.3
           cache-to: |
             type=inline
-            type=gha,mode=max,scope=classic-build-image,ignore-error=true
+            type=gha,mode=max,scope=classic-build-image-llvm-23.1.3,ignore-error=true
+
+      - name: Select immutable portable tag
+        id: portable-metadata
+        env:
+          CANDIDATE_ONLY: ${{ inputs.candidate_only }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/classic-portable-build"
+          if [[ "${CANDIDATE_ONLY}" == true ]]; then
+            echo "tag=${image}:candidate-sha-${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "tag=${image}:sha-${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+          fi
 
       - name: Publish immutable portable candidate
-        if: ${{ !inputs.candidate_only }}
         id: portable-publish
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           file: portable/Dockerfile
+          build-args: LLVM_BUILD_JOBS=2
           target: portable-final
           platforms: linux/amd64
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/classic-portable-build:sha-${{ github.sha }}
+          tags: ${{ steps.portable-metadata.outputs.tag }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           sbom: true
           provenance: mode=max
-          cache-from: type=gha,scope=classic-portable-build-image
+          cache-from: |
+            type=gha,scope=llvm-toolchain-23.1.3
+            type=gha,scope=classic-portable-build-image-llvm-23.1.3
 
       - name: Promote validated portable aliases
         if: ${{ !inputs.candidate_only }}

@@ -37,7 +37,9 @@ jobs:
           windows=false
           while IFS= read -r path; do
             case "${path}" in
-            .dockerignore | .github/actionlint.yaml | .github/workflows/* | \
+            .dockerignore | llvm-toolchain.json | llvm-bootstrap-packages.lock | \
+                tools/install_llvm_toolchain.py | tools/validate_llvm_toolchain.py | \
+                tools/tests/test_install_llvm_toolchain.py | tools/tests/test_workflow_contracts.py | .github/actionlint.yaml | .github/workflows/* | \
                 portable/* | classic-packages.lock | \
                 classic-shader-toolchain.json | classic-shader-toolchain.spdx.json | \
                 audio-toolchain.json | audio-toolchain.spdx.json | tools/audio/* | \
@@ -47,7 +49,9 @@ jobs:
               ;;
             esac
             case "${path}" in
-            .dockerignore | .github/actionlint.yaml | \
+            .dockerignore | llvm-toolchain.json | llvm-bootstrap-packages.lock | \
+                tools/install_llvm_toolchain.py | tools/validate_llvm_toolchain.py | \
+                tools/tests/test_install_llvm_toolchain.py | tools/tests/test_workflow_contracts.py | .github/actionlint.yaml | \
                 .github/workflows/* | linux/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
                 classic-vulkan-toolchain.json | \
@@ -66,7 +70,9 @@ jobs:
               ;;
             esac
             case "${path}" in
-            .dockerignore | .github/workflows/publish-linux.yml | \
+            .dockerignore | llvm-toolchain.json | llvm-bootstrap-packages.lock | \
+                tools/install_llvm_toolchain.py | tools/validate_llvm_toolchain.py | \
+                tools/tests/test_install_llvm_toolchain.py | tools/tests/test_workflow_contracts.py | .github/workflows/publish-linux.yml | \
                 .github/workflows/validate.yml | linux/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
                 classic-packages.lock | classic-toolchain.json | windows/classic-check-toolchain.json | \
@@ -92,7 +98,9 @@ jobs:
               ;;
             esac
             case "${path}" in
-            .dockerignore | .github/workflows/measure-classic-check.yml | \
+            .dockerignore | llvm-toolchain.json | llvm-bootstrap-packages.lock | \
+                tools/install_llvm_toolchain.py | tools/validate_llvm_toolchain.py | \
+                tools/tests/test_install_llvm_toolchain.py | tools/tests/test_workflow_contracts.py | .github/workflows/measure-classic-check.yml | \
                 .github/workflows/publish-windows.yml | \
                 .github/workflows/validate.yml | windows/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
@@ -120,6 +128,12 @@ jobs:
             echo "windows=${windows}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Test producer workflow contracts
+        run: python3 -m unittest tools/tests/test_workflow_contracts.py
+
+      - name: Test LLVM toolchain installer
+        run: python3 -m unittest tools/tests/test_install_llvm_toolchain.py
+
       - name: Test portable ABI checks
         run: python3 -m unittest discover -s portable -p 'test_*.py'
 
@@ -138,12 +152,41 @@ jobs:
       - name: Test Classic Vulkan toolchain installer
         run: python3 -m unittest tools/tests/test_install_classic_vulkan_toolchain.py
 
+  llvm:
+    name: Shared LLVM source toolchain
+    needs: changes
+    if: >-
+      needs.changes.outputs.linux == 'true' ||
+      needs.changes.outputs.classic == 'true' ||
+      needs.changes.outputs.portable == 'true' ||
+      needs.changes.outputs.windows == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out image sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Build shared LLVM source toolchain
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: linux/Dockerfile
+          target: llvm-toolchain
+          build-args: LLVM_BUILD_JOBS=2
+          platforms: linux/amd64
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=llvm-toolchain-23.1.3
+          cache-to: type=gha,mode=max,scope=llvm-toolchain-23.1.3,ignore-error=true
+
   linux:
     name: Linux image
-    needs: changes
+    needs: [changes, llvm]
     if: needs.changes.outputs.linux == 'true'
     runs-on: ubuntu-26.04
-    timeout-minutes: 180
+    timeout-minutes: 360
     permissions:
       attestations: read
       contents: read
@@ -159,11 +202,14 @@ jobs:
         with:
           context: .
           file: linux/Dockerfile
+          build-args: LLVM_BUILD_JOBS=2
           target: validation
           load: true
           tags: atrinik-linux-validation:ci
-          cache-from: type=gha,scope=linux-build-image
-          cache-to: type=gha,mode=max,scope=linux-build-image,ignore-error=true
+          cache-from: |
+            type=gha,scope=llvm-toolchain-23.1.3
+            type=gha,scope=linux-build-image-llvm-23.1.3
+          cache-to: type=gha,mode=max,scope=linux-build-image-llvm-23.1.3,ignore-error=true
 
       - name: Read broad Linux cancellation qualification consumer
         id: curl-consumer
@@ -240,10 +286,10 @@ jobs:
 
   windows:
     name: Windows cross-build images
-    needs: changes
+    needs: [changes, llvm]
     if: needs.changes.outputs.windows == 'true'
     runs-on: ubuntu-26.04
-    timeout-minutes: 180
+    timeout-minutes: 360
     steps:
       - name: Check out image sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -291,10 +337,13 @@ jobs:
           context: .
           file: windows/Dockerfile
           outputs: type=cacheonly
-          build-args: MXE_BUILD_JOBS=4
+          build-args: |
+            LLVM_BUILD_JOBS=2
+            WINDOWS_BUILD_JOBS=2
           cache-from: |
-            type=gha,scope=windows-build-image
-          cache-to: type=gha,mode=max,scope=windows-build-image,ignore-error=true
+            type=gha,scope=llvm-toolchain-23.1.3
+            type=gha,scope=windows-build-image-llvm-23.1.3
+          cache-to: type=gha,mode=max,scope=windows-build-image-llvm-23.1.3,ignore-error=true
 
       - name: Build task-focused Classic Check image
         id: classic-image
@@ -305,11 +354,14 @@ jobs:
           target: classic-check
           load: true
           tags: atrinik-windows-check:validation
-          build-args: MXE_BUILD_JOBS=4
+          build-args: |
+            LLVM_BUILD_JOBS=2
+            WINDOWS_BUILD_JOBS=2
           cache-from: |
-            type=gha,scope=windows-classic-check-image
-            type=gha,scope=windows-build-image
-          cache-to: type=gha,mode=max,scope=windows-classic-check-image,ignore-error=true
+            type=gha,scope=llvm-toolchain-23.1.3
+            type=gha,scope=windows-classic-check-image-llvm-23.1.3
+            type=gha,scope=windows-build-image-llvm-23.1.3
+          cache-to: type=gha,mode=max,scope=windows-classic-check-image-llvm-23.1.3,ignore-error=true
 
       - name: Resolve immutable Classic Check candidate
         id: candidate
@@ -370,10 +422,10 @@ jobs:
           & (Join-Path (Resolve-Path "build/native-windows-tests").Path "run-classic-native-tests.ps1")
   classic:
     name: Classic CI image
-    needs: changes
+    needs: [changes, llvm]
     if: needs.changes.outputs.classic == 'true'
     runs-on: ubuntu-26.04
-    timeout-minutes: 180
+    timeout-minutes: 360
     steps:
       - name: Check out image sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -390,22 +442,28 @@ jobs:
         with:
           context: .
           file: linux/Dockerfile
+          build-args: LLVM_BUILD_JOBS=2
           target: classic-validation
           platforms: linux/amd64
           outputs: type=cacheonly
-          cache-from: type=gha,scope=classic-build-image
-          cache-to: type=gha,mode=max,scope=classic-build-image,ignore-error=true
+          cache-from: |
+            type=gha,scope=llvm-toolchain-23.1.3
+            type=gha,scope=classic-build-image-llvm-23.1.3
+          cache-to: type=gha,mode=max,scope=classic-build-image-llvm-23.1.3,ignore-error=true
 
       - name: Load slim Classic image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           file: linux/Dockerfile
+          build-args: LLVM_BUILD_JOBS=2
           target: classic-final
           platforms: linux/amd64
           load: true
           tags: atrinik-classic-build:validation
-          cache-from: type=gha,scope=classic-build-image
+          cache-from: |
+            type=gha,scope=llvm-toolchain-23.1.3
+            type=gha,scope=classic-build-image-llvm-23.1.3
 
       - name: Check out pinned Classic sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -434,10 +492,10 @@ jobs:
 
   portable:
     name: Portable Classic image
-    needs: changes
+    needs: [changes, llvm]
     if: needs.changes.outputs.portable == 'true'
     runs-on: ubuntu-26.04
-    timeout-minutes: 180
+    timeout-minutes: 360
     permissions:
       contents: read
     steps:
@@ -470,22 +528,28 @@ jobs:
         with:
           context: .
           file: portable/Dockerfile
+          build-args: LLVM_BUILD_JOBS=2
           target: portable-validation
           platforms: linux/amd64
           outputs: type=cacheonly
-          cache-from: type=gha,scope=classic-portable-build-image
-          cache-to: type=gha,mode=max,scope=classic-portable-build-image,ignore-error=true
+          cache-from: |
+            type=gha,scope=llvm-toolchain-23.1.3
+            type=gha,scope=classic-portable-build-image-llvm-23.1.3
+          cache-to: type=gha,mode=max,scope=classic-portable-build-image-llvm-23.1.3,ignore-error=true
 
       - name: Load portable image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           file: portable/Dockerfile
+          build-args: LLVM_BUILD_JOBS=2
           target: portable-final
           platforms: linux/amd64
           load: true
           tags: atrinik-classic-portable:validation
-          cache-from: type=gha,scope=classic-portable-build-image
+          cache-from: |
+            type=gha,scope=llvm-toolchain-23.1.3
+            type=gha,scope=classic-portable-build-image-llvm-23.1.3
 
       - name: Build and test real non-root Classic client on the baseline
         run: |
@@ -510,6 +574,7 @@ jobs:
     name: Required checks
     needs:
       - changes
+      - llvm
       - portable
       - classic
       - linux
