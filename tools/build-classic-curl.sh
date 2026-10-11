@@ -9,8 +9,12 @@ jobs=${3:-2}
 : "${CXX:?explicit LLVM C++ compiler required}"
 : "${AR:?explicit LLVM archiver required}"
 : "${RANLIB:?explicit LLVM ranlib required}"
+# Libtool discovers its linker separately from Clang's driver configuration.
+# Select the cohort's linker by name when the caller has not exported LD.
+export LD=${LD:-ld.lld}
 "${CC}" --version | grep -F "clang version 23.1.3" >/dev/null
 "${CXX}" --version | grep -F "clang version 23.1.3" >/dev/null
+"${LD}" --version | grep -E '^LLD 23\.1\.3([[:space:]]|$)' >/dev/null
 test "$(pkg-config --modversion openssl)" = "$(jq -r '.linux.openssl_version' "$manifest")"
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT

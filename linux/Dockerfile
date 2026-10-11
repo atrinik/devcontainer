@@ -121,7 +121,7 @@ FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914
 
 COPY --from=llvm-toolchain /opt/llvm-23.1.3 /opt/llvm-23.1.3
 ENV PATH=/opt/llvm-23.1.3/bin:${PATH} \
-    CC=clang CXX=clang++ \
+    CC=clang CXX=clang++ LD=ld.lld \
     AR=llvm-ar RANLIB=llvm-ranlib NM=llvm-nm STRIP=llvm-strip \
     OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf GCOV=llvm-gcov
 COPY tools/validate_llvm_toolchain.py /usr/local/bin/atrinik-validate-llvm-toolchain
@@ -567,7 +567,7 @@ FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914
 
 COPY --from=llvm-toolchain /opt/llvm-23.1.3 /opt/llvm-23.1.3
 ENV PATH=/opt/llvm-23.1.3/bin:${PATH} \
-    CC=clang CXX=clang++ \
+    CC=clang CXX=clang++ LD=ld.lld \
     AR=llvm-ar RANLIB=llvm-ranlib NM=llvm-nm STRIP=llvm-strip \
     OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf GCOV=llvm-gcov
 COPY tools/validate_llvm_toolchain.py /usr/local/bin/atrinik-validate-llvm-toolchain
