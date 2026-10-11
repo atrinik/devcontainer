@@ -26,6 +26,7 @@ test ! -e /usr/local/lib/libdxil.so
 test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.36'
 python3 "${root}/tools/validate_llvm_toolchain.py" --manifest "${root}/llvm-toolchain.json" --prefix /opt/llvm-23.1.3
 python3 "${root}/compiler_evidence.py" --verify "${root}/compiler-evidence.json"
+python3 "${root}/curl_evidence.py" --root "${root}"
 work=$(mktemp -d)
 trap 'rm -rf -- "${work}"' EXIT
 cd "${work}"

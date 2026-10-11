@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 
 from compiler_evidence import record
+from curl_evidence import record as record_curl
 
 root = Path(__file__).resolve().parent
 contract = json.loads((root / "contract.json").read_text())
@@ -33,7 +34,8 @@ actual = {"schema_version": 2, "contract_sha256": hashlib.sha256((root / "contra
               "git-lfs": ["git", "lfs", "version"], "openssl": ["openssl", "version"]}.items()},
           "compiler_target": evidence["target"],
           "compiler_evidence_sha256": hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
-          "pkg_config": {name: output("pkg-config", "--modversion", name) for name in contract["pkg_config"]}}
+          "pkg_config": {name: output("pkg-config", "--modversion", name) for name in contract["pkg_config"]},
+          "curl": record_curl(root / contract["curl_manifest"])}
 assert actual["architecture"] == "amd64"
 assert actual["glibc"] == "glibc 2.36"
 for name, version in contract["pkg_config"].items():

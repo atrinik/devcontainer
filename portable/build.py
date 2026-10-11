@@ -106,6 +106,7 @@ def main() -> None:
                     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", *options[entry["name"]])
                 run("cmake", "--build", str(build), "--parallel", "2")
                 run("cmake", "--install", str(build))
+        run("python3", str(ROOT / "build-curl.py"), "--root", str(ROOT), "--jobs", "2")
         audio = json.loads((ROOT / "audio-toolchain.json").read_text())
         for entry in [audio["sdl_mixer"], *audio["dependencies"]]:
             download(entry["source"]["url"], entry["source"]["sha256"], archives)

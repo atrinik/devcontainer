@@ -75,7 +75,8 @@
     "sdl3-image": "3.4.0",
     "sdl3-mixer": "3.2.4",
     "sdl3-ttf": "3.2.2",
-    "zlib": "1.2.13"
+    "zlib": "1.2.13",
+    "libcares": "1.34.6"
   },
   "runtime": {
     "image_codecs": [
@@ -133,7 +134,8 @@
         ],
         "reason": "Classic does not use the SDL Steam user-storage API; Steam integration is unsupported and its proprietary provider is not included."
       }
-    ]
+    ],
+    "curl_resolver": "c-ares only; threaded resolver disabled; native cancellable request qualification required"
   },
   "redistribution": {
     "source_archives": "/opt/atrinik-portable/sources",
@@ -145,5 +147,6 @@
     "shader_corresponding_sources": "/opt/atrinik-portable/sources/classic-shaders",
     "toolchain_corresponding_sources": "/opt/atrinik-portable/sources/llvm",
     "toolchain_notices": "/opt/atrinik-portable/notices/llvm"
-  }
+  },
+  "curl_manifest": "curl-toolchain.json"
 }

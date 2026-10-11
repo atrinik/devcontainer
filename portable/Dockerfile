@@ -112,7 +112,7 @@ ENV PATH=/opt/llvm-23.1.3/bin:${PATH} \
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
     OPENSSL_MODULES=/usr/local/lib/ossl-modules
 COPY portable /opt/atrinik-portable
-COPY llvm-toolchain.json audio-toolchain.json audio-toolchain.spdx.json classic-shader-toolchain.json classic-shader-toolchain.spdx.json /opt/atrinik-portable/
+COPY llvm-toolchain.json audio-toolchain.json audio-toolchain.spdx.json classic-shader-toolchain.json classic-shader-toolchain.spdx.json classic-curl-toolchain.json /opt/atrinik-portable/
 COPY tools/install_llvm_toolchain.py tools/validate_llvm_toolchain.py tools/build-sdl3-mixer.sh tools/install_classic_shader_toolchain.py /opt/atrinik-portable/tools/
 COPY tools/audio /opt/atrinik-portable/audio
 RUN python3 /opt/atrinik-portable/build.py \
