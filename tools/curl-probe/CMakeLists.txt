@@ -8,7 +8,7 @@ include(CTest)
 
 set(ATRINIK_CLASSIC_SOURCE_DIR "" CACHE PATH "Clean pinned Classic source checkout")
 set(ATRINIK_CLASSIC_QUALIFICATION_COMMIT
-    "e4e84fb014a94c952cdbf9910a144e2266eea304" CACHE STRING
+    "3a1211f9557f3ebac112a51005fc94f3f9ba4495" CACHE STRING
     "Full Classic commit from the producer's committed consumer manifest")
 set(qualification_commit "${ATRINIK_CLASSIC_QUALIFICATION_COMMIT}")
 string(LENGTH "${qualification_commit}" qualification_commit_length)
