@@ -868,7 +868,10 @@
           "file": "src/glib-1-fixes.patch",
           "sha256": "644a94dd812484da0405d0d9ce5270ddb4c56c86446ca3cfa386a25d4b7c2998"
         }
-      ]
+      ],
+      "environment": {
+        "LDFLAGS": "-L{prefix}/lib -Wl,--require-defined,_tls_used"
+      }
     },
     {
       "name": "freetype-bootstrap",
@@ -1024,7 +1027,8 @@
         }
       ],
       "environment": {
-        "CFLAGS": "-Wno-incompatible-pointer-types"
+        "CFLAGS": "-Wno-incompatible-pointer-types",
+        "LDFLAGS": "-L{prefix}/lib -Wl,--require-defined,_tls_used"
       }
     },
     {

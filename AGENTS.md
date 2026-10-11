@@ -63,6 +63,10 @@
   into both Linux images, and records the WSLg host mounts/environment. Its
   pinned Lavapipe/Xvfb packages remain the fork-safe headless path; consumers
   still pin a released image digest and supply WSLg adapter selection.
+- Windows GLib/Cairo qualification requires actual PE TLS callback registration and
+  the hash-bound native callback/destructor or mutex-initialization probes. Keep original and
+  relinked failing DLL controls in the focused diagnostic; it does not replace
+  full candidate SDK and consumer qualification.
 - Keep a stable numeric runner UID when restoring a Classic ccache directory;
   the mode-1777 mount root supports non-root initialization but does not make
   ccache's owner-writable nested directories reusable across different UIDs.

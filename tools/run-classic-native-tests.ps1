@@ -32,6 +32,52 @@ function Invoke-QualifiedNativeTest {
     }
 }
 
+foreach ($library in @('glib', 'cairo')) {
+    $dllName = if ($library -eq 'glib') { 'libglib-2.0-0.dll' } else { 'libcairo-2.dll' }
+    $probeName = "atrinik-$library-tls-probe.exe"
+    # Check the same DLL whose private callback/flag RVAs are compiled into the probe.
+    $tlsReceipt = Get-Content -Raw (Join-Path $bundle "$library-tls.json") | ConvertFrom-Json
+    $dllHash = (Get-FileHash -Algorithm SHA256 (Join-Path $bundle $dllName)).Hash.ToLowerInvariant()
+    if ($tlsReceipt.schema_version -ne 1 -or $tlsReceipt.dll -ne $dllName -or $dllHash -ne $tlsReceipt.sha256) {
+        throw 'Library TLS probe does not match the staged DLL'
+    }
+    $probeHash = (Get-FileHash -Algorithm SHA256 (Join-Path $bundle $probeName)).Hash.ToLowerInvariant()
+    if ($probeHash -ne $tlsReceipt.probe_sha256) { throw "Library TLS probe executable differs from its producer receipt" }
+    $probeStart = [Diagnostics.ProcessStartInfo]::new()
+    $probeStart.FileName = Join-Path $bundle $probeName
+    $probeStart.WorkingDirectory = $bundle
+    $probeStart.UseShellExecute = $false
+    $probeStart.RedirectStandardOutput = $true
+    $probeStart.RedirectStandardError = $true
+    $probeStart.Environment['G_DEBUG'] = 'fatal-criticals'
+    $probeProcess = [Diagnostics.Process]::Start($probeStart)
+    try {
+        Write-Host "$library TLS qualification pid=$($probeProcess.Id) dll_sha256=$dllHash"
+        $stdout = $probeProcess.StandardOutput.ReadToEndAsync()
+        $stderr = $probeProcess.StandardError.ReadToEndAsync()
+        $timedOut = -not $probeProcess.WaitForExit(15000)
+        if ($timedOut) {
+            $probeProcess.Kill($true)
+            if (-not $probeProcess.WaitForExit(5000)) { throw 'Library TLS probe did not stop after timeout' }
+        }
+        $out = $stdout.GetAwaiter().GetResult()
+        $err = $stderr.GetAwaiter().GetResult()
+        [IO.File]::WriteAllText((Join-Path $bundle "$library-tls.stdout.log"), $out)
+        [IO.File]::WriteAllText((Join-Path $bundle "$library-tls.stderr.log"), $err)
+        Write-Host $out
+        if ($err) { Write-Host $err }
+        if ($timedOut) { throw 'Library TLS probe exceeded 15000 ms' }
+        if ($probeProcess.ExitCode -ne 0) { throw "Library TLS probe failed: $($probeProcess.ExitCode)" }
+        $expected = if ($library -eq 'glib') { 'process_attach_invoked=1 private_destructors=1 explicit_unload=1' } else { 'process_attach_initialized=2 surface_font_smoke=1 explicit_unload=1 reload=1' }
+        if ($out -notmatch $expected -or $err) {
+            throw 'Library TLS callback/destructor/unload evidence is incomplete or emitted diagnostics'
+        }
+    } finally {
+        $probeProcess.Dispose()
+    }
+
+}
+
 foreach ($test in $tests) {
     $arguments = @($test.arguments | ForEach-Object {
         if ([IO.Path]::IsPathRooted($_) -or $_ -like '../*' -or $_ -like '..\*') {

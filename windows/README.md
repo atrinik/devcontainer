@@ -21,3 +21,35 @@ contracts. Native Windows test execution, shipped-font equivalence, audible
 playback and GPU qualification require separate evidence before release
 acceptance. A private recovered LLVM cohort can diagnose dependency builds;
 canonical publication still requires the production Dockerfile and CI.
+
+GLib's and Cairo's GNU TLS macros retain callback pointers but do not force the CRT TLS
+registration directory into an LLVM/MinGW link. The target GLib and Cairo recipes require
+`_tls_used`; the host recipe and library features remain unchanged. `pe_tls.py`
+checks the actual PE TLS directory and callback array against each library's retained
+symbols. It binds the native probe to that exact DLL's callback and process
+attach flag. The producer's native bundle verifies the DLL hash, observes the
+callback flag, exercises a real GPrivate destructor using the configured POSIX
+thread backend, and explicitly unloads the DLL. Missing registration is also
+fatal through GLib's existing critical diagnostic.
+
+For focused diagnosis, run `qualify-glib-tls.py --work-dir ABSENT_DIRECTORY
+--output ABSENT_DIRECTORY` inside the pinned LLVM SDK, with an optional
+`--source-archive` that must match the locked GLib hash. It rebuilds GLib with
+and without the mandatory TLS reference, preserves linker-map evidence and
+import/export comparison, and stages the original SDK DLL as another negative
+control. Run the resulting `run-glib-tls-qualification.ps1` on native Windows;
+all three lanes must meet their declared outcomes. This focused test does not
+replace complete candidate SDK, consumer, font, media, or GPU qualification.
+
+The same focused helper accepts `--library cairo` (GLib is the default) with
+Cairo's locked source archive and distinct work/output directories. Build GLib
+first, then pass its output through `--glib-bundle` to the Cairo invocation. The
+helper checks that bundle's source/recipe/tool hashes, sealed files and actual
+PE callback registration, and stages the same repaired GLib bytes in all three
+Cairo lanes. This isolates Cairo's result from its FreeType/HarfBuzz/GLib
+dependency chain without changing the SDK's original ownership receipts. Its native
+probe observes `_cairo_mutex_initialized == 2` immediately after loading,
+before any API can initialize the mutexes lazily, exercises image/context and
+Win32 font APIs, releases the objects, unloads and reloads the DLL. The original
+and relinked controls must fail on missing TLS registration. Successful unload
+is recorded without claiming direct observation of the detach callback's work.
