@@ -37,7 +37,8 @@ class WindowsDependenciesTests(unittest.TestCase):
             self.assertEqual(env["CC"], "clang" if host else "x86_64-w64-mingw32-clang")
             self.assertEqual(env["CXX"], "clang++" if host else "x86_64-w64-mingw32-clang++")
             self.assertEqual(env["AR"], "llvm-ar")
-            self.assertEqual(env["LD"], "ld.lld")
+            self.assertEqual(env["LD"], "ld.lld" if host else "/llvm/bin/x86_64-w64-mingw32-ld")
+            self.assertEqual(env["OBJDUMP"], "llvm-objdump" if host else "/llvm/bin/x86_64-w64-mingw32-objdump")
             self.assertTrue(env["PATH"].startswith("/llvm/bin:/host/bin:"))
             self.assertEqual(env["PKG_CONFIG_PATH"], "")
 
