@@ -22,15 +22,10 @@ concurrency:
 # remains owned by validate.yml and publish-windows.yml.
 jobs:
   cross-build:
-    name: Build scoped ${{ matrix.library }} TLS qualification bundle
-    strategy:
-      fail-fast: false
-      matrix:
-        library: [glib, cairo]
+    name: Build scoped GLib and Cairo TLS qualification bundles
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     env:
-      LIBRARY: ${{ matrix.library }}
       SDK_IMAGE: ghcr.io/atrinik/windows-build:candidate-sha-1d82af6036b831d97cc470e2230357047e4c78f8@sha256:914acf5c3c05546ca4fb45e47362d754ec717a9062f6ebcc1b81b3ab7d0ad325
     steps:
       - name: Check out qualification sources
@@ -48,11 +43,8 @@ jobs:
           # has neither registry credentials nor network access.
           python3 - <<'PY'
           import json
-          import os
           from pathlib import Path
           records = json.loads(Path('windows/dependencies.json').read_text())['dependencies']
-          library = os.environ['LIBRARY']
-          package, = [item for item in records if item['name'] == library]
           inputs = {
               'glib': {
                   'version': '2.89.3',
@@ -67,20 +59,23 @@ jobs:
                   'sha256': '445ed8208a6e4823de1226a74ca319d3600e83f6369f99b14265006599c32ccb',
               },
           }
-          expected = inputs[library]
-          if any(package.get(key) != value for key, value in expected.items()):
-              raise SystemExit('Library source differs from the scoped qualification input')
-          Path('build/glib-qualification/provenance/library-source.json').write_text(
-              json.dumps({'library': library, **expected}, indent=2) + '\n')
-          Path('build/glib-qualification/downloads/source-url.txt').write_text(expected['url'])
-          Path('build/glib-qualification/downloads/source.sha256').write_text(
-              expected['sha256'] + '  build/glib-qualification/downloads/source.tar.xz\n')
+          for library, expected in inputs.items():
+              package, = [item for item in records if item['name'] == library]
+              if any(package.get(key) != value for key, value in expected.items()):
+                  raise SystemExit('Library source differs from the scoped qualification input')
+              Path(f'build/glib-qualification/provenance/{library}-source.json').write_text(
+                  json.dumps({'library': library, **expected}, indent=2) + '\n')
+              Path(f'build/glib-qualification/downloads/{library}-url.txt').write_text(expected['url'])
+              Path(f'build/glib-qualification/downloads/{library}.sha256').write_text(
+                  expected['sha256'] + f'  build/glib-qualification/downloads/{library}.tar.xz\n')
           PY
-          curl --fail --location --proto '=https' --tlsv1.2 \
-            --connect-timeout 15 --max-time 120 \
-            "$(cat build/glib-qualification/downloads/source-url.txt)" \
-            -o build/glib-qualification/downloads/source.tar.xz
-          sha256sum --check --strict build/glib-qualification/downloads/source.sha256
+          for library in glib cairo; do
+            curl --fail --location --proto '=https' --tlsv1.2 \
+              --connect-timeout 15 --max-time 60 \
+              "$(cat "build/glib-qualification/downloads/${library}-url.txt")" \
+              -o "build/glib-qualification/downloads/${library}.tar.xz"
+            sha256sum --check --strict "build/glib-qualification/downloads/${library}.sha256"
+          done
           git rev-parse HEAD > build/glib-qualification/provenance/source-commit.txt
           git rev-parse 'HEAD^{tree}' > build/glib-qualification/provenance/source-tree.txt
           printf '%s\n' "${SDK_IMAGE}" > build/glib-qualification/provenance/sdk-image.txt
@@ -108,9 +103,15 @@ jobs:
             --pids-limit 512 --ulimit nofile=4096:4096 --cap-drop ALL \
             --security-opt no-new-privileges --env HOME=/tmp/glib-home \
             --workdir /tmp/qualification/source "${SDK_IMAGE}" \
-            python3 windows/qualify-glib-tls.py --library "${LIBRARY}" \
-            --source-archive /tmp/qualification/downloads/source.tar.xz \
-            --work-dir /tmp/qualification/work --output /tmp/qualification/bundle)
+            sh -eu -c '
+              python3 windows/qualify-glib-tls.py --library glib \
+                --source-archive /tmp/qualification/downloads/glib.tar.xz \
+                --work-dir /tmp/qualification/work/glib --output /tmp/qualification/bundle/glib
+              python3 windows/qualify-glib-tls.py --library cairo \
+                --source-archive /tmp/qualification/downloads/cairo.tar.xz \
+                --work-dir /tmp/qualification/work/cairo --output /tmp/qualification/bundle/cairo \
+                --glib-bundle /tmp/qualification/bundle/glib
+            ')
           cleanup() { docker rm --force "${worker}" >/dev/null; }
           trap cleanup EXIT
           # Preserve the fixed worker UID without mounting the runner workspace.
@@ -127,11 +128,13 @@ jobs:
             exit "${status}"
           fi
           docker cp "${worker}:/tmp/qualification/bundle" build/glib-native-bundle
-          cp -R build/glib-qualification/provenance build/glib-native-bundle/provenance
-          cp windows/qualify-glib-tls.py windows/run-glib-tls-qualification.ps1 \
-            build/glib-native-bundle/provenance/
-          cp build/glib-qualification/downloads/source.tar.xz \
-            build/glib-native-bundle/provenance/
+          for library in glib cairo; do
+            cp -R build/glib-qualification/provenance "build/glib-native-bundle/${library}/provenance"
+            cp windows/qualify-glib-tls.py windows/run-glib-tls-qualification.ps1 \
+              "build/glib-native-bundle/${library}/provenance/"
+            cp "build/glib-qualification/downloads/${library}.tar.xz" \
+              "build/glib-native-bundle/${library}/provenance/"
+          done
           # Bound artifact size and reject links before uploading executable input.
           python3 - <<'PY'
           from pathlib import Path
@@ -141,18 +144,19 @@ jobs:
               raise SystemExit('Native bundle contains a link')
           if sum(item.stat().st_size for item in files if item.is_file()) > 100 * 1024 * 1024:
               raise SystemExit('Native bundle exceeds 100 MiB')
-          for lane in ('candidate', 'original', 'relinked'):
-              if not (root / lane).is_dir():
-                  raise SystemExit(f'Missing qualification lane: {lane}')
-          for name in ('qualification.json', 'run-glib-tls-qualification.ps1'):
-              if not (root / name).is_file():
-                  raise SystemExit(f'Missing qualification artifact: {name}')
+          for library in ('glib', 'cairo'):
+              for lane in ('candidate', 'original', 'relinked'):
+                  if not (root / library / lane).is_dir():
+                      raise SystemExit(f'Missing qualification lane: {library}/{lane}')
+              for name in ('qualification.json', 'run-glib-tls-qualification.ps1'):
+                  if not (root / library / name).is_file():
+                      raise SystemExit(f'Missing qualification artifact: {library}/{name}')
           PY
 
       - name: Upload bounded native library bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: windows-${{ matrix.library }}-tls-native-bundle
+          name: windows-glib-cairo-tls-native-bundle
           path: build/glib-native-bundle
           if-no-files-found: error
           retention-days: 3
@@ -161,7 +165,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: windows-${{ matrix.library }}-tls-cross-build-evidence
+          name: windows-glib-cairo-tls-cross-build-evidence
           path: |
             build/glib-cross-build.log
             build/glib-qualification/provenance
@@ -175,17 +179,11 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 5
     steps:
-      - name: Download scoped native GLib bundle
+      - name: Download scoped native GLib and Cairo bundles
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: windows-glib-tls-native-bundle
-          path: build/glib-native-bundle/glib
-
-      - name: Download scoped native Cairo bundle
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: windows-cairo-tls-native-bundle
-          path: build/glib-native-bundle/cairo
+          name: windows-glib-cairo-tls-native-bundle
+          path: build/glib-native-bundle
 
       - name: Require native TLS lifecycle and negative controls
         shell: pwsh
