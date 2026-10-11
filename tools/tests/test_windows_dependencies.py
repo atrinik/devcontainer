@@ -1,0 +1,152 @@
+# SPDX-License-Identifier: MIT
+# Copyright 2026 The Atrinik Project
+import importlib.util
+import io
+import json
+from pathlib import Path
+import tarfile
+import tempfile
+import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
+
+ROOT = Path(__file__).resolve().parents[2]
+SPEC = importlib.util.spec_from_file_location("windows_dependencies", ROOT / "windows/build-dependencies.py")
+BUILDER = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(BUILDER)
+
+
+class WindowsDependenciesTests(unittest.TestCase):
+    def test_locked_sources_are_ordered_and_complete(self):
+        lock = BUILDER.load_lock(ROOT / "windows/dependencies.json")
+        entries = {item["name"]: item for item in lock["dependencies"]}
+        for name, version in (("curl", "8.21.0"), ("c-ares", "1.34.6"), ("openssl", "3.5.5")):
+            self.assertEqual(entries[name]["version"], version)
+        self.assertTrue({"sdl3", "sdl3-image", "sdl3-ttf", "libxml2", "miniupnpc"}.issubset(entries))
+        options = entries["curl"]["options"]
+        self.assertIn("--disable-threaded-resolver", options)
+        self.assertIn("--enable-ares={prefix}", options)
+        self.assertIn("--with-openssl={prefix}", options)
+        for feature in ("--with-nghttp2", "--with-libidn2", "--with-libpsl", "--with-brotli", "--with-zstd"):
+            self.assertIn(feature, options)
+
+    def test_compiler_environments_are_llvm_only(self):
+        for host in (True, False):
+            env = BUILDER.environment(Path("/target"), Path("/host"), Path("/llvm"), host)
+            self.assertEqual(env["CC"], "clang" if host else "x86_64-w64-mingw32-clang")
+            self.assertEqual(env["CXX"], "clang++" if host else "x86_64-w64-mingw32-clang++")
+            self.assertEqual(env["AR"], "llvm-ar")
+            self.assertEqual(env["LD"], "ld.lld")
+            self.assertTrue(env["PATH"].startswith("/llvm/bin:/host/bin:"))
+            self.assertEqual(env["PKG_CONFIG_PATH"], "")
+
+    def test_target_cmake_is_fenced_to_toolchain(self):
+        commands = BUILDER.commands({"build_system": "cmake"}, Path("/source"), Path("/build"), Path("/target"), 3)
+        self.assertIn("-DCMAKE_TOOLCHAIN_FILE=/target/share/cmake/llvm-mingw.cmake", commands[0])
+        self.assertEqual(commands[1][-2:], ["--parallel", "3"])
+        host = BUILDER.commands({"build_system": "cmake"}, Path("/source"), Path("/build"), Path("/host"), 3, True)
+        self.assertIn("-DCMAKE_C_COMPILER=clang", host[0])
+        self.assertFalse(any("TOOLCHAIN_FILE" in arg for arg in host[0]))
+
+    def test_checksum_mismatch_prevents_extraction(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            (cache / "source.tar.gz").write_bytes(b"untrusted")
+            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                BUILDER.verified_archive({"name": "bad", "archive": "source.tar.gz", "sha256": "0" * 64}, cache)
+
+    def test_archive_traversal_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "source.tar"
+            with tarfile.open(archive, "w") as tar:
+                entry = tarfile.TarInfo("../outside")
+                entry.size = 1
+                tar.addfile(entry, io.BytesIO(b"x"))
+            with self.assertRaisesRegex(ValueError, "unsafe"):
+                BUILDER.extract(archive, root / "source")
+            self.assertFalse((root / "outside").exists())
+
+    def test_host_cross_bootstrap_and_feature_cycle(self):
+        lock = BUILDER.load_lock(ROOT / "windows/dependencies.json")
+        entries = {item["name"]: item for item in lock["dependencies"]}
+        self.assertTrue(entries["host-icu4c"]["host"])
+        self.assertIn("host-icu4c", entries["icu4c"]["depends"])
+        self.assertIn("--with-cross-build={work}/build/host-icu4c", entries["icu4c"]["options"])
+        self.assertIn("freetype-bootstrap", entries["harfbuzz"]["depends"])
+        self.assertIn("harfbuzz", entries["freetype"]["depends"])
+        for feature in ("-Dcairo=enabled", "-Dglib=enabled", "-Dicu=enabled", "-Dfreetype=enabled"):
+            self.assertIn(feature, entries["harfbuzz"]["options"])
+        self.assertIn("-DSDLIMAGE_TIF=OFF", entries["sdl3-image"]["options"])
+        for item in lock["dependencies"]:
+            self.assertNotIn("gcc", " ".join(item.get("environment", {}).values()))
+            self.assertNotIn("-lstdc++", " ".join(item.get("options", [])))
+
+    def test_pe_verification_rejects_legacy_runtime(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            prefix = Path(temporary)
+            (prefix / "bin").mkdir()
+            for name in ("SDL3.dll", "SDL3_image.dll", "SDL3_ttf.dll"):
+                (prefix / "bin" / name).touch()
+            notice = prefix / "share/licenses/test/COPYING"
+            notice.parent.mkdir(parents=True)
+            notice.write_text("test notice")
+            receipt = {"schema_version": 1,
+                "dlls": {name: {"sha256": BUILDER.file_hash(prefix / "bin" / name), "owner": "test", "source_sha256": "a" * 64}
+                         for name in ("SDL3.dll", "SDL3_image.dll", "SDL3_ttf.dll")},
+                "notices": {"test": {"test/COPYING": BUILDER.file_hash(notice)}}}
+            BUILDER.ownership_path(prefix).parent.mkdir(parents=True)
+            BUILDER.save_ownership(prefix, receipt)
+            lock = {"dependencies": [{"name": "test", "sha256": "a" * 64}], "runtime_providers": {}}
+            output = "Machine: IMAGE_FILE_MACHINE_AMD64\n  Name: ucrtbase.dll\n"
+            with patch.object(BUILDER.subprocess, "run", return_value=SimpleNamespace(stdout=output)):
+                self.assertEqual(len(BUILDER.verify(prefix, Path("/llvm"), lock)["dlls"]), 3)
+            with patch.object(BUILDER.subprocess, "run", return_value=SimpleNamespace(stdout=output + "  Name: missing-provider.dll\n")):
+                with self.assertRaisesRegex(ValueError, "unresolved"):
+                    BUILDER.verify(prefix, Path("/llvm"), lock)
+            for bad in ("msvcrt.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libssp-0.dll"):
+                with patch.object(BUILDER.subprocess, "run", return_value=SimpleNamespace(stdout=output + "  Name: " + bad + "\n")):
+                    with self.assertRaisesRegex(ValueError, "runtime"):
+                        BUILDER.verify(prefix, Path("/llvm"), lock)
+
+    def test_runtime_ownership_detects_bytes_and_notice_mutation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            prefix = Path(temporary)
+            dll = prefix / "bin/test.dll"
+            dll.parent.mkdir()
+            dll.write_bytes(b"built dependency")
+            notice = prefix / "share/licenses/test/COPYING"
+            notice.parent.mkdir(parents=True)
+            notice.write_text("upstream notice")
+            receipt = {"schema_version": 1, "dlls": {dll.name: {"sha256": BUILDER.file_hash(dll)}},
+                       "notices": {"test": {"test/COPYING": BUILDER.file_hash(notice)}}}
+            BUILDER.assert_receipt(prefix, receipt)
+            (prefix / "bin/unowned.dll").touch()
+            with self.assertRaisesRegex(ValueError, "unowned"):
+                BUILDER.assert_receipt(prefix, receipt)
+            (prefix / "bin/unowned.dll").unlink()
+            notice.write_text("replacement notice")
+            with self.assertRaisesRegex(ValueError, "notice"):
+                BUILDER.assert_receipt(prefix, receipt)
+            notice.write_text("upstream notice")
+            dll.write_bytes(b"replacement binary")
+            with self.assertRaisesRegex(ValueError, "changed"):
+                BUILDER.assert_receipt(prefix, receipt)
+
+    def test_invalid_graph_and_pins_fail_closed(self):
+        item = {"name": "curl", "archive": "curl.tar.gz", "sha256": "a" * 64, "url": "https://example.test/source", "licenses": ["COPYING"],
+                "license": "curl", "build_system": "autotools", "depends": ["missing"]}
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "lock.json"
+            path.write_text(json.dumps({"schema_version": 1, "dependencies": [item]}))
+            with self.assertRaisesRegex(ValueError, "precede"):
+                BUILDER.load_lock(path)
+            item["depends"] = []
+            item["sha256"] = "mutable"
+            path.write_text(json.dumps({"schema_version": 1, "dependencies": [item]}))
+            with self.assertRaisesRegex(ValueError, "SHA-256"):
+                BUILDER.load_lock(path)
+
+
+if __name__ == "__main__":
+    unittest.main()

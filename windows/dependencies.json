@@ -1,0 +1,1306 @@
+{
+  "schema_version": 1,
+  "recipe_origin": {
+    "repository": "https://github.com/mxe/mxe",
+    "commit": "8784776b145a8ddd350ce32aa0908ac10977060c"
+  },
+  "dependencies": [
+    {
+      "name": "mxe-recipes",
+      "version": "8784776b145a8ddd350ce32aa0908ac10977060c",
+      "url": "https://codeload.github.com/mxe/mxe/tar.gz/8784776b145a8ddd350ce32aa0908ac10977060c",
+      "archive": "mxe-8784776b145a8ddd350ce32aa0908ac10977060c.tar.gz",
+      "sha256": "1efcc4e8b4484d2335badbe49273d304a241e6058dfda9aaa3db50f5ba05d668",
+      "license": "MIT",
+      "licenses": [
+        "LICENSE.md"
+      ],
+      "build_system": "custom",
+      "commands": [],
+      "depends": [],
+      "host": true
+    },
+    {
+      "name": "meson",
+      "version": "1.11.2",
+      "url": "https://github.com/mesonbuild/meson/releases/download/1.11.2/meson-1.11.2.tar.gz",
+      "archive": "meson-1.11.2.tar.gz",
+      "sha256": "698feae069cef3ecd4d7aaf281d7df359bdfcf555a9a1564383d3b913fa8a736",
+      "license": "Apache-2.0",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "custom",
+      "depends": [],
+      "options": [],
+      "host": true,
+      "commands": [
+        [
+          "install",
+          "-d",
+          "{prefix}/bin"
+        ],
+        [
+          "python3",
+          "{source}/packaging/create_zipapp.py",
+          "--outfile",
+          "{prefix}/bin/meson",
+          "--interpreter",
+          "/usr/bin/python3",
+          "{source}"
+        ]
+      ]
+    },
+    {
+      "name": "zlib",
+      "version": "1.3.2",
+      "url": "https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.xz",
+      "archive": "zlib-1.3.2.tar.xz",
+      "sha256": "d7a0654783a4da529d1bb793b7ad9c3318020af77667bcae35f95d0e42a792f3",
+      "license": "Zlib",
+      "licenses": [
+        "LICENSE"
+      ],
+      "build_system": "cmake",
+      "depends": [
+        "mxe-recipes"
+      ],
+      "options": [
+        "-DZLIB_BUILD_TESTING=OFF",
+        "-DZLIB_BUILD_STATIC=OFF",
+        "-DZLIB_BUILD_SHARED=ON"
+      ],
+      "patches": [
+        {
+          "file": "src/zlib-1-fixes.patch",
+          "sha256": "eaee296dc1e1422301047025eeee9da56fb9be865006a4ab3b6bef86ad11943d"
+        }
+      ]
+    },
+    {
+      "name": "libiconv",
+      "version": "1.19",
+      "url": "https://ftp.gnu.org/gnu/libiconv/libiconv-1.19.tar.gz",
+      "archive": "libiconv-1.19.tar.gz",
+      "sha256": "88dd96a8c0464eca144fc791ae60cd31cd8ee78321e67397e25fc095c4a19aa6",
+      "license": "LGPL-2.1-or-later AND GPL-3.0-or-later",
+      "licenses": [
+        "COPYING",
+        "COPYING.LIB"
+      ],
+      "build_system": "autotools",
+      "depends": [],
+      "options": [
+        "--disable-nls"
+      ]
+    },
+    {
+      "name": "libunistring",
+      "version": "1.4.2",
+      "url": "https://ftp.gnu.org/gnu/libunistring/libunistring-1.4.2.tar.xz",
+      "archive": "libunistring-1.4.2.tar.xz",
+      "sha256": "5b46e74377ed7409c5b75e7a96f95377b095623b689d8522620927964a41499c",
+      "license": "LGPL-3.0-or-later OR GPL-2.0-or-later",
+      "licenses": [
+        "COPYING",
+        "COPYING.LIB"
+      ],
+      "build_system": "autotools",
+      "depends": [
+        "libiconv"
+      ],
+      "options": [
+        "--enable-threads=win32",
+        "--with-libiconv-prefix={prefix}"
+      ]
+    },
+    {
+      "name": "libidn2",
+      "version": "2.3.8",
+      "url": "https://ftp.gnu.org/gnu/libidn/libidn2-2.3.8.tar.gz",
+      "archive": "libidn2-2.3.8.tar.gz",
+      "sha256": "f557911bf6171621e1f72ff35f5b1825bb35b52ed45325dcdee931e5d3c0787a",
+      "license": "(GPL-2.0-or-later OR LGPL-3.0-or-later) AND GPL-3.0-or-later",
+      "licenses": [
+        "COPYING",
+        "COPYING.LESSERv3",
+        "COPYINGv2",
+        "COPYING.unicode"
+      ],
+      "build_system": "autotools",
+      "depends": [
+        "libiconv",
+        "libunistring"
+      ],
+      "options": [
+        "--disable-doc",
+        "--with-libiconv-prefix={prefix}",
+        "--with-libunistring-prefix={prefix}"
+      ]
+    },
+    {
+      "name": "xz",
+      "version": "5.8.3",
+      "url": "https://github.com/tukaani-project/xz/releases/download/v5.8.3/xz-5.8.3.tar.gz",
+      "archive": "xz-5.8.3.tar.gz",
+      "sha256": "3d3a1b973af218114f4f889bbaa2f4c037deaae0c8e815eec381c3d546b974a0",
+      "license": "0BSD AND LGPL-2.1-or-later AND GPL-2.0-or-later",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "autotools",
+      "depends": [],
+      "options": [
+        "--disable-threads",
+        "--disable-nls"
+      ],
+      "make_subdir": "src/liblzma"
+    },
+    {
+      "name": "libxml2",
+      "version": "2.15.3",
+      "url": "https://download.gnome.org/sources/libxml2/2.15/libxml2-2.15.3.tar.xz",
+      "archive": "libxml2-2.15.3.tar.xz",
+      "sha256": "78262a6e7ac170d6528ebfe2efccdf220191a5af6a6cd61ea4a9a9a5042c7a07",
+      "license": "MIT",
+      "licenses": [
+        "Copyright"
+      ],
+      "build_system": "autotools",
+      "depends": [
+        "mxe-recipes",
+        "libiconv",
+        "xz",
+        "zlib"
+      ],
+      "options": [
+        "--with-zlib={prefix}",
+        "--without-debug",
+        "--without-python",
+        "--without-threads"
+      ],
+      "patches": [
+        {
+          "file": "src/libxml2-1-fixes.patch",
+          "sha256": "068c1d5cb3f4a7c1453925f71753f6fe5a32df307e327e3732303e27555ad50a"
+        }
+      ],
+      "make_options": [
+        "bin_PROGRAMS=",
+        "sbin_PROGRAMS=",
+        "noinst_PROGRAMS=",
+        "man_MANS="
+      ],
+      "recipe_notes": "The old xml2-config.in uname substitution is already obsolete in 2.15.3: pinned source has no uname invocation."
+    },
+    {
+      "name": "brotli",
+      "version": "1.2.0",
+      "url": "https://github.com/google/brotli/archive/refs/tags/v1.2.0.tar.gz",
+      "archive": "brotli-1.2.0.tar.gz",
+      "sha256": "816c96e8e8f193b40151dad7e8ff37b1221d019dbcb9c35cd3fadbfe6477dfec",
+      "license": "MIT",
+      "licenses": [
+        "LICENSE"
+      ],
+      "build_system": "cmake",
+      "depends": [],
+      "options": [
+        "-DBROTLI_DISABLE_TESTS=ON"
+      ]
+    },
+    {
+      "name": "zstd",
+      "version": "1.5.7",
+      "url": "https://github.com/facebook/zstd/archive/refs/tags/v1.5.7.tar.gz",
+      "archive": "zstd-1.5.7.tar.gz",
+      "sha256": "37d7284556b20954e56e1ca85b80226768902e2edabd3b649e9e72c0c9012ee3",
+      "license": "BSD-3-Clause OR GPL-2.0-only",
+      "licenses": [
+        "LICENSE",
+        "COPYING"
+      ],
+      "build_system": "cmake",
+      "depends": [],
+      "options": [
+        "-DZSTD_BUILD_STATIC=OFF",
+        "-DZSTD_BUILD_SHARED=ON",
+        "-DZSTD_BUILD_PROGRAMS=OFF",
+        "-DZSTD_BUILD_TESTS=OFF"
+      ],
+      "source_subdir": "build/cmake"
+    },
+    {
+      "name": "openssl",
+      "version": "3.5.5",
+      "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.5/openssl-3.5.5.tar.gz",
+      "archive": "openssl-3.5.5.tar.gz",
+      "sha256": "b28c91532a8b65a1f983b4c28b7488174e4a01008e29ce8e69bd789f28bc2a89",
+      "license": "Apache-2.0",
+      "licenses": [
+        "LICENSE.txt"
+      ],
+      "build_system": "openssl",
+      "depends": [
+        "zlib"
+      ],
+      "options": [
+        "zlib"
+      ],
+      "environment": {
+        "CPPFLAGS": "-I{prefix}/include",
+        "LDFLAGS": "-L{prefix}/lib"
+      }
+    },
+    {
+      "name": "c-ares",
+      "version": "1.34.6",
+      "url": "https://github.com/c-ares/c-ares/releases/download/v1.34.6/c-ares-1.34.6.tar.gz",
+      "archive": "c-ares-1.34.6.tar.gz",
+      "sha256": "912dd7cc3b3e8a79c52fd7fb9c0f4ecf0aaa73e45efda880266a2d6e26b84ef5",
+      "license": "MIT",
+      "licenses": [
+        "LICENSE.md"
+      ],
+      "build_system": "autotools",
+      "depends": [],
+      "options": []
+    },
+    {
+      "name": "libssh2",
+      "version": "1.11.1",
+      "url": "https://libssh2.org/download/libssh2-1.11.1.tar.gz",
+      "archive": "libssh2-1.11.1.tar.gz",
+      "sha256": "d9ec76cbe34db98eec3539fe2c899d26b0c837cb3eb466a56b0f109cabf658f7",
+      "license": "BSD-3-Clause",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "autotools",
+      "depends": [
+        "zlib"
+      ],
+      "options": [
+        "--disable-examples-build",
+        "--disable-rpath",
+        "--with-crypto=wincng"
+      ]
+    },
+    {
+      "name": "nghttp2",
+      "version": "1.70.0",
+      "url": "https://github.com/nghttp2/nghttp2/releases/download/v1.70.0/nghttp2-1.70.0.tar.gz",
+      "archive": "nghttp2-1.70.0.tar.gz",
+      "sha256": "aa317e2cf9dca6afa0aed68f8fad6ff303ec6982e25a78c75c0b65e2b9b3ded5",
+      "license": "MIT",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "autotools",
+      "depends": [],
+      "options": [
+        "--enable-lib-only",
+        "--without-jemalloc",
+        "--without-libxml2"
+      ]
+    },
+    {
+      "name": "jpeg",
+      "version": "10",
+      "url": "https://www.ijg.org/files/jpegsrc.v10.tar.gz",
+      "archive": "jpegsrc.v10.tar.gz",
+      "sha256": "8b9eaa13242690ebd03e1728ab1edf97a81a78ed6e83624d493655f31ac95ab5",
+      "license": "IJG",
+      "licenses": [
+        "README"
+      ],
+      "build_system": "autotools",
+      "depends": [
+        "mxe-recipes"
+      ],
+      "options": [],
+      "patches": [
+        {
+          "file": "src/jpeg-1-fixes.patch",
+          "sha256": "a049ce4fd819822f99c7bb5f74f933f2dce8746c8f8ccc3c98b8ab767946b035"
+        }
+      ],
+      "make_options": [
+        "bin_PROGRAMS=",
+        "sbin_PROGRAMS=",
+        "noinst_PROGRAMS=",
+        "man_MANS="
+      ]
+    },
+    {
+      "name": "libpng",
+      "version": "1.6.58",
+      "url": "https://downloads.sourceforge.net/project/libpng/libpng16/1.6.58/libpng-1.6.58.tar.xz",
+      "archive": "libpng-1.6.58.tar.xz",
+      "sha256": "28eb403f51f0f7405249132cecfe82ea5c0ef97f1b32c5a65828814ae0d34775",
+      "license": "Libpng",
+      "licenses": [
+        "LICENSE"
+      ],
+      "build_system": "cmake",
+      "depends": [
+        "zlib"
+      ],
+      "options": [
+        "-DPNG_SHARED=ON",
+        "-DPNG_STATIC=OFF",
+        "-DPNG_TESTS=OFF",
+        "-DPNG_TOOLS=OFF"
+      ]
+    },
+    {
+      "name": "libwebp",
+      "version": "1.6.0",
+      "url": "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz",
+      "archive": "libwebp-1.6.0.tar.gz",
+      "sha256": "e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564",
+      "license": "BSD-3-Clause",
+      "licenses": [
+        "COPYING",
+        "PATENTS"
+      ],
+      "build_system": "autotools",
+      "depends": [],
+      "options": [
+        "--enable-everything"
+      ],
+      "make_options": [
+        "bin_PROGRAMS=",
+        "sbin_PROGRAMS=",
+        "noinst_PROGRAMS=",
+        "man_MANS="
+      ]
+    },
+    {
+      "name": "bzip2",
+      "version": "1.0.8",
+      "url": "https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz",
+      "archive": "bzip2-1.0.8.tar.gz",
+      "sha256": "ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269",
+      "license": "bzip2-1.0.6",
+      "licenses": [
+        "LICENSE"
+      ],
+      "build_system": "custom",
+      "depends": [
+        "mxe-recipes"
+      ],
+      "options": [],
+      "commands": [
+        [
+          "make",
+          "-C",
+          "{source}",
+          "-j{jobs}",
+          "libbz2.a",
+          "CC=x86_64-w64-mingw32-clang",
+          "AR=llvm-ar",
+          "RANLIB=llvm-ranlib"
+        ],
+        [
+          "install",
+          "-d",
+          "{prefix}/bin",
+          "{prefix}/lib",
+          "{prefix}/include"
+        ],
+        [
+          "install",
+          "-m644",
+          "{source}/bzlib.h",
+          "{prefix}/include/bzlib.h"
+        ],
+        [
+          "x86_64-w64-mingw32-clang",
+          "{source}/blocksort.o",
+          "{source}/huffman.o",
+          "{source}/crctable.o",
+          "{source}/randtable.o",
+          "{source}/compress.o",
+          "{source}/decompress.o",
+          "{source}/bzlib.o",
+          "-shared",
+          "-o",
+          "{prefix}/bin/libbz2.dll",
+          "-Wl,--out-implib,{prefix}/lib/libbz2.dll.a"
+        ]
+      ],
+      "patches": [
+        {
+          "file": "src/bzip2-1-fixes.patch",
+          "sha256": "c72246b123edffc187e2a4b505ab01abec000f40278d18fc600837fe9fcb2adc"
+        }
+      ]
+    },
+    {
+      "name": "libsamplerate",
+      "version": "0.1.9",
+      "url": "https://distfiles.macports.org/libsamplerate/libsamplerate-0.1.9.tar.gz",
+      "archive": "libsamplerate-0.1.9.tar.gz",
+      "sha256": "0a7eb168e2f21353fb6d84da152e4512126f7dc48ccb0be80578c565413444c1",
+      "license": "BSD-2-Clause",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "autotools",
+      "depends": [],
+      "options": [
+        "--disable-fftw",
+        "--disable-sndfile"
+      ],
+      "make_options": [
+        "bin_PROGRAMS=",
+        "sbin_PROGRAMS=",
+        "noinst_PROGRAMS="
+      ],
+      "upstream_url": "https://www.mega-nerd.com/SRC/libsamplerate-0.1.9.tar.gz"
+    },
+    {
+      "name": "libffi",
+      "version": "3.7.1",
+      "url": "https://github.com/libffi/libffi/releases/download/v3.7.1/libffi-3.7.1.tar.gz",
+      "archive": "libffi-3.7.1.tar.gz",
+      "sha256": "d5e9a6638ddbd2513ddb54518eb67e4bbe6fa707bcc01c10f6212f0a088d819d",
+      "license": "MIT",
+      "licenses": [
+        "LICENSE"
+      ],
+      "build_system": "autotools",
+      "depends": [],
+      "options": []
+    },
+    {
+      "name": "pcre2",
+      "version": "10.47",
+      "url": "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.47/pcre2-10.47.tar.bz2",
+      "archive": "pcre2-10.47.tar.bz2",
+      "sha256": "47fe8c99461250d42f89e6e8fdaeba9da057855d06eb7fc08d9ca03fd08d7bc7",
+      "license": "BSD-3-Clause",
+      "licenses": [
+        "LICENCE.md"
+      ],
+      "build_system": "autotools",
+      "depends": [],
+      "options": [
+        "--enable-pcre2-16",
+        "--enable-utf",
+        "--enable-unicode-properties",
+        "--disable-pcre2grep-libz",
+        "--disable-pcre2grep-libbz2",
+        "--disable-pcre2test-libreadline"
+      ]
+    },
+    {
+      "name": "expat",
+      "version": "2.8.2",
+      "url": "https://github.com/libexpat/libexpat/releases/download/R_2_8_2/expat-2.8.2.tar.bz2",
+      "archive": "expat-2.8.2.tar.bz2",
+      "sha256": "69e7f52417d85b1c2b7fe855e176eec55d0b2d7d92d691372d833a1c7df7923b",
+      "license": "MIT",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "cmake",
+      "depends": [],
+      "options": [
+        "-DEXPAT_BUILD_DOCS=OFF",
+        "-DEXPAT_BUILD_TESTS=OFF",
+        "-DEXPAT_BUILD_EXAMPLES=OFF",
+        "-DEXPAT_BUILD_TOOLS=OFF"
+      ]
+    },
+    {
+      "name": "dbus",
+      "version": "1.15.6",
+      "url": "https://dbus.freedesktop.org/releases/dbus/dbus-1.15.6.tar.xz",
+      "archive": "dbus-1.15.6.tar.xz",
+      "sha256": "f97f5845f9c4a5a1fb3df67dfa9e16b5a3fd545d348d6dc850cb7ccc9942bd8c",
+      "license": "AFL-2.1 OR GPL-2.0-or-later",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "autotools",
+      "depends": [
+        "mxe-recipes",
+        "expat"
+      ],
+      "options": [
+        "--disable-tests",
+        "--disable-verbose-mode",
+        "--disable-asserts",
+        "--disable-maintainer-mode",
+        "--disable-silent-rules",
+        "--disable-launchd",
+        "--disable-doxygen-docs",
+        "--disable-xml-docs"
+      ],
+      "environment": {
+        "CFLAGS": "-O2 -DPROCESS_QUERY_LIMITED_INFORMATION=0x1000"
+      },
+      "patches": [
+        {
+          "file": "src/dbus-1-fixes.patch",
+          "sha256": "16178004221e256d65caed535b31dec3fbeb9185d6ef0a51f526165ff1225da6"
+        }
+      ]
+    },
+    {
+      "name": "host-zlib",
+      "version": "1.3.2",
+      "url": "https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.xz",
+      "archive": "zlib-1.3.2.tar.xz",
+      "sha256": "d7a0654783a4da529d1bb793b7ad9c3318020af77667bcae35f95d0e42a792f3",
+      "license": "Zlib",
+      "licenses": [
+        "LICENSE"
+      ],
+      "build_system": "cmake",
+      "depends": [
+        "mxe-recipes"
+      ],
+      "options": [
+        "-DZLIB_BUILD_TESTING=OFF",
+        "-DZLIB_BUILD_STATIC=OFF",
+        "-DZLIB_BUILD_SHARED=ON"
+      ],
+      "host": true,
+      "patches": [
+        {
+          "file": "src/zlib-1-fixes.patch",
+          "sha256": "eaee296dc1e1422301047025eeee9da56fb9be865006a4ab3b6bef86ad11943d"
+        }
+      ]
+    },
+    {
+      "name": "host-libiconv",
+      "version": "1.19",
+      "url": "https://ftp.gnu.org/gnu/libiconv/libiconv-1.19.tar.gz",
+      "archive": "libiconv-1.19.tar.gz",
+      "sha256": "88dd96a8c0464eca144fc791ae60cd31cd8ee78321e67397e25fc095c4a19aa6",
+      "license": "LGPL-2.1-or-later AND GPL-3.0-or-later",
+      "licenses": [
+        "COPYING",
+        "COPYING.LIB"
+      ],
+      "build_system": "autotools",
+      "depends": [],
+      "options": [
+        "--disable-nls"
+      ],
+      "host": true
+    },
+    {
+      "name": "host-libffi",
+      "version": "3.7.1",
+      "url": "https://github.com/libffi/libffi/releases/download/v3.7.1/libffi-3.7.1.tar.gz",
+      "archive": "libffi-3.7.1.tar.gz",
+      "sha256": "d5e9a6638ddbd2513ddb54518eb67e4bbe6fa707bcc01c10f6212f0a088d819d",
+      "license": "MIT",
+      "licenses": [
+        "LICENSE"
+      ],
+      "build_system": "autotools",
+      "depends": [],
+      "options": [],
+      "host": true
+    },
+    {
+      "name": "host-pcre2",
+      "version": "10.47",
+      "url": "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.47/pcre2-10.47.tar.bz2",
+      "archive": "pcre2-10.47.tar.bz2",
+      "sha256": "47fe8c99461250d42f89e6e8fdaeba9da057855d06eb7fc08d9ca03fd08d7bc7",
+      "license": "BSD-3-Clause",
+      "licenses": [
+        "LICENCE.md"
+      ],
+      "build_system": "autotools",
+      "depends": [],
+      "options": [
+        "--enable-pcre2-16",
+        "--enable-utf",
+        "--enable-unicode-properties",
+        "--disable-pcre2grep-libz",
+        "--disable-pcre2grep-libbz2",
+        "--disable-pcre2test-libreadline"
+      ],
+      "host": true
+    },
+    {
+      "name": "host-gettext",
+      "version": "1.0",
+      "url": "https://ftp.gnu.org/gnu/gettext/gettext-1.0.tar.lz",
+      "archive": "gettext-1.0.tar.lz",
+      "sha256": "d6342cbe1411a2fe7d139bfed80c2d63b1babc92acfedc72501cc105184f61ee",
+      "license": "LGPL-2.1-or-later AND GPL-3.0-or-later",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "autotools",
+      "depends": [
+        "host-libiconv"
+      ],
+      "options": [
+        "--disable-java",
+        "--disable-csharp",
+        "--without-emacs",
+        "--disable-openmp"
+      ],
+      "host": true
+    },
+    {
+      "name": "gettext",
+      "version": "1.0",
+      "url": "https://ftp.gnu.org/gnu/gettext/gettext-1.0.tar.lz",
+      "archive": "gettext-1.0.tar.lz",
+      "sha256": "d6342cbe1411a2fe7d139bfed80c2d63b1babc92acfedc72501cc105184f61ee",
+      "license": "LGPL-2.1-or-later",
+      "licenses": [
+        "COPYING",
+        "gettext-runtime/intl/COPYING.LIB"
+      ],
+      "build_system": "autotools",
+      "depends": [
+        "libiconv",
+        "host-gettext"
+      ],
+      "options": [
+        "--enable-threads=win32",
+        "--without-libexpat-prefix",
+        "--without-libxml2-prefix"
+      ],
+      "source_subdir": "gettext-runtime",
+      "make_subdir": "intl"
+    },
+    {
+      "name": "host-glib",
+      "version": "2.89.3",
+      "url": "https://download.gnome.org/sources/glib/2.89/glib-2.89.3.tar.xz",
+      "archive": "glib-2.89.3.tar.xz",
+      "sha256": "09fd1e99f991067749ad66090e482ec4bd6514ad53abb4e9fbbdc2a4d2753532",
+      "license": "LGPL-2.1-or-later",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "meson",
+      "depends": [
+        "mxe-recipes",
+        "meson",
+        "host-zlib",
+        "host-libffi",
+        "host-libiconv",
+        "host-gettext",
+        "host-pcre2"
+      ],
+      "options": [
+        "-Dtests=false",
+        "-Dintrospection=disabled",
+        "-Ddocumentation=false"
+      ],
+      "host": true,
+      "patches": [
+        {
+          "file": "src/glib-1-fixes.patch",
+          "sha256": "644a94dd812484da0405d0d9ce5270ddb4c56c86446ca3cfa386a25d4b7c2998"
+        }
+      ]
+    },
+    {
+      "name": "glib",
+      "version": "2.89.3",
+      "url": "https://download.gnome.org/sources/glib/2.89/glib-2.89.3.tar.xz",
+      "archive": "glib-2.89.3.tar.xz",
+      "sha256": "09fd1e99f991067749ad66090e482ec4bd6514ad53abb4e9fbbdc2a4d2753532",
+      "license": "LGPL-2.1-or-later",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "meson",
+      "depends": [
+        "mxe-recipes",
+        "meson",
+        "host-glib",
+        "dbus",
+        "gettext",
+        "libffi",
+        "libiconv",
+        "pcre2",
+        "zlib"
+      ],
+      "options": [
+        "-Dtests=false",
+        "-Dforce_posix_threads=true",
+        "-Dintrospection=disabled",
+        "-Ddocumentation=false"
+      ],
+      "patches": [
+        {
+          "file": "src/glib-1-fixes.patch",
+          "sha256": "644a94dd812484da0405d0d9ce5270ddb4c56c86446ca3cfa386a25d4b7c2998"
+        }
+      ]
+    },
+    {
+      "name": "freetype-bootstrap",
+      "version": "2.14.3",
+      "url": "https://downloads.sourceforge.net/project/freetype/freetype2/2.14.3/freetype-2.14.3.tar.xz",
+      "archive": "freetype-2.14.3.tar.xz",
+      "sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f",
+      "license": "FTL OR GPL-2.0-only",
+      "licenses": [
+        "docs/FTL.TXT",
+        "docs/GPLv2.TXT"
+      ],
+      "build_system": "autotools",
+      "depends": [
+        "brotli",
+        "bzip2",
+        "libpng",
+        "zlib"
+      ],
+      "options": [
+        "--with-harfbuzz=no",
+        "--enable-freetype-config",
+        "--with-brotli=yes",
+        "--with-bzip2=yes",
+        "--with-png=yes",
+        "--with-zlib=yes"
+      ]
+    },
+    {
+      "name": "fontconfig",
+      "version": "2.18.2",
+      "url": "https://gitlab.freedesktop.org/fontconfig/fontconfig/-/archive/2.18.2/fontconfig-2.18.2.tar.bz2",
+      "archive": "fontconfig-2.18.2.tar.bz2",
+      "sha256": "34d612edc4a1ed7aa032fc0b9ab7ca52803032f94b1a47e37ee5d49a1db4cbeb",
+      "license": "MIT",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "meson",
+      "depends": [
+        "mxe-recipes",
+        "meson",
+        "expat",
+        "freetype-bootstrap",
+        "gettext",
+        "libiconv"
+      ],
+      "options": [
+        "-Dtests=disabled",
+        "-Ddoc=disabled",
+        "-Diconv=enabled"
+      ],
+      "patches": [
+        {
+          "file": "src/fontconfig-1-fixes.patch",
+          "sha256": "93bed878801d73a5658ee8b6d8318a590a36eb39a5eb3818cf4d6d92fdcae69b"
+        }
+      ]
+    },
+    {
+      "name": "lzo",
+      "version": "2.10",
+      "url": "https://www.oberhumer.com/opensource/lzo/download/lzo-2.10.tar.gz",
+      "archive": "lzo-2.10.tar.gz",
+      "sha256": "c0f892943208266f9b6543b3ae308fab6284c5c90e627931446fb49b4221a072",
+      "license": "GPL-2.0-or-later",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "autotools",
+      "depends": [],
+      "options": [],
+      "make_options": [
+        "bin_PROGRAMS=",
+        "sbin_PROGRAMS=",
+        "noinst_PROGRAMS=",
+        "LDFLAGS=-no-undefined"
+      ]
+    },
+    {
+      "name": "pixman",
+      "version": "0.46.4",
+      "url": "https://cairographics.org/releases/pixman-0.46.4.tar.gz",
+      "archive": "pixman-0.46.4.tar.gz",
+      "sha256": "d09c44ebc3bd5bee7021c79f922fe8fb2fb57f7320f55e97ff9914d2346a591c",
+      "license": "MIT",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "meson",
+      "depends": [
+        "meson",
+        "libpng"
+      ],
+      "options": [
+        "-Dtests=disabled"
+      ]
+    },
+    {
+      "name": "cairo",
+      "version": "1.18.4",
+      "url": "https://cairographics.org/releases/cairo-1.18.4.tar.xz",
+      "archive": "cairo-1.18.4.tar.xz",
+      "sha256": "445ed8208a6e4823de1226a74ca319d3600e83f6369f99b14265006599c32ccb",
+      "license": "LGPL-2.1-only OR MPL-1.1",
+      "licenses": [
+        "COPYING",
+        "COPYING-LGPL-2.1",
+        "COPYING-MPL-1.1"
+      ],
+      "build_system": "meson",
+      "depends": [
+        "mxe-recipes",
+        "meson",
+        "fontconfig",
+        "freetype-bootstrap",
+        "glib",
+        "libpng",
+        "lzo",
+        "pixman",
+        "zlib"
+      ],
+      "options": [
+        "-Dgtk_doc=false",
+        "-Dtests=disabled",
+        "-Dxcb=disabled",
+        "-Dxlib=disabled",
+        "-Dxlib-xcb=disabled",
+        "-Dquartz=disabled",
+        "-Dpng=enabled",
+        "-Dfontconfig=enabled",
+        "-Dfreetype=enabled"
+      ],
+      "patches": [
+        {
+          "file": "src/cairo-1-fixes.patch",
+          "sha256": "58398aa2163b66819ad2f121473e08c740e73f5d39b54a29a832c53e3aca4c8b",
+          "replacements": {
+            "-lstdc++": "-lc++"
+          }
+        }
+      ],
+      "environment": {
+        "CFLAGS": "-O2 -Wno-incompatible-pointer-types"
+      }
+    },
+    {
+      "name": "host-icu4c",
+      "version": "74.2",
+      "url": "https://github.com/unicode-org/icu/releases/download/release-74-2/icu4c-74_2-src.tgz",
+      "archive": "icu4c-74_2-src.tgz",
+      "sha256": "68db082212a96d6f53e35d60f47d38b962e9f9d207a74cfac78029ae8ff5e08c",
+      "license": "Unicode-3.0",
+      "licenses": [
+        "LICENSE"
+      ],
+      "build_system": "autotools",
+      "depends": [
+        "mxe-recipes"
+      ],
+      "options": [
+        "--enable-tests=no",
+        "--enable-samples=no"
+      ],
+      "source_subdir": "source",
+      "host": true,
+      "patches": [
+        {
+          "file": "src/icu4c-1-fixes.patch",
+          "sha256": "ab548d6405004dcc6c867cd373b0e170576220c1034c2732c51deac2b85c348f"
+        }
+      ]
+    },
+    {
+      "name": "icu4c",
+      "version": "74.2",
+      "url": "https://github.com/unicode-org/icu/releases/download/release-74-2/icu4c-74_2-src.tgz",
+      "archive": "icu4c-74_2-src.tgz",
+      "sha256": "68db082212a96d6f53e35d60f47d38b962e9f9d207a74cfac78029ae8ff5e08c",
+      "license": "Unicode-3.0",
+      "licenses": [
+        "LICENSE"
+      ],
+      "build_system": "autotools",
+      "depends": [
+        "mxe-recipes",
+        "host-icu4c"
+      ],
+      "options": [
+        "--with-cross-build={work}/build/host-icu4c",
+        "--enable-icu-config=no",
+        "--enable-tests=no",
+        "--enable-samples=no"
+      ],
+      "source_subdir": "source",
+      "environment": {
+        "CXXFLAGS": "-O2 -std=c++17"
+      },
+      "patches": [
+        {
+          "file": "src/icu4c-1-fixes.patch",
+          "sha256": "ab548d6405004dcc6c867cd373b0e170576220c1034c2732c51deac2b85c348f"
+        }
+      ],
+      "make_options": [
+        "VERBOSE=1",
+        "SO_TARGET_VERSION_SUFFIX="
+      ]
+    },
+    {
+      "name": "harfbuzz",
+      "version": "14.3.0",
+      "url": "https://github.com/harfbuzz/harfbuzz/releases/download/14.3.0/harfbuzz-14.3.0.tar.xz",
+      "archive": "harfbuzz-14.3.0.tar.xz",
+      "sha256": "16070d77cfc4ba1f1e7327e83bf9b3f55898081cabdb94e56a33e04fc8874eae",
+      "license": "MIT",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "meson",
+      "depends": [
+        "mxe-recipes",
+        "meson",
+        "brotli",
+        "cairo",
+        "freetype-bootstrap",
+        "glib",
+        "icu4c"
+      ],
+      "options": [
+        "-Dchafa=disabled",
+        "-Dbenchmark=disabled",
+        "-Dtests=disabled",
+        "-Ddocs=disabled",
+        "-Dintrospection=disabled",
+        "-Dcairo=enabled",
+        "-Dglib=enabled",
+        "-Dicu=enabled",
+        "-Dfreetype=enabled"
+      ],
+      "patches": [
+        {
+          "file": "src/harfbuzz-1-fixes.patch",
+          "sha256": "0dfc793c67564461328b5a8f2152d063572a34e613d82247567410818abd0c97"
+        }
+      ]
+    },
+    {
+      "name": "freetype",
+      "version": "2.14.3",
+      "url": "https://downloads.sourceforge.net/project/freetype/freetype2/2.14.3/freetype-2.14.3.tar.xz",
+      "archive": "freetype-2.14.3.tar.xz",
+      "sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f",
+      "license": "FTL OR GPL-2.0-only",
+      "licenses": [
+        "docs/FTL.TXT",
+        "docs/GPLv2.TXT"
+      ],
+      "build_system": "autotools",
+      "depends": [
+        "brotli",
+        "bzip2",
+        "harfbuzz",
+        "libpng",
+        "zlib"
+      ],
+      "options": [
+        "--with-harfbuzz=yes",
+        "--enable-freetype-config",
+        "--with-brotli=yes",
+        "--with-bzip2=yes",
+        "--with-png=yes",
+        "--with-zlib=yes"
+      ]
+    },
+    {
+      "name": "dlfcn-win32",
+      "version": "1.4.2",
+      "url": "https://github.com/dlfcn-win32/dlfcn-win32/archive/refs/tags/v1.4.2.tar.gz",
+      "archive": "dlfcn-win32-1.4.2.tar.gz",
+      "sha256": "f61a874bc9163ab488accb364fd681d109870c86e8071f4710cbcdcbaf9f2565",
+      "license": "MIT",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "cmake",
+      "depends": [],
+      "options": []
+    },
+    {
+      "name": "sqlite",
+      "version": "3530400",
+      "url": "https://www.sqlite.org/2026/sqlite-autoconf-3530400.tar.gz",
+      "archive": "sqlite-autoconf-3530400.tar.gz",
+      "sha256": "0e9483900e92cd5de8fd48d16bf9200145a61f7fd5be542a5ac81d8a9516eb9c",
+      "license": "blessing",
+      "licenses": [
+        "sqlite3.h"
+      ],
+      "build_system": "autotools",
+      "depends": [
+        "dlfcn-win32"
+      ],
+      "options": [
+        "--out-implib",
+        "--disable-readline"
+      ],
+      "environment": {
+        "CFLAGS": "-O2 -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_COLUMN_METADATA -DSQLITE_ENABLE_RTREE"
+      }
+    },
+    {
+      "name": "libpsl",
+      "version": "0.23.0",
+      "url": "https://github.com/rockdaboot/libpsl/releases/download/0.23.0/libpsl-0.23.0.tar.gz",
+      "archive": "libpsl-0.23.0.tar.gz",
+      "sha256": "f39b9631b3d369a21259ea4654f8875c0ec6995ce9551c0eb5d423e4c011f911",
+      "license": "MIT",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "meson",
+      "depends": [
+        "meson",
+        "glib",
+        "libidn2",
+        "libxml2",
+        "sqlite"
+      ],
+      "options": [
+        "-Druntime=libidn2",
+        "-Dbuiltin=true"
+      ],
+      "environment": {
+        "LDFLAGS": "-L{prefix}/lib -liconv"
+      }
+    },
+    {
+      "name": "curl",
+      "version": "8.21.0",
+      "url": "https://curl.se/download/curl-8.21.0.tar.xz",
+      "archive": "curl-8.21.0.tar.xz",
+      "sha256": "aa1b66a70eace83dc624508745646c08ae561de512ab403adffb93ac87fc72e6",
+      "license": "curl",
+      "licenses": [
+        "COPYING"
+      ],
+      "build_system": "autotools",
+      "depends": [
+        "brotli",
+        "c-ares",
+        "openssl",
+        "libidn2",
+        "libpsl",
+        "libssh2",
+        "nghttp2",
+        "zstd"
+      ],
+      "options": [
+        "--with-openssl={prefix}",
+        "--without-schannel",
+        "--enable-ares={prefix}",
+        "--disable-threaded-resolver",
+        "--disable-ldap",
+        "--disable-ldaps",
+        "--without-librtmp",
+        "--with-libidn2",
+        "--enable-sspi",
+        "--enable-ipv6",
+        "--with-libssh2",
+        "--with-nghttp2",
+        "--with-libpsl",
+        "--with-brotli",
+        "--with-zstd",
+        "--with-zlib={prefix}"
+      ],
+      "environment": {
+        "CPPFLAGS": "-I{prefix}/include",
+        "LDFLAGS": "-L{prefix}/lib",
+        "LIBS": "-lpsl -lbrotlidec -lwinpthread -lnetio"
+      }
+    },
+    {
+      "name": "sdl3",
+      "version": "3.4.0",
+      "url": "https://github.com/libsdl-org/SDL/releases/download/release-3.4.0/SDL3-3.4.0.tar.gz",
+      "archive": "SDL3-3.4.0.tar.gz",
+      "sha256": "082cbf5f429e0d80820f68dc2b507a94d4cc1b4e70817b119bbb8ec6a69584b8",
+      "license": "Zlib",
+      "licenses": [
+        "LICENSE.txt"
+      ],
+      "build_system": "cmake",
+      "depends": [
+        "libiconv",
+        "libsamplerate"
+      ],
+      "options": [
+        "-DSDL_SHARED=ON",
+        "-DSDL_STATIC=OFF",
+        "-DSDL_TESTS=OFF"
+      ]
+    },
+    {
+      "name": "sdl3-image",
+      "version": "3.2.4",
+      "url": "https://github.com/libsdl-org/SDL_image/releases/download/release-3.2.4/SDL3_image-3.2.4.tar.gz",
+      "archive": "SDL3_image-3.2.4.tar.gz",
+      "sha256": "a725bd6d04261fdda0dd8d950659e1dc15a8065d025275ef460d32ae7dcfc182",
+      "license": "Zlib",
+      "licenses": [
+        "LICENSE.txt"
+      ],
+      "build_system": "cmake",
+      "depends": [
+        "jpeg",
+        "libpng",
+        "libwebp",
+        "sdl3"
+      ],
+      "options": [
+        "-DSDLIMAGE_TIF=OFF",
+        "-DSDLIMAGE_VENDORED=OFF",
+        "-DSDLIMAGE_JPG=ON",
+        "-DSDLIMAGE_PNG=ON",
+        "-DSDLIMAGE_WEBP=ON"
+      ]
+    },
+    {
+      "name": "sdl3-ttf",
+      "version": "3.2.2",
+      "url": "https://github.com/libsdl-org/SDL_ttf/releases/download/release-3.2.2/SDL3_ttf-3.2.2.tar.gz",
+      "archive": "SDL3_ttf-3.2.2.tar.gz",
+      "sha256": "63547d58d0185c833213885b635a2c0548201cc8f301e6587c0be1a67e1e045d",
+      "license": "Zlib",
+      "licenses": [
+        "LICENSE.txt"
+      ],
+      "build_system": "cmake",
+      "depends": [
+        "freetype",
+        "harfbuzz",
+        "sdl3"
+      ],
+      "options": [
+        "-DSDLTTF_VENDORED=OFF",
+        "-DSDLTTF_HARFBUZZ=ON"
+      ]
+    },
+    {
+      "name": "miniupnpc",
+      "version": "2.3.3",
+      "commit": "bf4215a7574f88aa55859db9db00e3ae58cf42d6",
+      "url": "https://codeload.github.com/miniupnp/miniupnp/tar.gz/bf4215a7574f88aa55859db9db00e3ae58cf42d6",
+      "archive": "miniupnp-bf4215a7574f88aa55859db9db00e3ae58cf42d6.tar.gz",
+      "sha256": "213a37a83f1b77a3c4f90b4dad70a5d2460d1b1042d3b0b4aef20234ae809add",
+      "license": "BSD-3-Clause",
+      "licenses": [
+        "miniupnpc/LICENSE"
+      ],
+      "build_system": "cmake",
+      "depends": [],
+      "source_subdir": "miniupnpc",
+      "options": [
+        "-DUPNPC_BUILD_STATIC=ON",
+        "-DUPNPC_BUILD_SHARED=OFF",
+        "-DUPNPC_BUILD_TESTS=OFF"
+      ]
+    }
+  ],
+  "runtime_providers": {
+    "llvm-mingw": {
+      "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64.tar.xz",
+      "sha256": "5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4",
+      "dlls": {
+        "libc++.dll": "81fb50f0866840d7e5a1d35d48cf31adc02f623a61d8b77daf62881e1e59401b",
+        "libunwind.dll": "b0636a4281610124704adb2be2edf5642e830d86c68b7f27dbc9c8154705a780",
+        "libwinpthread-1.dll": "7658f9e5e89213af287d342c554b8abcb5b2700b4a44d02184b56004b104ceec"
+      },
+      "notices": {
+        "LICENSE.TXT": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee",
+        "COPYING": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f",
+        "COPYING.MinGW-w64-runtime.txt": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f",
+        "COPYING.MinGW-w64.txt": "f38e6194bd3bfa1b654f118e5acefe0aead437bbe669eee43957ccc65a7127f1",
+        "COPYING.winpthreads.txt": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177",
+        "COPYING.winstorecompat.txt": "fa7368d1f93d890c173177475d8ec7aff265a7d08f1f364d66f74d138978ce36"
+      }
+    },
+    "sdl3-mixer": {
+      "url": "https://github.com/libsdl-org/SDL_mixer/releases/download/release-3.2.4/SDL3_mixer-3.2.4.tar.gz",
+      "sha256": "182a07c745375e113dc740d43964ff21b0be29f29f59876c4dbc4db3d32f6901",
+      "dlls": [
+        "SDL3_mixer.dll"
+      ],
+      "contract": {
+        "sdl_mixer": {
+          "name": "SDL3_mixer",
+          "version": "3.2.4",
+          "source": {
+            "url": "https://github.com/libsdl-org/SDL_mixer/releases/download/release-3.2.4/SDL3_mixer-3.2.4.tar.gz",
+            "sha256": "182a07c745375e113dc740d43964ff21b0be29f29f59876c4dbc4db3d32f6901"
+          },
+          "license": "Zlib",
+          "linkage": "shared",
+          "codec_linkage": "static",
+          "required_decoders": [
+            "WAV",
+            "STBVORBIS",
+            "OPUS",
+            "DRMP3"
+          ],
+          "forbidden_decoders": [
+            "FLUIDSYNTH",
+            "GME",
+            "TIMIDITY",
+            "XMP"
+          ]
+        },
+        "dependencies": [
+          {
+            "name": "libogg",
+            "version": "1.3.5",
+            "source": {
+              "repository": "libsdl-org/ogg",
+              "commit": "936fdd822a4e4fc963197b3eda931b89b52859a0",
+              "url": "https://codeload.github.com/libsdl-org/ogg/legacy.tar.gz/936fdd822a4e4fc963197b3eda931b89b52859a0",
+              "sha256": "4e2e1da271f4b7b9902f325a714e07d6412e9df7a0dbe43ca53257901c5d74ff"
+            },
+            "license": "BSD-3-Clause",
+            "linkage": "static"
+          },
+          {
+            "name": "libopus",
+            "version": "1.4",
+            "source": {
+              "repository": "libsdl-org/opus",
+              "commit": "ac9f053e1db9cc1c7608b74e029c25ded0254e3e",
+              "url": "https://codeload.github.com/libsdl-org/opus/legacy.tar.gz/ac9f053e1db9cc1c7608b74e029c25ded0254e3e",
+              "sha256": "3af32ef61579bc441883a63fce6b28bc9975df194d72b399415db67c61d5c25a"
+            },
+            "license": "BSD-3-Clause",
+            "linkage": "static"
+          },
+          {
+            "name": "libopusfile",
+            "version": "0.12",
+            "source": {
+              "repository": "libsdl-org/opusfile",
+              "commit": "9e5322c62de32d2b2ad88324b3ad311174cec41d",
+              "url": "https://codeload.github.com/libsdl-org/opusfile/legacy.tar.gz/9e5322c62de32d2b2ad88324b3ad311174cec41d",
+              "sha256": "ed9ea07e9e7e9f9b603e793ffac9551218c978cd5021c7d8f9a3a5dfece9a860"
+            },
+            "license": "BSD-3-Clause",
+            "linkage": "static"
+          }
+        ]
+      }
+    }
+  }
+}
