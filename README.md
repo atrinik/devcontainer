@@ -459,7 +459,8 @@ The image exposes its contract, actual tool/package versions, Debian source
 coordinates, source archives, notices, `compiler-evidence.json`, and
 shader-generation record under
 `/opt/atrinik-portable`. Schema 2 compiler evidence requires canonical paths,
-versions and hashes for every selected LLVM utility, including `llvm-ar` and
+versions and hashes for every selected LLVM utility, including independent
+`compiler` (`clang`) and `cxx_compiler` (`clang++`) records plus `llvm-ar` and
 `llvm-ranlib`; incomplete earlier evidence is rejected. Consumers rehash these
 identities before building and publication. Shared application libraries live under `/usr/local`;
 Debian packages provide the baseline transitive libraries. Compiler flags use

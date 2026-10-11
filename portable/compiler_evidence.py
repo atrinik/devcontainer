@@ -25,7 +25,8 @@ LIBRARY_DIRECTORIES = frozenset({
 })
 CC1_EXECUTABLE = "/opt/llvm-23.1.3/bin/clang-23"
 TOOL_NAMES = {
-    "compiler": "clang", "linker": "ld.lld", "readelf": "llvm-readelf",
+    "compiler": "clang", "cxx_compiler": "clang++",
+    "linker": "ld.lld", "readelf": "llvm-readelf",
     "archiver": "llvm-ar", "ranlib": "llvm-ranlib", "nm": "llvm-nm",
     "strip": "llvm-strip", "objcopy": "llvm-objcopy", "objdump": "llvm-objdump",
 }

@@ -63,8 +63,8 @@ class CompilerEvidence(unittest.TestCase):
                 with self.subTest(role=role, change=change), self.assertRaises(ValueError):
                     evidence.validate(value)
 
-    def test_replaced_archive_tool_bytes_fail_installed_verification(self):
-        for role in ("archiver", "ranlib"):
+    def test_replaced_cxx_driver_and_archive_tool_bytes_fail_installed_verification(self):
+        for role in ("cxx_compiler", "archiver", "ranlib"):
             records = {record["path"]: record["sha256"]
                        for record in [*self.value["tools"].values(),
                                       self.value["runtime"], self.value["unwinder"]]}
@@ -72,6 +72,11 @@ class CompilerEvidence(unittest.TestCase):
             with self.subTest(role=role), mock.patch.object(evidence, "digest", side_effect=lambda path: records[str(path)]), \
                  self.assertRaisesRegex(ValueError, "changed installed LLVM identity"):
                 evidence.validate(self.value, installed=True)
+
+    def test_cxx_driver_cannot_substitute_the_c_driver_path(self):
+        self.value["tools"]["cxx_compiler"]["path"] = self.value["tools"]["compiler"]["path"]
+        with self.assertRaisesRegex(ValueError, "wrong pinned LLVM identity: cxx_compiler"):
+            evidence.validate(self.value)
 
     def test_compile_command_and_driver_command_must_agree(self):
         self.value["compile"]["command"].append("-flto=thin")

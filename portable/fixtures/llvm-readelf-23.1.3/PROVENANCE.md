@@ -1,6 +1,7 @@
 # LLVM utility fixture provenance
 
-The archiver, ranlib, nm, strip, objcopy and objdump records were captured from
+The C++ driver, archiver, ranlib, nm, strip, objcopy and objdump records were
+captured from
 private Debian portable SDK image
 `sha256:2abebea3544caaa947920f6fc1fe80158352a1a0b3450a0331c1367676114c71`
 on 2026-10-11 using SHA-256 of each installed executable and its `--version`

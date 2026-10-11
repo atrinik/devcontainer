@@ -22,8 +22,9 @@
   with the unchanged canonical tools in the build-only Ubuntu stage; copy only
   canonical-manifest-verified data into Debian. The consumer rejects changed
   source commits or shader inputs. Schema 2 compiler evidence requires every
-  selected LLVM utility, including archiver/ranlib, with canonical paths,
-  versions and hashes; rehash before consumer builds and publication. Portable curl is an LLVM rebuild of
+  selected LLVM utility, including separate Clang C/C++ drivers and
+  archiver/ranlib, with canonical paths, versions and hashes; rehash before
+  consumer builds and publication. Portable curl is an LLVM rebuild of
   security-patched Debian `7.88.1-10+deb12u15` with c-ares 1.34.6, retaining
   existing features including LDAP/LDAPS, RTMP, SCP and SFTP. Its separate
   `portable/curl-toolchain.json`, `portable/build-curl.py`,
