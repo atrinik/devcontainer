@@ -40,7 +40,13 @@ for component in server client; do
   python3 -m unittest discover -s tools/tests -p 'test_*.py'
   python3 tools/dependencies.py sync
   python3 tools/dependencies.py verify
+  coverage_options=()
+  if [[ ${component} == server ]]; then
+    # Match the server coverage lane: PCH can add unexecuted coverage mappings.
+    coverage_options+=(-DENABLE_PRECOMPILED_HEADERS=OFF)
+  fi
   cmake --preset llvm-coverage \
+    "${coverage_options[@]}" \
     -DCMAKE_TOOLCHAIN_FILE="${source_root}/cmake/toolchains/llvm.cmake" \
     -DCMAKE_C_COMPILER_LAUNCHER=ccache \
     -DFETCHCONTENT_SOURCE_DIR_ATRINIK_PROTOCOL="${source_root}/protocol" \
