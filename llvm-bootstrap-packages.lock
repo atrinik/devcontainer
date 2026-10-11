@@ -1,0 +1,14 @@
+ca-certificates=20230311+deb12u1
+clang-14=1:14.0.6-12
+cmake=3.25.1-1
+curl=7.88.1-10+deb12u15
+libc6-dev=2.36-9+deb12u14
+libclang-rt-14-dev=1:14.0.6-12
+libgcc-12-dev=12.2.0-14+deb12u1
+libstdc++-12-dev=12.2.0-14+deb12u1
+lld-14=1:14.0.6-12
+llvm-14=1:14.0.6-12
+make=4.3-4.1
+ninja-build=1.11.1-2~deb12u1
+python3=3.11.2-1+b1
+xz-utils=5.4.1-1+deb12u1
