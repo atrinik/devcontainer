@@ -38,7 +38,7 @@
   ],
   "consumer_validation": {
     "repository": "atrinik/classic",
-    "commit": "3a1211f9557f3ebac112a51005fc94f3f9ba4495"
+    "commit": "ebef0b616739bf32428d90c89cd3aaeb3195b59f"
   },
   "curl_contract": "/usr/local/share/atrinik/classic-curl-toolchain.json",
   "llvm_contract": "/opt/llvm-23.1.3/share/atrinik/llvm-toolchain.json"
