@@ -105,31 +105,102 @@ def download(source: dict, cache: Path) -> Path:
 def safe_archive_path(name: str, root: str) -> PurePosixPath:
     path = PurePosixPath(name)
     if (not name or "\\" in name or "\x00" in name or path.is_absolute()
-            or ".." in path.parts or path.parts[0] != root):
+            or not path.parts or ".." in path.parts or path.parts[0] != root):
         raise ToolchainError(f"unsafe LLVM archive path: {name!r}")
     return path
 
 
+def normalized_link_target(path: PurePosixPath, member: tarfile.TarInfo, root: str) -> PurePosixPath:
+    target = member.linkname
+    if not target or "\\" in target or "\x00" in target or PurePosixPath(target).is_absolute():
+        raise ToolchainError(f"unsafe LLVM archive link: {member.name!r}")
+    # Tar hardlink names start at the archive root; symlinks are relative to
+    # their containing directory. Never let '..' pop the archive root.
+    parts = list(path.parent.parts) if member.issym() else []
+    for part in PurePosixPath(target).parts:
+        if part == "..":
+            if len(parts) <= 1:
+                raise ToolchainError(f"LLVM archive link escapes source root: {member.name!r}")
+            parts.pop()
+        elif part != ".":
+            parts.append(part)
+    if not parts or parts[0] != root:
+        raise ToolchainError(f"LLVM archive link escapes source root: {member.name!r}")
+    return PurePosixPath(*parts)
+
+
+def validate_archive_members(members: list[tarfile.TarInfo], root: str) -> dict[PurePosixPath, tarfile.TarInfo]:
+    records: dict[PurePosixPath, tarfile.TarInfo] = {}
+    expanded = 0
+    if len(members) > 400000:
+        raise ToolchainError("LLVM archive exceeds extraction limits")
+    for member in members:
+        path = safe_archive_path(member.name, root)
+        if path in records:
+            raise ToolchainError(f"duplicate LLVM archive path: {path}")
+        if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
+            raise ToolchainError(f"unsupported LLVM archive member: {path}")
+        if member.size < 0 or member.size > 512 * 1024**2:
+            raise ToolchainError(f"invalid LLVM archive member size: {path}")
+        expanded += member.size
+        if expanded > 8 * 1024**3:
+            raise ToolchainError("LLVM archive exceeds extraction limits")
+        records[path] = member
+    for path, member in records.items():
+        for parent in path.parents:
+            if parent in records and not records[parent].isdir():
+                raise ToolchainError(f"LLVM archive member traverses non-directory parent: {path}")
+        if member.issym() or member.islnk():
+            target = normalized_link_target(path, member, root)
+            raw_parts = list(path.parent.parts) if member.issym() else []
+            for part in PurePosixPath(member.linkname).parts:
+                if part == "..":
+                    raw_parts.pop()
+                elif part != ".":
+                    raw_parts.append(part)
+                intermediate = PurePosixPath(*raw_parts)
+                if intermediate in records and (records[intermediate].issym() or records[intermediate].islnk()):
+                    raise ToolchainError(f"LLVM archive link traverses another link: {path}")
+            # Refuse link chains and link parents. Lexical '..' validation
+            # alone is insufficient when an intermediate symlink rewrites it.
+            for component in (target, *target.parents):
+                if component in records and (records[component].issym() or records[component].islnk()):
+                    raise ToolchainError(f"LLVM archive link traverses another link: {path}")
+            if member.islnk() and (target not in records or not records[target].isfile()):
+                raise ToolchainError(f"LLVM archive hardlink target is not a regular file: {path}")
+    return records
+
+
 def extract_source(archive: Path, destination: Path, source: dict) -> Path:
-    # Python's data filter validates link targets and rejects special files before
-    # writing. An explicit root check also fences top-level archive surprises.
+    if destination.is_symlink() or (destination.exists() and any(destination.iterdir())):
+        raise ToolchainError("LLVM extraction requires a new or empty destination")
     with tarfile.open(archive, "r:xz") as stream:
-        count = 0
-        expanded = 0
-        seen: set[str] = set()
-        for member in stream:
-            path = safe_archive_path(member.name, source["archive_root"])
-            key = path.as_posix()
-            if key in seen:
-                raise ToolchainError(f"duplicate LLVM archive path: {key}")
-            seen.add(key)
-            count += 1
-            expanded += member.size
-            if count > 400000 or expanded > 8 * 1024**3:
-                raise ToolchainError("LLVM archive exceeds extraction limits")
-            if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
-                raise ToolchainError(f"unsupported LLVM archive member: {key}")
-        stream.extractall(destination, filter="data")
+        records = validate_archive_members(stream.getmembers(), source["archive_root"])
+        destination.mkdir(parents=True, exist_ok=True)
+        # Write directories and regular files first using exclusive creation.
+        # All link parents were rejected before any archive contents are written.
+        for path, member in records.items():
+            output = destination.joinpath(*path.parts)
+            if member.isdir():
+                output.mkdir(parents=True, exist_ok=True)
+            elif member.isfile():
+                output.parent.mkdir(parents=True, exist_ok=True)
+                contents = stream.extractfile(member)
+                if contents is None:
+                    raise ToolchainError(f"cannot read LLVM archive member: {path}")
+                with contents, output.open("xb") as target:
+                    shutil.copyfileobj(contents, target)
+                output.chmod(0o755 if member.mode & 0o111 else 0o644)
+        for path, member in records.items():
+            if not (member.issym() or member.islnk()):
+                continue
+            output = destination.joinpath(*path.parts)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            if member.issym():
+                os.symlink(member.linkname, output)
+            else:
+                target = normalized_link_target(path, member, source["archive_root"])
+                os.link(destination.joinpath(*target.parts), output, follow_symlinks=False)
     root = destination / source["archive_root"]
     license_path = root / source["license_path"]
     if license_path.is_symlink() or sha256(license_path) != source["license_sha256"]:

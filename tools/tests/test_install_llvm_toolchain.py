@@ -49,7 +49,7 @@ class LLVMToolchainTests(unittest.TestCase):
                 MODULE.download(manifest["source"], cache)
 
     def test_rejects_traversal_or_external_archive_links(self):
-        for path in ["/outside", "root/../outside", "root\\outside"]:
+        for path in ["/outside", ".", "root/../outside", "root\\outside", "root/\x00bad"]:
             with self.assertRaises(MODULE.ToolchainError):
                 MODULE.safe_archive_path(path, "root")
         with tempfile.TemporaryDirectory() as temporary:
@@ -60,9 +60,54 @@ class LLVMToolchainTests(unittest.TestCase):
                 link.type = tarfile.SYMTYPE
                 link.linkname = "/outside"
                 stream.addfile(link)
-            with self.assertRaises(tarfile.FilterError):
+            with self.assertRaises(MODULE.ToolchainError):
                 MODULE.extract_source(archive, base / "unpacked", {"archive_root":"root"})
             self.assertFalse((base / "unpacked/root/link").exists())
+
+    def test_prevalidation_rejects_link_parent_and_link_chain_escapes(self):
+        def member(name, kind, target=""):
+            item = tarfile.TarInfo(name)
+            item.type = kind
+            item.linkname = target
+            return item
+        cases = [
+            [member("root/link", tarfile.SYMTYPE, "safe"), member("root/link/payload", tarfile.REGTYPE)],
+            [member("root/a", tarfile.SYMTYPE, "."), member("root/b", tarfile.SYMTYPE, "a/../outside")],
+            [member("root/hard", tarfile.LNKTYPE, "../outside")],
+            [member("root/hard", tarfile.LNKTYPE, "root/link"), member("root/link", tarfile.SYMTYPE, "safe")],
+            [member("root/hard", tarfile.LNKTYPE, "root/missing")],
+            [member("root/file", tarfile.REGTYPE), member("root/file", tarfile.REGTYPE)],
+            [member("root/device", tarfile.CHRTYPE)],
+            [member("root/file", tarfile.REGTYPE), member("root/file/payload", tarfile.REGTYPE)],
+        ]
+        for members in cases:
+            with self.subTest(paths=[item.name for item in members]), self.assertRaises(MODULE.ToolchainError):
+                MODULE.validate_archive_members(members, "root")
+
+    def test_extracts_valid_symlinks_and_hardlinks_without_extractall(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            archive = base / "source.tar.xz"
+            content = b"upstream license"
+            with tarfile.open(archive, "w:xz") as stream:
+                original = tarfile.TarInfo("root/llvm/LICENSE.TXT")
+                original.size = len(content)
+                stream.addfile(original, io.BytesIO(content))
+                for name, kind, target in [
+                    ("root/license-symlink", tarfile.SYMTYPE, "llvm/LICENSE.TXT"),
+                    ("root/license-hardlink", tarfile.LNKTYPE, "root/llvm/LICENSE.TXT"),
+                ]:
+                    link = tarfile.TarInfo(name)
+                    link.type, link.linkname = kind, target
+                    stream.addfile(link)
+            source = {"archive_root":"root", "license_path":"llvm/LICENSE.TXT", "license_sha256":hashlib.sha256(content).hexdigest()}
+            # Old snapshot Python lacks the filter argument. This path must
+            # never call extractall, with or without a filter.
+            with mock.patch.object(tarfile.TarFile, "extractall", side_effect=AssertionError("unsafe extractor called")):
+                root = MODULE.extract_source(archive, base / "unpacked", source)
+            self.assertTrue((root / "license-symlink").is_symlink())
+            self.assertEqual((root / "license-symlink").read_bytes(), content)
+            self.assertEqual((root / "license-hardlink").stat().st_ino, (root / "llvm/LICENSE.TXT").stat().st_ino)
 
     def test_extraction_checks_license(self):
         with tempfile.TemporaryDirectory() as temporary:
