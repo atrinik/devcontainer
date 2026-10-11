@@ -102,6 +102,7 @@ jobs:
                 tools/install_llvm_toolchain.py | tools/validate_llvm_toolchain.py | \
                 tools/tests/test_install_llvm_toolchain.py | tools/tests/test_workflow_contracts.py | .github/workflows/measure-classic-check.yml | \
                 .github/workflows/publish-windows.yml | \
+                .github/workflows/windows-glib-qualification.yml | \
                 .github/workflows/validate.yml | windows/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
                 classic-curl-toolchain.json | tools/verify-classic-curl.sh | \

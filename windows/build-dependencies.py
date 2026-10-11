@@ -12,6 +12,7 @@ import argparse
 import fnmatch
 import hashlib
 import io
+import importlib.util
 import json
 import math
 import os
@@ -896,6 +897,16 @@ def verify(prefix: Path, llvm: Path, lock: dict | None = None) -> dict:
             reports[kind][name] = {**record, "imports": sorted(names)}
     if not any(name == "ucrtbase.dll" or name.startswith("api-ms-win-crt-") for name in imports):
         raise ValueError("dependency closure does not import UCRT")
+    if {"glib", "cairo"} & sources.keys():
+        # Source-declared callbacks need an actual CRT TLS registration table.
+        spec = importlib.util.spec_from_file_location("pe_tls", Path(__file__).with_name("pe_tls.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for library in ("glib", "cairo"):
+            if library in sources:
+                dll = module.LIBRARIES[library][0]
+                tls = module.inspect_file(prefix / "bin" / dll, llvm, library)
+                reports["dlls"][dll]["tls"] = tls
     report_path = prefix / "share/atrinik/windows-dependencies/pe-closure.json"
     result = {"schema_version": 2, **reports, "notices": receipt["notices"]}
     report_path.write_text(json.dumps(result, indent=2) + "\n")
