@@ -13,8 +13,8 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / '.github/workflows/windows-glib-qualification.yml'
 
 
-def script(step):
-    block = WORKFLOW.read_text().split(f'      - name: {step}\n', 1)[1]
+def script(step, path=WORKFLOW):
+    block = path.read_text().split(f'      - name: {step}\n', 1)[1]
     block = block.split('\n      - name:', 1)[0]
     body = block.split('        run: |\n', 1)[1]
     return '\n'.join(line[10:] for line in body.splitlines()) + '\n'
@@ -116,6 +116,26 @@ elif args[0] == 'cp' and args[1].endswith(':/tmp/qualification/bundle'):
             self.assertEqual(len(calls), 1)
             self.assertIn('--library glib', calls[0])
             self.assertNotIn('--library cairo', calls[0])
+
+    def test_focused_workflow_change_selects_full_windows_validation(self):
+        selector = script('Detect image changes', ROOT / '.github/workflows/validate.yml')
+        for changed, selected in (('.github/workflows/windows-glib-qualification.yml', 'true'),
+                                  ('README.md', 'false')):
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                git = root / 'git'
+                git.write_text('#!/bin/sh\nprintf "%s\\n" "$CHANGED_PATH"\n')
+                git.chmod(0o755)
+                output = root / 'output'
+                result = subprocess.run(
+                    ['bash', '-euo', 'pipefail', '-c', selector], cwd=root,
+                    env=dict(os.environ, PATH=f'{root}:' + os.environ['PATH'],
+                             CHANGED_PATH=changed, GITHUB_OUTPUT=str(output),
+                             BASE_SHA='b' * 40, HEAD_SHA='a' * 40),
+                    capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                values = dict(line.split('=', 1) for line in output.read_text().splitlines())
+                self.assertEqual(values['windows'], selected)
 
     def test_native_job_requires_build_and_strict_native_runner(self):
         text = WORKFLOW.read_text()
