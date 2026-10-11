@@ -175,6 +175,7 @@ def build(source: Path, work: Path, prefix: Path, manifest: dict, jobs: int) -> 
          "-DCMAKE_C_FLAGS=--rtlib=libgcc --unwindlib=libgcc -fuse-ld=lld",
          "-DCMAKE_CXX_FLAGS=--rtlib=libgcc --unwindlib=libgcc -fuse-ld=lld",
          "-DCMAKE_INSTALL_LIBDIR=lib", "-DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=OFF",
+         "-DCOMPILER_RT_INSTALL_PATH=lib/clang/23",
          "-DLLVM_ENABLE_RUNTIMES=compiler-rt;libunwind", "-DLLVM_INCLUDE_TESTS=OFF",
          "-DCOMPILER_RT_BUILD_TESTS=OFF", "-DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON",
          "-DCOMPILER_RT_BUILD_XRAY=OFF", "-DCOMPILER_RT_BUILD_ORC=OFF",
