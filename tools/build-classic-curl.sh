@@ -37,11 +37,21 @@ fetch "$(jq -r '.cares.url' "$manifest")" "$work/cares.tar.gz" "$(jq -r '.cares.
 fetch "$(jq -r '.linux.curl_url' "$manifest")" "$work/curl.tar.xz" "$(jq -r '.linux.curl_sha256' "$manifest")"
 tar --no-same-owner -xf "$work/cares.tar.gz" -C "$work"
 tar --no-same-owner -xf "$work/curl.tar.xz" -C "$work"
+# Portable callers retain their explicit release optimization; ordinary Linux
+# callers keep CMake's existing Release defaults when these variables are absent.
+cares_release_flags=()
+if [[ -n ${ATRINIK_RELEASE_C_FLAGS:-} ]]; then
+  cares_release_flags+=("-DCMAKE_C_FLAGS_RELEASE=${ATRINIK_RELEASE_C_FLAGS}")
+fi
+if [[ -n ${ATRINIK_RELEASE_CXX_FLAGS:-} ]]; then
+  cares_release_flags+=("-DCMAKE_CXX_FLAGS_RELEASE=${ATRINIK_RELEASE_CXX_FLAGS}")
+fi
 cmake -S "$work/c-ares-$(jq -r '.cares.version' "$manifest")" -B "$work/cares-build" \
   -DCMAKE_C_COMPILER="${cmake_cc}" -DCMAKE_CXX_COMPILER="${cmake_cxx}" \
   -DCMAKE_AR="${cmake_ar}" -DCMAKE_RANLIB="${cmake_ranlib}" \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" -DCMAKE_INSTALL_LIBDIR=lib \
-  -DCARES_STATIC=OFF -DCARES_SHARED=ON -DCARES_BUILD_TOOLS=OFF -DCARES_BUILD_TESTS=OFF
+  -DCARES_STATIC=OFF -DCARES_SHARED=ON -DCARES_BUILD_TOOLS=OFF -DCARES_BUILD_TESTS=OFF \
+  "${cares_release_flags[@]}"
 cmake --build "$work/cares-build" --parallel "$jobs"
 cmake --install "$work/cares-build"
 cd "$work/curl-$(jq -r '.linux.curl_version' "$manifest")"
