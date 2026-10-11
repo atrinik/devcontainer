@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import posixpath
 import shlex
 import shutil
 import subprocess
@@ -14,6 +15,15 @@ VERSION = "23.1.3"
 FLAGS = ["-O2", "-march=x86-64", "-mtune=generic", "--rtlib=compiler-rt",
          "--unwindlib=libunwind", "-fuse-ld=lld"]
 SOURCE = "int main(void) { return 0; }\n"
+# Exact native search roots observed with the sealed Debian 12/LLVM cohort.
+# Normalize the driver's bin/../lib and GCC multilib spellings without using
+# the validating host's unrelated filesystem symlinks.
+LIBRARY_DIRECTORIES = frozenset({
+    "/opt/llvm-23.1.3/lib", "/usr/local/lib", "/usr/lib/gcc/x86_64-linux-gnu/12",
+    "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/lib64", "/lib64",
+    "/usr/lib", "/lib",
+})
+CC1_EXECUTABLE = "/opt/llvm-23.1.3/bin/clang-23"
 
 
 def digest(path: Path) -> str:
@@ -48,6 +58,10 @@ def validate(value: dict, *, installed: bool = False) -> None:
     if len(compilers) != 1 or len(linkers) != 1:
         raise ValueError("missing actual Clang/LLD invocation")
     compiler = compilers[0]
+    if compiler[0] != CC1_EXECUTABLE:
+        raise ValueError("foreign Clang cc1 executable")
+    if installed and Path(tools["compiler"]["path"]).resolve() != Path(CC1_EXECUTABLE):
+        raise ValueError("Clang driver does not resolve to pinned cc1 executable")
     for option, expected in (("-target-cpu", "x86-64"), ("-tune-cpu", "generic")):
         if option not in compiler or compiler[compiler.index(option) + 1] != expected:
             raise ValueError(f"wrong portable CPU invocation: {option}")
@@ -60,8 +74,29 @@ def validate(value: dict, *, installed: bool = False) -> None:
         raise ValueError("compiler-rt missing from LLD invocation")
     if any("libgcc.a" in arg or arg in {"-lgcc", "-lgcc_s"} for arg in linkers[0]):
         raise ValueError("GNU compiler builtins selected")
-    if not any(arg.startswith("-L") and Path(arg[2:]).resolve() == Path("/opt/llvm-23.1.3/lib")
-               for arg in linkers[0]):
+    directories = []
+    linker = linkers[0]
+    index = 1
+    while index < len(linker):
+        arg = linker[index]
+        if arg == "-L":
+            index += 1
+            if index == len(linker):
+                raise ValueError("missing LLD library directory")
+            directory = linker[index]
+        elif arg.startswith("-L"):
+            directory = arg[2:]
+        else:
+            index += 1
+            continue
+        if not directory.startswith("/") or "$" in directory:
+            raise ValueError("invalid LLD library directory")
+        directory = posixpath.normpath(directory)
+        if directory not in LIBRARY_DIRECTORIES:
+            raise ValueError("foreign LLD library directory")
+        directories.append(directory)
+        index += 1
+    if "/opt/llvm-23.1.3/lib" not in directories:
         raise ValueError("LLVM runtime library directory missing from LLD invocation")
     if not any(arg in {"-lunwind", value["unwinder"]["path"]} for arg in linkers[0]):
         raise ValueError("LLVM unwinder missing from LLD invocation")

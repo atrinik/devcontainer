@@ -19,7 +19,7 @@ class CompilerEvidence(unittest.TestCase):
                       "unwinder": {"path": prefix + "lib/libunwind.a", "sha256": "c" * 64}}
         command = [prefix + "bin/clang", *evidence.FLAGS, "/tmp/probe.c", "-o", "/tmp/probe"]
         self.value["compile"] = {"command": command, "driver_command": [command[0], "-###", *command[1:]],
-                                 "driver_output": f'"{command[0]}" "-cc1" "-target-cpu" "x86-64" "-tune-cpu" "generic" "-O2"\n'
+                                 "driver_output": f'"{evidence.CC1_EXECUTABLE}" "-cc1" "-target-cpu" "x86-64" "-tune-cpu" "generic" "-O2"\n'
                                  f'"{prefix}bin/ld.lld" "{self.value["runtime"]["path"]}" "-L/opt/llvm-23.1.3/lib" "-lunwind"\n'}
 
     def test_baseline_invocations(self):
@@ -49,6 +49,29 @@ class CompilerEvidence(unittest.TestCase):
         self.value["compile"]["command"].append("-flto=thin")
         with self.assertRaisesRegex(ValueError, "driver command"):
             evidence.validate(self.value)
+
+    def test_foreign_cc1_executable_is_rejected(self):
+        self.value["compile"]["driver_output"] = self.value["compile"]["driver_output"].replace(
+            evidence.CC1_EXECUTABLE, "/tmp/foreign-clang")
+        with self.assertRaisesRegex(ValueError, "foreign Clang cc1"):
+            evidence.validate(self.value)
+
+    def test_every_library_directory_is_checked(self):
+        for option in ('"-L/tmp/foreign"', '"-L" "/tmp/foreign"',
+                       '"-L/usr/local/lib/foreign"', '"-Lrelative"', '"-L$ORIGIN"', '"-L"'):
+            value = copy.deepcopy(self.value)
+            value["compile"]["driver_output"] = value["compile"]["driver_output"].rstrip() + " " + option + "\n"
+            with self.subTest(option=option), self.assertRaises(ValueError):
+                evidence.validate(value)
+
+    def test_authentic_debian_driver_multilib_paths_and_sdk_prefix(self):
+        value = copy.deepcopy(self.value)
+        value["compile"]["driver_output"] = value["compile"]["driver_output"].rstrip() + (
+            ' "-L/opt/llvm-23.1.3/bin/../lib" "-L/usr/lib/gcc/x86_64-linux-gnu/12"'
+            ' "-L/usr/lib/gcc/x86_64-linux-gnu/12/../../../../lib64" "-L/lib/x86_64-linux-gnu"'
+            ' "-L/lib/../lib64" "-L/usr/lib/x86_64-linux-gnu" "-L/usr/lib64" "-L/lib" "-L/usr/lib"'
+            ' "-L" "/usr/local/lib"\n')
+        evidence.validate(value)
 
 
 if __name__ == "__main__":
