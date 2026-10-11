@@ -176,9 +176,12 @@ def load_manifest(path: Path) -> dict[str, object]:
             "license",
             "license_path",
             "license_sha256",
+            "compiler",
         },
         "spirv_cross",
     )
+    if spirv_cross["compiler"] != {'family': 'Clang', 'version': '23.1.3', 'runtime': 'compiler-rt', 'unwind': 'libunwind', 'linker': 'LLD'}:
+        raise ToolchainError("SPIRV-Cross compiler cohort is not LLVM 23.1.3")
     if dxc["repository"] != "microsoft/DirectXShaderCompiler":
         raise ToolchainError("dxc.repository is not the governed upstream")
     if spirv_cross["repository"] != "KhronosGroup/SPIRV-Cross":
@@ -434,6 +437,15 @@ def install_file(source: Path, destination: Path, expected: str, executable: boo
 
 
 def run_build(source: Path, build: Path, jobs: int) -> Path:
+    if os.environ.get("CC") != "clang" or os.environ.get("CXX") != "clang++":
+        raise ToolchainError("SPIRV-Cross producer requires the explicit LLVM compiler cohort")
+    if "clang version 23.1.3" not in subprocess.check_output(["clang", "--version"], text=True):
+        raise ToolchainError("SPIRV-Cross producer requires Clang 23.1.3")
+    release_flags = [
+        f"-DCMAKE_{language}_FLAGS_RELEASE={os.environ[variable]}"
+        for language, variable in (("C", "ATRINIK_RELEASE_C_FLAGS"), ("CXX", "ATRINIK_RELEASE_CXX_FLAGS"))
+        if os.environ.get(variable)
+    ]
     subprocess.run(
         [
             "cmake",
@@ -444,6 +456,11 @@ def run_build(source: Path, build: Path, jobs: int) -> Path:
             "-G",
             "Ninja",
             "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_C_COMPILER=clang",
+            "-DCMAKE_CXX_COMPILER=clang++",
+            "-DCMAKE_AR=llvm-ar",
+            "-DCMAKE_RANLIB=llvm-ranlib",
+            *release_flags,
             "-DSPIRV_CROSS_CLI=ON",
             "-DSPIRV_CROSS_ENABLE_TESTS=OFF",
             "-DGIT_EXECUTABLE=GIT_EXECUTABLE-NOTFOUND",

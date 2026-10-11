@@ -72,7 +72,27 @@ for dependency in libogg libopus libopusfile; do
     "${mixer_source}/external/${destination}"
 done
 
-"${cmake_command}" \
+# Native source dependencies must share the selected compiler cohort. MXE's
+# CMake wrapper remains the Windows compiler owner.
+compiler_args=()
+if [[ ${cmake_command} == cmake ]]; then
+  : "${CC:?explicit LLVM C compiler required}"
+  : "${CXX:?explicit LLVM C++ compiler required}"
+  : "${AR:?explicit LLVM archiver required}"
+  : "${RANLIB:?explicit LLVM ranlib required}"
+  "${CC}" --version | grep -F 'clang version 23.1.3' >/dev/null
+  "${CXX}" --version | grep -F 'clang version 23.1.3' >/dev/null
+  compiler_args=(-DCMAKE_C_COMPILER="${CC}" -DCMAKE_CXX_COMPILER="${CXX}"
+    -DCMAKE_AR="${AR}" -DCMAKE_RANLIB="${RANLIB}")
+  if [[ -n ${ATRINIK_RELEASE_C_FLAGS:-} ]]; then
+    compiler_args+=(-DCMAKE_C_FLAGS_RELEASE="${ATRINIK_RELEASE_C_FLAGS}")
+  fi
+  if [[ -n ${ATRINIK_RELEASE_CXX_FLAGS:-} ]]; then
+    compiler_args+=(-DCMAKE_CXX_FLAGS_RELEASE="${ATRINIK_RELEASE_CXX_FLAGS}")
+  fi
+fi
+
+"${cmake_command}" "${compiler_args[@]}" \
   -S "${mixer_source}" \
   -B "${work}/build" \
   -DCMAKE_BUILD_TYPE=Release \

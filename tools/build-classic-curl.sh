@@ -5,6 +5,12 @@ manifest=${1:?usage: build-classic-curl.sh MANIFEST [PREFIX] [JOBS]}
 manifest=$(realpath "$manifest")
 prefix=${2:-/usr/local}
 jobs=${3:-2}
+: "${CC:?explicit LLVM C compiler required}"
+: "${CXX:?explicit LLVM C++ compiler required}"
+: "${AR:?explicit LLVM archiver required}"
+: "${RANLIB:?explicit LLVM ranlib required}"
+"${CC}" --version | grep -F "clang version 23.1.3" >/dev/null
+"${CXX}" --version | grep -F "clang version 23.1.3" >/dev/null
 test "$(pkg-config --modversion openssl)" = "$(jq -r '.linux.openssl_version' "$manifest")"
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
@@ -17,6 +23,8 @@ fetch "$(jq -r '.linux.curl_url' "$manifest")" "$work/curl.tar.xz" "$(jq -r '.li
 tar --no-same-owner -xf "$work/cares.tar.gz" -C "$work"
 tar --no-same-owner -xf "$work/curl.tar.xz" -C "$work"
 cmake -S "$work/c-ares-$(jq -r '.cares.version' "$manifest")" -B "$work/cares-build" \
+  -DCMAKE_C_COMPILER="${CC}" -DCMAKE_CXX_COMPILER="${CXX}" \
+  -DCMAKE_AR="${AR}" -DCMAKE_RANLIB="${RANLIB}" \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" -DCMAKE_INSTALL_LIBDIR=lib \
   -DCARES_STATIC=OFF -DCARES_SHARED=ON -DCARES_BUILD_TOOLS=OFF -DCARES_BUILD_TESTS=OFF
 cmake --build "$work/cares-build" --parallel "$jobs"

@@ -191,6 +191,14 @@ def install_metadata(prefix: Path, manifest_path: Path, archive: Path, source: P
     wrapper = prefix / "bin" / "llvm-gcov"
     wrapper.write_text('#!/bin/sh\nexec "$(dirname "$0")/llvm-cov" gcov "$@"\n', encoding="utf-8")
     wrapper.chmod(0o755)
+    # Consumer images need compiler resource headers/runtimes and tools, not
+    # the LLVM C++ SDK's large static libraries. Keep libclang for developer
+    # bindings and libunwind for the explicit runtime contract.
+    for library in (prefix / "lib").glob("*.a"):
+        if library.name != "libunwind.a":
+            library.unlink()
+    for name in ("llvm", "llvm-c", "clang", "clang-c"):
+        shutil.rmtree(prefix / "include" / name, ignore_errors=True)
     metadata = manifest["metadata"]
     for destination, original in [(metadata["manifest"], manifest_path), (metadata["source_archive"], archive)]:
         path = prefix / destination

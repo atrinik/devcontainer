@@ -13,7 +13,7 @@ spdx_expected=$3
 spdx_installed=$4
 package_lock=${5:-}
 
-for command in cmp jq readelf sha256sum vulkaninfo xvfb-run; do
+for command in cmp jq llvm-readelf sha256sum vulkaninfo xvfb-run; do
   command -v "${command}" >/dev/null || {
     echo "required command is unavailable: ${command}" >&2
     exit 1
@@ -74,7 +74,7 @@ jq -e '
     {"name": "zlib1g", "version": "1:1.3.dfsg+really1.3.1-1ubuntu3"}
   ]
   and .runtime.shared_library_sonames == [
-    "libc.so.6", "libdrm.so.2", "libgcc_s.so.1", "libm.so.6",
+    "libc.so.6", "libdrm.so.2", "libm.so.6",
     "libudev.so.1", "libwayland-client.so.0", "libz.so.1"
   ]
   and .runtime.headless == {
@@ -132,7 +132,7 @@ jq -e --arg library "${library}" \
 ' "${icd}" >/dev/null
 
 while IFS= read -r soname; do
-  readelf -d "${library}" | grep -Fq "Shared library: [${soname}]"
+  llvm-readelf -d "${library}" | grep -Fq "Shared library: [${soname}]"
 done < <(jq -er '.runtime.shared_library_sonames[]' "${expected}")
 
 while IFS=$'\t' read -r package version; do

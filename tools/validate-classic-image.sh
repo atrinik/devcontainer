@@ -190,9 +190,8 @@ test "$(ccache --version | sed -n '1s/^ccache version //p')" = \
   "$(jq -r '.tools.ccache' "${expected}")"
 test "$(cmake --version | sed -n '1s/^cmake version //p')" = \
   "$(jq -r '.tools.cmake' "${expected}")"
-test "$(gcc -dumpfullversion)" = "$(jq -r '.tools.gcc' "${expected}")"
-test "$(gcovr --version | sed -n '1s/^gcovr //p')" = \
-  "$(jq -r '.tools.gcovr' "${expected}")"
+python3 /usr/local/bin/atrinik-validate-llvm-toolchain \
+  --manifest "$(jq -er '.llvm_contract' "${expected}")" --prefix /opt/llvm-23.1.3
 test "$(ninja --version)" = "$(jq -r '.tools.ninja' "${expected}")"
 test "$(python3 --version | cut -d' ' -f2)" = \
   "$(jq -r '.tools.python' "${expected}")"
@@ -213,9 +212,9 @@ work=$(mktemp -d)
 trap 'rm -rf -- "${work}"' EXIT
 printf 'int answer(void) { return 42; }\n' > "${work}/cache-smoke.c"
 ccache --zero-stats >/dev/null
-ccache gcc -c "${work}/cache-smoke.c" -o "${work}/cache-smoke.o"
+ccache clang -c "${work}/cache-smoke.c" -o "${work}/cache-smoke.o"
 rm "${work}/cache-smoke.o"
-ccache gcc -c "${work}/cache-smoke.c" -o "${work}/cache-smoke.o"
+ccache clang -c "${work}/cache-smoke.c" -o "${work}/cache-smoke.o"
 hits=$(ccache --print-stats | awk -F '\t' '
   $1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" { hits += $2 }
   END { print hits + 0 }
