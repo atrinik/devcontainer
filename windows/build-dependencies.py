@@ -21,6 +21,7 @@ import shlex
 import shutil
 import subprocess
 import tarfile
+import tempfile
 import urllib.request
 
 TARGET = "x86_64-w64-mingw32"
@@ -94,6 +95,21 @@ SYSTEM_DLLS = {
 }
 
 
+def config_alias_contract(item: dict) -> dict | None:
+    """Scope the ICU SDK lookup alias to its two source-declared text files."""
+    alias = item.get("sdk_config_alias")
+    if item["name"] != "icu4c" or item.get("host", False):
+        if alias is not None:
+            raise ValueError("configuration alias is only supported for target ICU")
+        return None
+    version = item.get("version", "")
+    expected = {"path": "lib/icu/current", "target": version,
+                "files": ["Makefile.inc", "pkgdata.inc"]}
+    if not re.fullmatch(r"[0-9]+\.[0-9]+", version) or alias != expected:
+        raise ValueError("invalid source-declared ICU configuration alias")
+    return alias
+
+
 def load_lock(path: Path) -> dict:
     lock = json.loads(path.read_text())
     if lock.get("schema_version") != 1:
@@ -126,6 +142,7 @@ def load_lock(path: Path) -> dict:
                         or not re.fullmatch(r"[A-Za-z0-9_.*-]+\.dll", artifact["dll"])
                         or not re.fullmatch(r"[A-Za-z0-9_.-]+\.dll\.a", artifact["import_library"])):
                     raise ValueError(f"unsafe shared artifact contract: {name}")
+        config_alias_contract(item)
         names.add(name)
     return lock
 
@@ -459,6 +476,65 @@ def provider_paths(prefix: Path) -> tuple[dict[str, Path], dict[str, Path]]:
     return dlls, modules
 
 
+def materialize_config_alias(item: dict, prefix: Path, destination: Path) -> None:
+    """Keep ICU SDK lookup paths without accepting linked provider trees."""
+    contract = config_alias_contract(item)
+    if contract is None:
+        return
+    alias = prefix / contract["path"]
+    target = alias.parent / contract["target"]
+
+    def validated_files() -> dict[str, bytes]:
+        current = prefix
+        for component in (None, "lib", "icu", contract["target"]):
+            if component is not None:
+                current /= component
+            if current.is_symlink() or not current.is_dir():
+                raise ValueError("ICU configuration alias has a linked or missing directory")
+        if not alias.is_symlink() or os.readlink(alias) != contract["target"]:
+            raise ValueError("ICU configuration alias differs from source-declared target")
+        children = {path.name: path for path in target.iterdir()}
+        if set(children) != set(contract["files"]):
+            raise ValueError("ICU configuration directory inventory differs from source")
+        contents = {}
+        for name, path in children.items():
+            if path.is_symlink() or not path.is_file() or path.stat().st_size > 1024**2:
+                raise ValueError("ICU configuration file must be a normal bounded text file")
+            data = path.read_bytes()
+            if not data or b"\0" in data or data.startswith((b"MZ", b"\x7fELF", b"!<arch>\n", b"!<thin>\n")):
+                raise ValueError("ICU configuration file is not text")
+            try:
+                data.decode("utf-8")
+            except UnicodeDecodeError as error:
+                raise ValueError("ICU configuration file is not UTF-8 text") from error
+            contents[name] = data
+        return contents
+
+    contents = validated_files()
+    temporary = Path(tempfile.mkdtemp(prefix=".atrinik-icu-config-", dir=alias.parent))
+    try:
+        temporary.chmod(0o755)
+        for name, data in contents.items():
+            path = temporary / name
+            with path.open("xb") as output:
+                output.write(data)
+            path.chmod(0o644)
+        # Verify the original namespace and bytes again immediately before the
+        # sole mutation. Runtime DLLs and sibling lookup aliases stay in place.
+        if validated_files() != contents:
+            raise ValueError("ICU configuration inputs changed before materialization")
+        alias.unlink()
+        temporary.rename(alias)
+    finally:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+    report = {"path": contract["path"], "original_target": contract["target"],
+              "files": {name: {"before_sha256": hashlib.sha256(data).hexdigest(),
+                               "after_sha256": file_hash(alias / name)}
+                        for name, data in contents.items()}}
+    (destination / "config-directory-alias.json").write_text(json.dumps(report, indent=2) + "\n")
+
+
 def dll_snapshot(prefix: Path) -> dict:
     return {name: file_hash(path) for name, path in provider_paths(prefix)[0].items()}
 
@@ -711,6 +787,7 @@ def run(lock: dict, prefix: Path, work: Path, llvm: Path, jobs: int, dry_run: bo
                     require_shared_configuration(item, build, configuration)
         if not dry_run:
             retain_configuration(item, build, configuration)
+            materialize_config_alias(item, selected_prefix, configuration)
             receipt["notices"][item["name"]] = {item["name"] + "/" + notice.replace("/", "_"):
                 file_hash(prefix / "share/licenses" / item["name"] / notice.replace("/", "_"))
                 for notice in item["licenses"]}

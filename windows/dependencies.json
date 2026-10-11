@@ -1089,6 +1089,14 @@
         "VERBOSE=1",
         "SO_TARGET_VERSION_SUFFIX="
       ],
+      "sdk_config_alias": {
+        "path": "lib/icu/current",
+        "target": "74.2",
+        "files": [
+          "Makefile.inc",
+          "pkgdata.inc"
+        ]
+      },
       "shared_artifacts": [
         {
           "dll": "icuuc*.dll",

@@ -73,6 +73,108 @@ class WindowsDependenciesTests(unittest.TestCase):
         self.assertFalse(any(option.startswith("--disable-") and option != "--disable-symvers"
                              for option in item["options"]))
 
+    def test_icu_config_alias_preserves_lookup_bytes_and_strict_scanner(self):
+        item = next(item for item in BUILDER.load_lock(ROOT / "windows/dependencies.json")["dependencies"]
+                    if item["name"] == "icu4c")
+        with tempfile.TemporaryDirectory() as temporary:
+            prefix = Path(temporary) / "prefix"
+            target = prefix / "lib/icu/74.2"
+            target.mkdir(parents=True)
+            contents = {"Makefile.inc": b"# ICU configuration\nICU_VERSION=74.2\n",
+                        "pkgdata.inc": b"# ICU package configuration\nCC=clang\n"}
+            for name, data in contents.items():
+                (target / name).write_bytes(data)
+                (target.parent / name).symlink_to("current/" + name)
+            (target.parent / "current").symlink_to("74.2")
+            evidence = Path(temporary) / "evidence"
+            evidence.mkdir()
+            with self.assertRaisesRegex(ValueError, "unsafe symlink"):
+                BUILDER.provider_paths(prefix)
+            BUILDER.materialize_config_alias(item, prefix, evidence)
+            current = target.parent / "current"
+            self.assertFalse(current.is_symlink())
+            self.assertEqual(current.stat().st_mode & 0o777, 0o755)
+            report = json.loads((evidence / "config-directory-alias.json").read_text())
+            self.assertEqual(report["original_target"], "74.2")
+            for name, data in contents.items():
+                for directory in (target, current, target.parent):
+                    self.assertEqual((directory / name).read_bytes(), data)
+                self.assertEqual((current / name).stat().st_mode & 0o777, 0o644)
+                self.assertEqual((target.parent / name).readlink().as_posix(), "current/" + name)
+                self.assertEqual(report["files"][name]["before_sha256"], report["files"][name]["after_sha256"])
+            self.assertEqual(BUILDER.provider_paths(prefix), ({}, {}))
+
+    def test_icu_config_alias_rejects_drift_without_mutating_inputs(self):
+        item = next(item for item in BUILDER.load_lock(ROOT / "windows/dependencies.json")["dependencies"]
+                    if item["name"] == "icu4c")
+        cases = ("wrong-version", "external", "chained-target", "linked-parent", "linked-prefix",
+                 "missing-file", "extra-file", "nested-directory", "linked-file", "normal-current",
+                 "pe", "elf", "archive", "thin-archive", "nul", "invalid-utf8", "oversized", "empty")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                prefix = root / "prefix"
+                target = prefix / "lib/icu/74.2"
+                target.mkdir(parents=True)
+                for name in item["sdk_config_alias"]["files"]:
+                    (target / name).write_text("# normal ICU config\n")
+                alias = target.parent / "current"
+                alias.symlink_to("74.2")
+                evidence = root / "evidence"
+                evidence.mkdir()
+                if case in {"wrong-version", "external"}:
+                    alias.unlink()
+                    alias.symlink_to("75.1" if case == "wrong-version" else str(target))
+                elif case == "chained-target":
+                    target.rename(target.with_name("real"))
+                    target.symlink_to("real")
+                elif case in {"linked-parent", "linked-prefix"}:
+                    linked = target.parent if case == "linked-parent" else prefix
+                    outside = root / "relocated"
+                    linked.rename(outside)
+                    linked.symlink_to(outside)
+                elif case == "missing-file":
+                    (target / "pkgdata.inc").unlink()
+                elif case == "extra-file":
+                    (target / "unexpected.dll").write_bytes(b"MZpayload")
+                elif case == "nested-directory":
+                    (target / "nested").mkdir()
+                elif case == "linked-file":
+                    (target / "Makefile.inc").unlink()
+                    (target / "Makefile.inc").symlink_to("pkgdata.inc")
+                elif case == "normal-current":
+                    alias.unlink()
+                    alias.mkdir()
+                else:
+                    data = {"pe": b"MZpayload", "elf": b"\x7fELFpayload", "archive": b"!<arch>\npayload",
+                            "thin-archive": b"!<thin>\npayload", "nul": b"config\0data", "invalid-utf8": b"\xff",
+                            "oversized": b"x" * (1024**2 + 1), "empty": b""}[case]
+                    (target / "Makefile.inc").write_bytes(data)
+
+                def snapshot():
+                    return {path.relative_to(root).as_posix():
+                            ("link", path.readlink().as_posix()) if path.is_symlink() else
+                            ("file", path.read_bytes()) if path.is_file() else ("directory",)
+                            for path in root.rglob("*")}
+
+                before = snapshot()
+                with self.assertRaises(ValueError):
+                    BUILDER.materialize_config_alias(item, prefix, evidence)
+                self.assertEqual(snapshot(), before)
+
+    def test_icu_config_alias_contract_cannot_expand_to_other_paths_or_recipes(self):
+        item = next(item for item in BUILDER.load_lock(ROOT / "windows/dependencies.json")["dependencies"]
+                    if item["name"] == "icu4c")
+        for key, value in (("path", "lib/current"), ("target", "../74.2"), ("files", ["Makefile.inc", "extra.dll"])):
+            changed = json.loads(json.dumps(item))
+            changed["sdk_config_alias"][key] = value
+            with self.assertRaisesRegex(ValueError, "source-declared"):
+                BUILDER.config_alias_contract(changed)
+        for changed in ({**item, "name": "another-recipe"}, {**item, "host": True},
+                        {key: value for key, value in item.items() if key != "sdk_config_alias"}):
+            with self.assertRaises(ValueError):
+                BUILDER.config_alias_contract(changed)
+
     def test_shared_configuration_requires_actual_resolved_settings(self):
         libtool = ("# ### BEGIN LIBTOOL CONFIG\nbuild_libtool_libs=yes\nbuild_old_libs=no\n# ### END LIBTOOL CONFIG\n"
                    "# ### BEGIN LIBTOOL TAG CONFIG: disable-shared\nbuild_libtool_libs=no\nbuild_old_libs=yes\n"
