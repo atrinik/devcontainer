@@ -21,68 +21,28 @@
   },
   "host_packages": [
     "ca-certificates",
+    "ccache",
     "cmake",
     "git",
     "ninja-build",
+    "pkg-config",
     "python3"
   ],
-  "mxe": {
-    "repository": "mxe/mxe",
-    "commit": "8784776b145a8ddd350ce32aa0908ac10977060c",
-    "target": "x86_64-w64-mingw32.shared",
-    "packages": [
-      "c-ares",
-      "cc",
-      "cmake",
-      "curl",
-      "libidn2",
-      "libxml2",
-      "openssl",
-      "sdl3",
-      "sdl3_image",
-      "sdl3_ttf",
-      "zlib"
-    ],
-    "additional_libraries": [
-      "miniupnpc",
-      "SDL3_mixer",
-      "libogg",
-      "libopus",
-      "libopusfile"
-    ],
-    "sources": {
-      "miniupnpc": {
-        "repository": "miniupnp/miniupnp",
-        "commit": "bf4215a7574f88aa55859db9db00e3ae58cf42d6"
-      }
-    },
-    "copied_roots": [
-      "/opt/mxe/usr/bin",
-      "/opt/mxe/usr/include",
-      "/opt/mxe/usr/installed",
-      "/opt/mxe/usr/lib",
-      "/opt/mxe/usr/libexec",
-      "/opt/mxe/usr/share",
-      "/opt/mxe/usr/x86_64-w64-mingw32.shared",
-      "/opt/mxe/usr/x86_64-pc-linux-gnu/bin/{cmake,cpack,ctest,pkgconf,x86_64-w64-mingw32.shared-g++,x86_64-w64-mingw32.shared-gcc}",
-      "/opt/mxe/usr/x86_64-pc-linux-gnu/share/cmake-3.31",
-      "/opt/mxe/.ccache/bin",
-      "/opt/mxe/.ccache/etc"
-    ],
-    "ccache_path": "/opt/mxe/.ccache/bin/ccache",
-    "runtime_directory": "/opt/mxe/usr/x86_64-w64-mingw32.shared/bin"
-  },
   "staging": {
     "commands": [
       "bash",
+      "ccache",
       "cmake",
       "cpack",
       "git",
       "ninja",
       "python3",
-      "x86_64-w64-mingw32.shared-cmake",
-      "x86_64-w64-mingw32.shared-gcc",
-      "x86_64-w64-mingw32.shared-objdump"
+      "x86_64-w64-mingw32-clang",
+      "llvm-ar",
+      "llvm-ranlib",
+      "llvm-readobj",
+      "llvm-dlltool",
+      "x86_64-w64-mingw32-windres"
     ],
     "python_modules": [
       "hashlib",
@@ -98,10 +58,10 @@
   "runtime_contract": {
     "inventory": "/usr/local/share/atrinik/audio-toolchain.json",
     "sbom": "/usr/local/share/atrinik/audio-toolchain.spdx.json",
-    "probe": "/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/atrinik-sdl3-mixer-probe.exe",
+    "probe": "/opt/atrinik-windows/bin/atrinik-sdl3-mixer-probe.exe",
     "import_contract_source": "audio-toolchain.json#windows",
     "cares_license": {
-      "source": "/opt/mxe/usr/x86_64-w64-mingw32.shared/share/licenses/c-ares/LICENSE.md",
+      "source": "/opt/atrinik-windows/share/licenses/c-ares/LICENSE.md",
       "upstream": "https://github.com/c-ares/c-ares/blob/v1.34.6/LICENSE.md",
       "sha256": "460f5e768fda3752ca2169a95df062578a10fb126bfd65f3b9b1a1bed2f84807",
       "bundle_name": "c-ares-LICENSE.md"
@@ -168,21 +128,66 @@
   },
   "excluded": {
     "paths": [
-      "/opt/mxe/.git",
-      "/opt/mxe/.ccache/ccache",
-      "/opt/mxe/log",
-      "/opt/mxe/pkg",
-      "/opt/mxe/python-runtime",
-      "/opt/mxe/usr/x86_64-pc-linux-gnu/icu4c",
-      "/opt/mxe/usr/x86_64-w64-mingw32.shared/include/python3.14",
-      "/opt/mxe/usr/x86_64-w64-mingw32.shared/lib/libpython314.dll.a"
+      "/opt/atrinik-windows/python-runtime",
+      "/opt/atrinik-windows/include/python3.14",
+      "/opt/atrinik-windows/lib/libpython314.dll.a",
+      "/tmp/windows-dependencies"
     ],
     "capabilities": [
       "native Linux worldmaker build",
       "Windows server Python plugin SDK and runtime",
-      "general-purpose MXE development checkout"
+      "dependency source build caches"
     ],
     "reason": "Classic Check builds and stages only libatrinik and client native Windows tests; server packaging and worldmaker remain on the general-purpose image."
   },
-  "curl_contract": "/usr/local/share/atrinik/classic-curl-toolchain.json"
+  "curl_contract": "/usr/local/share/atrinik/classic-curl-toolchain.json",
+  "llvm_mingw": {
+    "repository": "mstorsjo/llvm-mingw",
+    "release": "20261006",
+    "source_commit": "e1878a59f8bf3e1a73afe28f1b83168b1d029ed8",
+    "llvm_version": "23.1.3",
+    "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64.tar.xz",
+    "sha256": "5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4",
+    "crt": "ucrt",
+    "runtime": "compiler-rt",
+    "target": "x86_64-w64-mingw32",
+    "prefix": "/opt/llvm-mingw",
+    "dependency_prefix": "/opt/atrinik-windows",
+    "toolchain_file": "/opt/atrinik-windows/share/cmake/llvm-mingw.cmake",
+    "runtime_directory": "/opt/atrinik-windows/bin",
+    "dependency_lock": "windows/dependencies.json",
+    "llvm_source_commit": "0d261d1ca552c95a8f007e061c787ac7132fbcbc",
+    "licenses": [
+      {
+        "name": "LICENSE.TXT",
+        "source": "/opt/atrinik-windows/share/licenses/llvm-mingw/LICENSE.TXT",
+        "sha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
+      },
+      {
+        "name": "COPYING",
+        "source": "/opt/atrinik-windows/share/licenses/llvm-mingw/COPYING",
+        "sha256": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f"
+      },
+      {
+        "name": "COPYING.MinGW-w64-runtime.txt",
+        "source": "/opt/atrinik-windows/share/licenses/llvm-mingw/COPYING.MinGW-w64-runtime.txt",
+        "sha256": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f"
+      },
+      {
+        "name": "COPYING.MinGW-w64.txt",
+        "source": "/opt/atrinik-windows/share/licenses/llvm-mingw/COPYING.MinGW-w64.txt",
+        "sha256": "f38e6194bd3bfa1b654f118e5acefe0aead437bbe669eee43957ccc65a7127f1"
+      },
+      {
+        "name": "COPYING.winpthreads.txt",
+        "source": "/opt/atrinik-windows/share/licenses/llvm-mingw/COPYING.winpthreads.txt",
+        "sha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177"
+      },
+      {
+        "name": "COPYING.winstorecompat.txt",
+        "source": "/opt/atrinik-windows/share/licenses/llvm-mingw/COPYING.winstorecompat.txt",
+        "sha256": "fa7368d1f93d890c173177475d8ec7aff265a7d08f1f364d66f74d138978ce36"
+      }
+    ]
+  }
 }

@@ -52,3 +52,10 @@ if ($inventory.verification.public_ca.endpoint -ne 'https://curl.se/') {
     throw 'Unexpected public TLS qualification endpoint'
 }
 Invoke-QualifiedNativeTest 'atrinik-curl-cancellation-probe.exe' @('--public-ca', $ca, 'https://curl.se/') 15000
+
+$audio = Get-Content -Raw (Join-Path $bundle 'audio-toolchain.json') | ConvertFrom-Json
+$opus = Join-Path $bundle 'opus-probe.opus'
+if ((Get-FileHash -Algorithm SHA256 $opus).Hash.ToLowerInvariant() -ne $audio.fixture.sha256) {
+    throw 'Opus fixture does not match the pinned audio producer'
+}
+Invoke-QualifiedNativeTest 'atrinik-sdl3-mixer-probe.exe' @($opus) 60000

@@ -13,9 +13,8 @@ import tempfile
 import zipfile
 
 
-DLL_NAME = re.compile(r"^\s*DLL Name:\s*(\S+)\s*$", re.IGNORECASE | re.MULTILINE)
+DLL_NAME = re.compile(r"^\s*Name:\s*(\S+\.(?:dll|drv))\s*$", re.IGNORECASE | re.MULTILINE)
 EXPECTED_RUNTIME_DLLS = {
-    "libssp-0.dll",
     "sdl3.dll",
     "sdl3_image.dll",
     "sdl3_mixer.dll",
@@ -42,7 +41,7 @@ SYSTEM_DLLS = {
     "iphlpapi.dll",
     "kernel32.dll",
     "msimg32.dll",
-    "msvcrt.dll",
+    "ucrtbase.dll",
     "ncrypt.dll",
     "normaliz.dll",
     "ole32.dll",
@@ -80,12 +79,12 @@ def is_system_dll(name: str) -> bool:
 def main() -> int:
     if len(sys.argv) != 4:
         print(
-            f"usage: {Path(sys.argv[0]).name} PACKAGE OBJDUMP TOOLCHAIN_MANIFEST",
+            f"usage: {Path(sys.argv[0]).name} PACKAGE READOBJ TOOLCHAIN_MANIFEST",
             file=sys.stderr,
         )
         return 2
     package = Path(sys.argv[1])
-    objdump = sys.argv[2]
+    readobj = sys.argv[2]
     manifest = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
     expected_payloads = {
         "ca-bundle.crt": manifest["verification"]["public_ca"]["sha256"],
@@ -122,12 +121,15 @@ def main() -> int:
                 + ", ".join(sorted(missing_expected))
             )
 
-        queue = [Path(executable).name.lower()]
+        queue = [name for name in archive_by_basename
+                 if name.endswith((".exe", ".dll", ".pyd"))]
         inspected: set[str] = set()
         while queue:
             basename = queue.pop()
             if basename in inspected:
                 continue
+            if basename == "msvcrt.dll" or basename.startswith(("libgcc", "libstdc++", "libssp", "libgomp", "libatomic", "libquadmath")):
+                raise RuntimeError(f"packaged forbidden GCC or legacy CRT runtime: {basename}")
             matches = archive_by_basename.get(basename, [])
             if len(matches) != 1:
                 raise RuntimeError(
@@ -136,7 +138,7 @@ def main() -> int:
             binary = Path(temporary) / basename
             binary.write_bytes(archive.read(matches[0]))
             result = subprocess.run(
-                [objdump, "-p", str(binary)],
+                [readobj, "--coff-imports", str(binary)],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -147,9 +149,13 @@ def main() -> int:
                     f"cannot inspect packaged {basename}: "
                     f"{result.stderr.strip() or result.returncode}"
                 )
+            if "Format: COFF-x86-64" not in result.stdout:
+                raise RuntimeError(f"packaged runtime is not x86_64 COFF: {basename}")
             inspected.add(basename)
             for dependency in DLL_NAME.findall(result.stdout):
                 normalized = dependency.lower()
+                if normalized == "msvcrt.dll" or normalized.startswith(("libgcc", "libstdc++", "libssp", "libgomp", "libatomic", "libquadmath")):
+                    raise RuntimeError(f"packaged runtime imports forbidden GCC or legacy CRT runtime: {normalized}")
                 if not is_system_dll(normalized) and normalized not in inspected:
                     queue.append(normalized)
     return 0

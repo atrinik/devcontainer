@@ -53,7 +53,7 @@ class PackageClosureTests(unittest.TestCase):
                     else runtime_imports
                 )
                 return subprocess.CompletedProcess(
-                    command, 0, "".join("DLL Name: " + name + "\n" for name in imports), ""
+                    command, 0, "Format: COFF-x86-64\n" + "".join("Import {\n  Name: " + name + "\n}\n" for name in imports), ""
                 )
 
             with mock.patch.object(MODULE.sys, "argv", ["verify", str(package), "objdump", str(manifest)]), mock.patch.object(
@@ -67,6 +67,17 @@ class PackageClosureTests(unittest.TestCase):
     def test_transitive_private_runtime_still_must_be_packaged(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "libcares-2.dll"):
             self.verify(["D3D12.dll", "SDL3.dll"], ["libcares-2.dll"])
+
+    def test_ucrt_is_inbox(self) -> None:
+        self.assertEqual(self.verify(["ucrtbase.dll", "api-ms-win-crt-runtime-l1-1-0.dll", "SDL3.dll"], ["KERNEL32.dll"]), 0)
+
+    def test_gnu_runtime_dependency_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "forbidden GCC"):
+            self.verify(["SDL3.dll"], ["libgcc_s_seh-1.dll"])
+
+    def test_legacy_msvcrt_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "legacy CRT"):
+            self.verify(["SDL3.dll"], ["msvcrt.dll"])
 
     def test_package_cannot_replace_pinned_ca_with_system_ca(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "ca-bundle.crt checksum"):

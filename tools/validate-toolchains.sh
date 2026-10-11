@@ -66,13 +66,12 @@ jq -e '
   and .fixture.license == "MIT"
   and (.fixture.sha256 | test("^[0-9a-f]{64}$"))
   and .windows.codec_runtime_dlls == []
-  and .windows.support_runtime_dlls == ["libssp-0.dll"]
-  and .windows.sdl_mixer_imports == [
-    "KERNEL32.dll", "libssp-0.dll", "msvcrt.dll", "SDL3.dll"
-  ]
-  and .windows.support_runtime_imports == {
-    "libssp-0.dll": ["ADVAPI32.dll", "KERNEL32.dll", "msvcrt.dll"]
-  }
+  and .windows.support_runtime_dlls == []
+  and .windows.support_runtime_imports == {}
+  and (.windows.sdl_mixer_imports | length > 0)
+  and all(.windows.sdl_mixer_imports[];
+    (test("^(libgcc|libstdc|libssp|msvcrt)"; "i") | not))
+  and any(.windows.sdl_mixer_imports[]; test("^(api-ms-win-crt-|ucrtbase)"; "i"))
 ' "${audio_expected}" >/dev/null
 
 if [[ -n ${audio_installed} ]]; then
@@ -131,7 +130,7 @@ fi
 if [[ -n ${classic_check_expected} ]]; then
   jq -e '
   keys == [
-    "$schema", "base", "consumer", "curl_contract", "excluded", "host_packages", "mxe",
+    "$schema", "base", "consumer", "curl_contract", "excluded", "host_packages", "llvm_mingw",
     "runtime_contract", "schema_version", "staging", "target", "verification"
   ]
   and .["$schema"] == "https://json-schema.org/draft/2020-12/schema"
@@ -154,62 +153,37 @@ if [[ -n ${classic_check_expected} ]]; then
     "digest": "sha256:86165cfc170e9b2aa8df90b847127eea97b08eb9987021e6e6ec6c3a96545d7c"
   }
   and .host_packages == [
-    "ca-certificates", "cmake", "git", "ninja-build", "python3"
+    "ca-certificates", "ccache", "cmake", "git", "ninja-build", "pkg-config", "python3"
   ]
-  and (.mxe | keys == [
-    "additional_libraries", "ccache_path", "commit", "copied_roots",
-    "packages", "repository", "runtime_directory", "sources", "target"
-  ])
-  and .mxe.repository == "mxe/mxe"
-  and .mxe.commit == "8784776b145a8ddd350ce32aa0908ac10977060c"
-  and .mxe.target == "x86_64-w64-mingw32.shared"
-  and .mxe.packages == [
-    "c-ares", "cc", "cmake", "curl", "libidn2", "libxml2", "openssl", "sdl3",
-    "sdl3_image", "sdl3_ttf", "zlib"
+  and (.llvm_mingw.repository == "mstorsjo/llvm-mingw")
+  and .llvm_mingw.release == "20261006"
+  and .llvm_mingw.llvm_version == "23.1.3"
+  and .llvm_mingw.source_commit == "e1878a59f8bf3e1a73afe28f1b83168b1d029ed8"
+  and .llvm_mingw.sha256 == "5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4"
+  and .llvm_mingw.crt == "ucrt"
+  and .llvm_mingw.runtime == "compiler-rt"
+  and .llvm_mingw.target == "x86_64-w64-mingw32"
+  and .llvm_mingw.prefix == "/opt/llvm-mingw"
+  and .llvm_mingw.dependency_prefix == "/opt/atrinik-windows"
+  and .llvm_mingw.toolchain_file == "/opt/atrinik-windows/share/cmake/llvm-mingw.cmake"
+  and .llvm_mingw.runtime_directory == "/opt/atrinik-windows/bin"
+  and .llvm_mingw.dependency_lock == "windows/dependencies.json"
+  and .staging.commands == [
+    "bash", "ccache", "cmake", "cpack", "git", "ninja", "python3",
+    "x86_64-w64-mingw32-clang", "llvm-ar", "llvm-ranlib", "llvm-readobj",
+    "llvm-dlltool", "x86_64-w64-mingw32-windres"
   ]
-  and .mxe.additional_libraries == [
-    "miniupnpc", "SDL3_mixer", "libogg", "libopus", "libopusfile"
+  and .staging.python_modules == [
+    "hashlib", "json", "pathlib", "shutil", "subprocess", "tarfile",
+    "urllib.request", "zipfile"
   ]
-  and .mxe.sources == {
-    "miniupnpc": {
-      "repository": "miniupnp/miniupnp",
-      "commit": "bf4215a7574f88aa55859db9db00e3ae58cf42d6"
-    }
-  }
-  and .mxe.copied_roots == [
-    "/opt/mxe/usr/bin",
-    "/opt/mxe/usr/include",
-    "/opt/mxe/usr/installed",
-    "/opt/mxe/usr/lib",
-    "/opt/mxe/usr/libexec",
-    "/opt/mxe/usr/share",
-    "/opt/mxe/usr/x86_64-w64-mingw32.shared",
-    "/opt/mxe/usr/x86_64-pc-linux-gnu/bin/{cmake,cpack,ctest,pkgconf,x86_64-w64-mingw32.shared-g++,x86_64-w64-mingw32.shared-gcc}",
-    "/opt/mxe/usr/x86_64-pc-linux-gnu/share/cmake-3.31",
-    "/opt/mxe/.ccache/bin",
-    "/opt/mxe/.ccache/etc"
-  ]
-  and .mxe.ccache_path == "/opt/mxe/.ccache/bin/ccache"
-  and .mxe.runtime_directory == "/opt/mxe/usr/x86_64-w64-mingw32.shared/bin"
-  and .staging == {
-    "commands": [
-      "bash", "cmake", "cpack", "git", "ninja", "python3",
-      "x86_64-w64-mingw32.shared-cmake",
-      "x86_64-w64-mingw32.shared-gcc",
-      "x86_64-w64-mingw32.shared-objdump"
-    ],
-    "python_modules": [
-      "hashlib", "json", "pathlib", "shutil", "subprocess", "tarfile",
-      "urllib.request", "zipfile"
-    ]
-  }
   and .runtime_contract == {
     "inventory": "/usr/local/share/atrinik/audio-toolchain.json",
     "sbom": "/usr/local/share/atrinik/audio-toolchain.spdx.json",
-    "probe": "/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/atrinik-sdl3-mixer-probe.exe",
+    "probe": "/opt/atrinik-windows/bin/atrinik-sdl3-mixer-probe.exe",
     "import_contract_source": "audio-toolchain.json#windows",
     "cares_license": {
-      "source":"/opt/mxe/usr/x86_64-w64-mingw32.shared/share/licenses/c-ares/LICENSE.md",
+      "source":"/opt/atrinik-windows/share/licenses/c-ares/LICENSE.md",
       "upstream":"https://github.com/c-ares/c-ares/blob/v1.34.6/LICENSE.md",
       "sha256":"460f5e768fda3752ca2169a95df062578a10fb126bfd65f3b9b1a1bed2f84807",
       "bundle_name":"c-ares-LICENSE.md"
@@ -233,16 +207,15 @@ if [[ -n ${classic_check_expected} ]]; then
   }
   and .excluded == {
     "paths": [
-      "/opt/mxe/.git", "/opt/mxe/.ccache/ccache", "/opt/mxe/log",
-      "/opt/mxe/pkg", "/opt/mxe/python-runtime",
-      "/opt/mxe/usr/x86_64-pc-linux-gnu/icu4c",
-      "/opt/mxe/usr/x86_64-w64-mingw32.shared/include/python3.14",
-      "/opt/mxe/usr/x86_64-w64-mingw32.shared/lib/libpython314.dll.a"
+      "/opt/atrinik-windows/python-runtime",
+      "/opt/atrinik-windows/include/python3.14",
+      "/opt/atrinik-windows/lib/libpython314.dll.a",
+      "/tmp/windows-dependencies"
     ],
     "capabilities": [
       "native Linux worldmaker build",
       "Windows server Python plugin SDK and runtime",
-      "general-purpose MXE development checkout"
+      "dependency source build caches"
     ],
     "reason": "Classic Check builds and stages only libatrinik and client native Windows tests; server packaging and worldmaker remain on the general-purpose image."
   }

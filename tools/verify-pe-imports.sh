@@ -2,11 +2,11 @@
 set -euo pipefail
 
 if [[ $# -lt 3 ]]; then
-  echo "usage: $0 OBJDUMP PE_FILE EXPECTED_DLL..." >&2
+  echo "usage: $0 READOBJ PE_FILE EXPECTED_DLL..." >&2
   exit 2
 fi
 
-objdump=$1
+readobj=$1
 pe_file=$2
 shift 2
 
@@ -18,8 +18,9 @@ fi
 work=$(mktemp -d)
 trap 'rm -rf -- "${work}"' EXIT
 
-"${objdump}" -p "${pe_file}" \
-  | sed -n 's/^[[:space:]]*DLL Name: //p' \
+"${readobj}" --coff-imports "${pe_file}" > "${work}/readobj"
+grep -F "Format: COFF-x86-64" "${work}/readobj" >/dev/null
+sed -n 's/^[[:space:]]*Name: //p' "${work}/readobj" \
   | tr '[:upper:]' '[:lower:]' \
   | LC_ALL=C sort -u > "${work}/actual"
 printf '%s\n' "$@" \

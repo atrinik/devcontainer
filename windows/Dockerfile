@@ -1,364 +1,182 @@
 # syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 
-FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:86165cfc170e9b2aa8df90b847127eea97b08eb9987021e6e6ec6c3a96545d7c AS windows-shared
-
+# One Debian 12-built LLVM cohort serves Ubuntu and portable consumers. The
+# bootstrap is build-only; every owned dependency uses the resulting Clang.
+FROM debian:bookworm-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867 AS llvm-toolchain
+ARG TARGETARCH
+ARG LLVM_BUILD_JOBS=2
 ENV DEBIAN_FRONTEND=noninteractive
+COPY llvm-bootstrap-packages.lock /tmp/llvm-bootstrap-packages.lock
+RUN test "${TARGETARCH}" = amd64 \
+    && test "$(dpkg --print-architecture)" = amd64 \
+    && rm /etc/apt/sources.list.d/debian.sources \
+    && printf '%s\n' \
+        'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260901T000000Z bookworm main' \
+        'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260901T000000Z bookworm-updates main' \
+        'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260901T000000Z bookworm-security main' \
+        > /etc/apt/sources.list \
+    && apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update \
+    && xargs apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+        < /tmp/llvm-bootstrap-packages.lock \
+    && while IFS='=' read -r package version; do \
+        test "$(dpkg-query --show --showformat='${Version}' "${package}")" = "${version}"; \
+       done < /tmp/llvm-bootstrap-packages.lock \
+    && sed -i 's|http://snapshot.debian.org|https://snapshot.debian.org|g' /etc/apt/sources.list \
+    && apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update \
+    && rm -rf /var/lib/apt/lists/*
+COPY llvm-toolchain.json /tmp/llvm-toolchain.json
+COPY tools/install_llvm_toolchain.py tools/validate_llvm_toolchain.py /tmp/
+RUN python3 /tmp/install_llvm_toolchain.py --manifest /tmp/llvm-toolchain.json \
+        --cache /tmp/llvm-downloads --prefix /opt/llvm-23.1.3 --jobs "${LLVM_BUILD_JOBS}" \
+    && PATH="/opt/llvm-23.1.3/bin:${PATH}" python3 /tmp/validate_llvm_toolchain.py \
+        --manifest /tmp/llvm-toolchain.json --prefix /opt/llvm-23.1.3 \
+    && rm -rf /tmp/llvm-downloads
 
+
+FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:86165cfc170e9b2aa8df90b847127eea97b08eb9987021e6e6ec6c3a96545d7c AS windows-shared
+ENV DEBIAN_FRONTEND=noninteractive
 RUN rm -f /etc/apt/apt.conf.d/docker-clean
-
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    apt-get update \
-    && apt-get install -y --no-install-recommends \
-        autoconf \
-        automake \
-        autopoint \
-        bison \
-        bzip2 \
-        ca-certificates \
-        cmake \
-        flex \
-        g++ \
-        g++-multilib \
-        gettext \
-        git \
-        gperf \
-        intltool \
-        libc6-dev-i386 \
-        libclang-dev \
-        libgdk-pixbuf-2.0-dev \
-        libgl-dev \
-        libltdl-dev \
-        libpcre2-dev \
-        libssl-dev \
-        libtool-bin \
-        libxml-parser-perl \
-        lzip \
-        make \
-        mingw-w64-tools \
-        ninja-build \
-        openssh-client \
-        openssl \
-        p7zip-full \
-        patch \
-        perl \
-        python-is-python3 \
-        python3 \
-        python3-mako \
-        python3-packaging \
-        python3-pkg-resources \
-        python3-setuptools \
-        ruby \
-        sqlite3 \
-        unzip \
-        wget \
-        xz-utils \
-        zip
-
-ARG MXE_REF=8784776b145a8ddd350ce32aa0908ac10977060c
-ARG MXE_BUILD_JOBS=2
-ARG MINIUPNPC_COMMIT=bf4215a7574f88aa55859db9db00e3ae58cf42d6
+    apt-get update && apt-get install -y --no-install-recommends \
+        autoconf automake autopoint bison bzip2 ca-certificates ccache cmake \
+        curl flex gettext git gperf libc6-dev libstdc++-12-dev libtool-bin lzip make ninja-build openssh-client \
+        patch perl pkg-config python3 python3-mako python3-packaging python3-setuptools unzip wget xz-utils zip jq
+ARG WINDOWS_BUILD_JOBS=2
 ARG PYTHON_VERSION=3.14.6
 ARG PYTHON_EMBED_SHA256=df901e84a896ff1ee720ad03377e0c8d8c2244fda79808aeeaff6316df1cb75c
 ARG PYTHON_SOURCE_SHA256=143b1dddefaec3bd2e21e3b839b34a2b7fb9842272883c576420d605e9f30c63
-RUN git clone --filter=blob:none https://github.com/mxe/mxe.git /opt/mxe \
-    && git -C /opt/mxe checkout "${MXE_REF}"
-
-COPY windows/curl-openssl.patch /tmp/curl-openssl.patch
-COPY windows/openssl-3.5.patch /tmp/openssl-3.5.patch
-COPY windows/c-ares.mk /opt/mxe/src/c-ares.mk
-RUN git -C /opt/mxe apply /tmp/curl-openssl.patch /tmp/openssl-3.5.patch \
-    && chown -R vscode:vscode /opt/mxe
-
-ENV MXE_ROOT=/opt/mxe \
-    MXE_TARGET=x86_64-w64-mingw32.shared \
-    MXE_PREFIX=/opt/mxe/usr/x86_64-w64-mingw32.shared \
-    MXE_TOOLCHAIN_FILE=/opt/mxe/usr/x86_64-w64-mingw32.shared/share/cmake/mxe-conf.cmake \
-    MXE_RUNTIME_DIR=/opt/mxe/usr/x86_64-w64-mingw32.shared/bin \
-    ATRINIK_WINDOWS_PYTHON_INCLUDE_DIR=/opt/mxe/usr/x86_64-w64-mingw32.shared/include/python3.14 \
-    ATRINIK_WINDOWS_PYTHON_LIBRARY=/opt/mxe/usr/x86_64-w64-mingw32.shared/lib/libpython314.dll.a \
-    ATRINIK_WINDOWS_PYTHON_RUNTIME_DIR=/opt/mxe/python-runtime \
-    PATH=/opt/mxe/usr/bin:${PATH}
-
+COPY --from=llvm-toolchain /opt/llvm-23.1.3 /opt/llvm-23.1.3
+COPY windows/classic-check-toolchain.json /tmp/classic-check-toolchain.json
+RUN url=$(jq -er '.llvm_mingw.url' /tmp/classic-check-toolchain.json) \
+    && hash=$(jq -er '.llvm_mingw.sha256' /tmp/classic-check-toolchain.json) \
+    && curl --fail --location --show-error "$url" --output /tmp/llvm-mingw.tar.xz \
+    && echo "$hash  /tmp/llvm-mingw.tar.xz" | sha256sum -c - \
+    && mkdir -p /opt/llvm-mingw /opt/atrinik-windows/share/cmake \
+    && tar -xf /tmp/llvm-mingw.tar.xz --strip-components=1 -C /opt/llvm-mingw \
+    && rm /tmp/llvm-mingw.tar.xz \
+    && mkdir -p /opt/atrinik-windows/share/licenses/llvm-mingw /opt/atrinik-windows/bin \
+    && cp /opt/llvm-mingw/LICENSE.TXT /opt/atrinik-windows/share/licenses/llvm-mingw/LICENSE.TXT \
+    && cp /opt/llvm-mingw/x86_64-w64-mingw32/share/mingw32/COPYING* /opt/atrinik-windows/share/licenses/llvm-mingw/ \
+    && cp /opt/llvm-mingw/x86_64-w64-mingw32/bin/libc++.dll \
+        /opt/llvm-mingw/x86_64-w64-mingw32/bin/libunwind.dll \
+        /opt/llvm-mingw/x86_64-w64-mingw32/bin/libwinpthread-1.dll /opt/atrinik-windows/bin/ \
+    && chown -R vscode:vscode /opt/atrinik-windows
+ENV ATRINIK_WINDOWS_TOOLCHAIN_FILE=/opt/atrinik-windows/share/cmake/llvm-mingw.cmake \
+    ATRINIK_WINDOWS_TARGET=x86_64-w64-mingw32 \
+    ATRINIK_WINDOWS_RUNTIME_DIR=/opt/atrinik-windows/bin \
+    ATRINIK_WINDOWS_PYTHON_INCLUDE_DIR=/opt/atrinik-windows/include/python3.14 \
+    ATRINIK_WINDOWS_PYTHON_LIBRARY=/opt/atrinik-windows/lib/libpython314.dll.a \
+    ATRINIK_WINDOWS_PYTHON_RUNTIME_DIR=/opt/atrinik-windows/python-runtime \
+    PATH=/opt/llvm-23.1.3/bin:/opt/llvm-mingw/bin:/opt/atrinik-windows/bin:${PATH} \
+    CC=clang CXX=clang++ AR=llvm-ar RANLIB=llvm-ranlib LD=ld.lld
+COPY --chown=vscode:vscode windows/llvm-mingw-toolchain.cmake ${ATRINIK_WINDOWS_TOOLCHAIN_FILE}
+COPY --chown=vscode:vscode windows/target-pkg-config.sh /opt/atrinik-windows/bin/x86_64-w64-mingw32-pkg-config
+COPY --chown=vscode:vscode windows/build-dependencies.py windows/dependencies.json /tmp/windows-producer/
 USER vscode
-RUN make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
-        MXE_TARGETS=x86_64-w64-mingw32.shared \
-        openssl
-RUN make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
-        MXE_TARGETS=x86_64-w64-mingw32.shared \
-        cc cmake curl openssl zlib libxml2 sdl3
-COPY --chown=vscode:vscode windows/sdl3-image-disable-tiff.patch \
-        /tmp/sdl3-image-disable-tiff.patch
-RUN git -C /opt/mxe apply /tmp/sdl3-image-disable-tiff.patch \
-    && make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
-        MXE_TARGETS=x86_64-w64-mingw32.shared \
-        sdl3_image \
-    || { \
-        cat /opt/mxe/log/sdl3_image_x86_64-w64-mingw32.shared; \
-        exit 1; \
-    }
-RUN make -C /opt/mxe --jobs="${MXE_BUILD_JOBS}" JOBS="${MXE_BUILD_JOBS}" \
-        MXE_TARGETS=x86_64-w64-mingw32.shared \
-        sdl3_ttf
+# Fresh target prefix: no binary or archive from the former GCC producer enters it.
+RUN python3 /tmp/windows-producer/build-dependencies.py \
+        --lock /tmp/windows-producer/dependencies.json --prefix /opt/atrinik-windows \
+        --work-dir /tmp/windows-dependencies --jobs "${WINDOWS_BUILD_JOBS}" \
+    && rm -rf /tmp/windows-dependencies
 COPY --chown=vscode:vscode tools/verify-classic-curl.sh /tmp/verify-classic-curl.sh
-RUN /tmp/verify-classic-curl.sh /opt/mxe/usr/x86_64-w64-mingw32.shared \
-    && test "$(/opt/mxe/usr/x86_64-w64-mingw32.shared/bin/curl-config --ssl-backends)" \
-        = "OpenSSL" \
-    && test "$(/opt/mxe/usr/bin/x86_64-w64-mingw32.shared-pkg-config --modversion openssl)" = "3.5.5" \
-    && test "$(/opt/mxe/usr/bin/x86_64-w64-mingw32.shared-pkg-config --modversion libcares)" = "1.34.6" \
-    && /opt/mxe/usr/x86_64-w64-mingw32.shared/bin/curl-config --configure \
-        | grep -F -- --disable-threaded-resolver
-
-# Install the audio manifest reader after the expensive MXE foundation so this
-# small dependency does not invalidate the established cross-toolchain cache.
-USER root
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    apt-get update \
-    && apt-get install -y --no-install-recommends jq
-USER vscode
-
-# MXE does not yet package SDL3_mixer. Cross-build the checksum-pinned release
-# with static libogg, libopus, and libopusfile inputs. This keeps the shared
-# SDL3_mixer DLL self-contained instead of creating an easy-to-miss codec DLL
-# closure for packaged clients.
+RUN /tmp/verify-classic-curl.sh /opt/atrinik-windows \
+    && test "$(x86_64-w64-mingw32-pkg-config --modversion openssl)" = 3.5.5 \
+    && test "$(x86_64-w64-mingw32-pkg-config --modversion libcares)" = 1.34.6
 COPY --chown=vscode:vscode audio-toolchain.json /tmp/audio-toolchain.json
 COPY --chown=vscode:vscode tools/build-sdl3-mixer.sh /tmp/build-sdl3-mixer.sh
-RUN /tmp/build-sdl3-mixer.sh \
-        /tmp/audio-toolchain.json \
-        x86_64-w64-mingw32.shared-cmake \
-        "${MXE_PREFIX}" "${MXE_BUILD_JOBS}" \
-    && test "$(x86_64-w64-mingw32.shared-pkg-config --modversion sdl3-mixer)" \
-        = "$(jq -r '.sdl_mixer.version' /tmp/audio-toolchain.json)"
-
-COPY --chown=vscode:vscode tools/audio/opus-probe.opus \
-        ${MXE_PREFIX}/share/atrinik/audio/opus-probe.opus
-COPY --chown=vscode:vscode tools/audio/sdl3-mixer-probe.c \
-        /tmp/sdl3-mixer-probe.c
-COPY --chown=vscode:vscode tools/verify-pe-imports.sh \
-        /tmp/verify-pe-imports.sh
-RUN test "$(sha256sum "${MXE_PREFIX}/share/atrinik/audio/opus-probe.opus" \
-        | cut -d' ' -f1)" \
+# The audio helper accepts a command; this small wrapper supplies our toolchain.
+RUN printf '%s\n' '#!/bin/sh' 'case "${1:-}" in --build|--install) exec cmake "$@";; esac' 'exec cmake -DCMAKE_TOOLCHAIN_FILE="$ATRINIK_WINDOWS_TOOLCHAIN_FILE" "$@"' \
+        > /opt/atrinik-windows/bin/atrinik-windows-cmake \
+    && chmod +x /opt/atrinik-windows/bin/atrinik-windows-cmake \
+    && /tmp/build-sdl3-mixer.sh /tmp/audio-toolchain.json \
+        atrinik-windows-cmake /opt/atrinik-windows "${WINDOWS_BUILD_JOBS}" \
+    && python3 /tmp/windows-producer/build-dependencies.py --register-audio \
+        --audio-lock /tmp/audio-toolchain.json --lock /tmp/windows-producer/dependencies.json \
+        --prefix /opt/atrinik-windows --work-dir /tmp/windows-audio-registration \
+    && rm -rf /tmp/windows-audio-registration
+COPY --chown=vscode:vscode tools/audio/opus-probe.opus /opt/atrinik-windows/share/atrinik/audio/opus-probe.opus
+COPY --chown=vscode:vscode tools/audio/sdl3-mixer-probe.c /tmp/sdl3-mixer-probe.c
+COPY --chown=vscode:vscode tools/verify-pe-imports.sh /tmp/verify-pe-imports.sh
+RUN test "$(sha256sum /opt/atrinik-windows/share/atrinik/audio/opus-probe.opus | cut -d' ' -f1)" \
         = "$(jq -r '.fixture.sha256' /tmp/audio-toolchain.json)" \
-    && x86_64-w64-mingw32.shared-gcc \
-        -std=c17 -Wall -Wextra -Werror \
-        /tmp/sdl3-mixer-probe.c \
-        -o "${MXE_RUNTIME_DIR}/atrinik-sdl3-mixer-probe.exe" \
-        $(x86_64-w64-mingw32.shared-pkg-config \
-            --cflags --libs sdl3-mixer) \
-    && jq -r '.windows.sdl_mixer_imports[]' \
-        /tmp/audio-toolchain.json \
-        | xargs /tmp/verify-pe-imports.sh \
-            x86_64-w64-mingw32.shared-objdump \
-            "${MXE_RUNTIME_DIR}/SDL3_mixer.dll" \
-    && jq -r '.windows.support_runtime_imports["libssp-0.dll"][]' \
-        /tmp/audio-toolchain.json \
-        | xargs /tmp/verify-pe-imports.sh \
-            x86_64-w64-mingw32.shared-objdump \
-            "${MXE_RUNTIME_DIR}/libssp-0.dll" \
-    && ! find "${MXE_RUNTIME_DIR}" -maxdepth 1 -type f \
-        \( -iname '*opus*.dll' -o -iname 'libogg*.dll' \) \
-        -print -quit | grep -q . \
+    && x86_64-w64-mingw32-clang -std=c17 -Wall -Wextra -Werror \
+        /tmp/sdl3-mixer-probe.c -o "${ATRINIK_WINDOWS_RUNTIME_DIR}/atrinik-sdl3-mixer-probe.exe" \
+        $(x86_64-w64-mingw32-pkg-config --cflags --libs sdl3-mixer) \
+    && jq -r '.windows.sdl_mixer_imports[]' /tmp/audio-toolchain.json \
+        | xargs /tmp/verify-pe-imports.sh llvm-readobj "${ATRINIK_WINDOWS_RUNTIME_DIR}/SDL3_mixer.dll" \
+    && python3 /tmp/windows-producer/build-dependencies.py \
+        --lock /tmp/windows-producer/dependencies.json --prefix /opt/atrinik-windows \
+        --work-dir /tmp/windows-dependencies --jobs "${WINDOWS_BUILD_JOBS}" --verify-only \
     && rm /tmp/sdl3-mixer-probe.c
-
-COPY --chown=vscode:vscode windows/classic-check-toolchain.json \
-    /tmp/classic-check-toolchain.json
-RUN mxe_commit=$(jq -er '.mxe.commit' \
-        /tmp/classic-check-toolchain.json) \
-    && test "${mxe_commit}" = "${MXE_REF}" \
-    && miniupnpc_commit=$(jq -er '.mxe.sources.miniupnpc.commit' \
-        /tmp/classic-check-toolchain.json) \
-    && test "${miniupnpc_commit}" = "${MINIUPNPC_COMMIT}" \
-    && git clone --filter=blob:none https://github.com/miniupnp/miniupnp.git \
-        /tmp/miniupnp \
-    && git -C /tmp/miniupnp checkout "${MINIUPNPC_COMMIT}" \
-    && x86_64-w64-mingw32.shared-cmake \
-        -S /tmp/miniupnp/miniupnpc \
-        -B /tmp/miniupnp-build \
-        -DUPNPC_BUILD_STATIC=ON \
-        -DUPNPC_BUILD_SHARED=OFF \
-        -DUPNPC_BUILD_TESTS=OFF \
-    && cmake --build /tmp/miniupnp-build --parallel "${MXE_BUILD_JOBS}" \
-    && cmake --install /tmp/miniupnp-build \
-    && rm -rf /tmp/miniupnp /tmp/miniupnp-build \
-        /tmp/classic-check-toolchain.json
-
-# Retain the exact notice for the new resolver DLL after the MXE foundation.
-COPY --chown=vscode:vscode windows/licenses/c-ares-1.34.6.LICENSE.md \
-    /opt/mxe/usr/x86_64-w64-mingw32.shared/share/licenses/c-ares/LICENSE.md
+COPY --chown=vscode:vscode windows/licenses/c-ares-1.34.6.LICENSE.md /opt/atrinik-windows/share/licenses/c-ares/LICENSE.md
 
 FROM windows-shared AS windows-build
-
+COPY --chown=vscode:vscode windows/python-import-library.py windows/python-runtime-inventory.py /tmp/
 RUN mkdir -p "${ATRINIK_WINDOWS_PYTHON_RUNTIME_DIR}" /tmp/python-sdk \
-    && wget -q \
-        "https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-embed-amd64.zip" \
-        -O /tmp/python-sdk/python-embed.zip \
-    && echo "${PYTHON_EMBED_SHA256}  /tmp/python-sdk/python-embed.zip" \
-        | sha256sum -c - \
-    && wget -q \
-        "https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz" \
-        -O /tmp/python-sdk/python-source.tar.xz \
-    && echo "${PYTHON_SOURCE_SHA256}  /tmp/python-sdk/python-source.tar.xz" \
-        | sha256sum -c - \
-    && unzip -q /tmp/python-sdk/python-embed.zip \
-        -d "${ATRINIK_WINDOWS_PYTHON_RUNTIME_DIR}" \
+    && wget -q "https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-embed-amd64.zip" -O /tmp/python-sdk/python-embed.zip \
+    && echo "${PYTHON_EMBED_SHA256}  /tmp/python-sdk/python-embed.zip" | sha256sum -c - \
+    && wget -q "https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz" -O /tmp/python-sdk/python-source.tar.xz \
+    && echo "${PYTHON_SOURCE_SHA256}  /tmp/python-sdk/python-source.tar.xz" | sha256sum -c - \
+    && unzip -q /tmp/python-sdk/python-embed.zip -d "${ATRINIK_WINDOWS_PYTHON_RUNTIME_DIR}" \
     && tar -xf /tmp/python-sdk/python-source.tar.xz -C /tmp/python-sdk \
     && mkdir -p "${ATRINIK_WINDOWS_PYTHON_INCLUDE_DIR}" \
-    && cp -R "/tmp/python-sdk/Python-${PYTHON_VERSION}/Include/." \
-        "${ATRINIK_WINDOWS_PYTHON_INCLUDE_DIR}/" \
-    && cp "/tmp/python-sdk/Python-${PYTHON_VERSION}/PC/pyconfig.h" \
-        "${ATRINIK_WINDOWS_PYTHON_INCLUDE_DIR}/pyconfig.h" \
-    && cd /tmp/python-sdk \
-    && gendef "${ATRINIK_WINDOWS_PYTHON_RUNTIME_DIR}/python314.dll" \
-    && x86_64-w64-mingw32.shared-dlltool \
-        -d python314.def \
-        -D python314.dll \
-        -l "${ATRINIK_WINDOWS_PYTHON_LIBRARY}" \
+    && cp -R "/tmp/python-sdk/Python-${PYTHON_VERSION}/Include/." "${ATRINIK_WINDOWS_PYTHON_INCLUDE_DIR}/" \
+    && cp "/tmp/python-sdk/Python-${PYTHON_VERSION}/PC/pyconfig.h" "${ATRINIK_WINDOWS_PYTHON_INCLUDE_DIR}/pyconfig.h" \
+    && python3 /tmp/python-import-library.py "${ATRINIK_WINDOWS_PYTHON_RUNTIME_DIR}/python314.dll" /tmp/python-sdk/python314.def \
+    && llvm-dlltool -m i386:x86-64 -d /tmp/python-sdk/python314.def -D python314.dll -l "${ATRINIK_WINDOWS_PYTHON_LIBRARY}" \
+    && printf '%s\n' '#include <Python.h>' 'int main(void) { Py_Initialize(); PyErr_SetString(PyExc_RuntimeError, "probe"); Py_Finalize(); return 0; }' > /tmp/python-sdk/probe.c \
+    && x86_64-w64-mingw32-clang -I"${ATRINIK_WINDOWS_PYTHON_INCLUDE_DIR}" /tmp/python-sdk/probe.c \
+        "${ATRINIK_WINDOWS_PYTHON_LIBRARY}" -o /tmp/python-sdk/probe.exe \
+    && llvm-readobj --coff-imports /tmp/python-sdk/probe.exe | grep -F 'Name: python314.dll' \
+    && python3 /tmp/python-runtime-inventory.py "$ATRINIK_WINDOWS_PYTHON_RUNTIME_DIR" \
+        /opt/atrinik-windows/share/atrinik/windows-dependencies/python-runtime.json \
     && rm -rf /tmp/python-sdk
-
 USER root
-
-# Native build dependencies used by Atrinik's build-windows.sh to run the Linux
-# world maker before cross-compiling and packaging the Windows server.
+# General-image worldmaker additions remain downstream of the shared producer.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    apt-get update \
-    && apt-get install -y --no-install-recommends \
-        libcurl4-openssl-dev \
-        libgd-dev \
-        libidn2-dev \
-        libminiupnpc-dev \
-        python3-dev \
-        zlib1g-dev
+    apt-get update && apt-get install -y --no-install-recommends \
+        libc6-dev libcurl4-openssl-dev libgd-dev libidn2-dev libminiupnpc-dev python3-dev zlib1g-dev
+COPY windows/llvm-path.sh /etc/profile.d/llvm-path.sh
+COPY windows/classic-check-toolchain.json classic-curl-toolchain.json audio-toolchain.json audio-toolchain.spdx.json /usr/local/share/atrinik/
+RUN x86_64-w64-mingw32-clang --version | grep -F '23.1.3' \
+    && clang --version | grep -F '23.1.3' \
+    && command -v llvm-readobj && command -v llvm-dlltool \
+    && bash -lc 'command -v x86_64-w64-mingw32-clang' \
+    && su --login vscode --command 'command -v x86_64-w64-mingw32-clang' \
+    && test -f "$ATRINIK_WINDOWS_TOOLCHAIN_FILE" \
+    && test -f "$ATRINIK_WINDOWS_PYTHON_LIBRARY" \
+    && test -f "$ATRINIK_WINDOWS_PYTHON_RUNTIME_DIR/python314.dll" \
+    && x86_64-w64-mingw32-pkg-config --exists libcurl sdl3-mixer \
+    && pkg-config --exists libidn2 && ssh -V
 
-COPY windows/mxe-path.sh /etc/profile.d/mxe-path.sh
-COPY classic-curl-toolchain.json /usr/local/share/atrinik/classic-curl-toolchain.json
-COPY audio-toolchain.json /usr/local/share/atrinik/audio-toolchain.json
-COPY audio-toolchain.spdx.json /usr/local/share/atrinik/audio-toolchain.spdx.json
-
-RUN command -v x86_64-w64-mingw32.shared-gcc \
-    && command -v x86_64-w64-mingw32.shared-cmake \
-    && bash -lc 'command -v x86_64-w64-mingw32.shared-gcc' \
-    && bash -lc 'command -v x86_64-w64-mingw32.shared-cmake' \
-    && su --login vscode --command \
-        'command -v x86_64-w64-mingw32.shared-gcc' \
-    && su --login vscode --command \
-        'command -v x86_64-w64-mingw32.shared-cmake' \
-    && x86_64-w64-mingw32.shared-gcc --version \
-    && /opt/mxe/usr/x86_64-pc-linux-gnu/bin/cmake --version \
-    && test -f "${MXE_RUNTIME_DIR}/SDL3.dll" \
-    && test -f "${MXE_RUNTIME_DIR}/SDL3_image.dll" \
-    && test -f "${MXE_RUNTIME_DIR}/SDL3_mixer.dll" \
-    && test -f "${MXE_RUNTIME_DIR}/atrinik-sdl3-mixer-probe.exe" \
-    && test -f "${MXE_RUNTIME_DIR}/SDL3_ttf.dll" \
-    && pkg-config --exists libidn2 \
-    && ssh -V
-
-# The Classic pull-request Check only needs the completed cross-toolchain and
-# staging utilities. Start again from the pinned base so MXE sources, logs,
-# package caches, the Windows Python SDK/runtime, and native worldmaker
-# dependencies do not become layers in this task-focused image. This stage is
-# deliberately branches from the shared toolchain before general-image Python
-# and worldmaker additions, so changes to those additions cannot invalidate it.
-FROM windows-shared AS classic-check-export
-
-USER root
-RUN mkdir -p /opt/classic-check/mxe \
-    && tar -C /opt/mxe \
-        --exclude='usr/x86_64-w64-mingw32.shared/include/python3.14' \
-        --exclude='usr/x86_64-w64-mingw32.shared/lib/libpython314.dll.a' \
-        -cf - \
-        usr/bin \
-        usr/include \
-        usr/installed \
-        usr/lib \
-        usr/libexec \
-        usr/share \
-        usr/x86_64-w64-mingw32.shared \
-        .ccache/bin \
-        .ccache/etc \
-        | tar -C /opt/classic-check/mxe -xf - \
-    && mkdir -p \
-        /opt/classic-check/mxe/usr/x86_64-pc-linux-gnu/bin \
-        /opt/classic-check/mxe/usr/x86_64-pc-linux-gnu/share \
-    && cp -a \
-        /opt/mxe/usr/x86_64-pc-linux-gnu/bin/cmake \
-        /opt/mxe/usr/x86_64-pc-linux-gnu/bin/cpack \
-        /opt/mxe/usr/x86_64-pc-linux-gnu/bin/ctest \
-        /opt/mxe/usr/x86_64-pc-linux-gnu/bin/pkgconf \
-        /opt/mxe/usr/x86_64-pc-linux-gnu/bin/x86_64-w64-mingw32.shared-g++ \
-        /opt/mxe/usr/x86_64-pc-linux-gnu/bin/x86_64-w64-mingw32.shared-gcc \
-        /opt/classic-check/mxe/usr/x86_64-pc-linux-gnu/bin/ \
-    && cp -a /opt/mxe/usr/x86_64-pc-linux-gnu/share/cmake-3.31 \
-        /opt/classic-check/mxe/usr/x86_64-pc-linux-gnu/share/
-
+# Shared expensive dependency stage branches before Python/worldmaker additions.
 FROM mcr.microsoft.com/devcontainers/base:bookworm@sha256:86165cfc170e9b2aa8df90b847127eea97b08eb9987021e6e6ec6c3a96545d7c AS classic-check
-
 ENV DEBIAN_FRONTEND=noninteractive
-
 RUN rm -f /etc/apt/apt.conf.d/docker-clean
-
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    apt-get update \
-    && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        cmake \
-        git \
-        ninja-build \
-        python3
-
-COPY --from=classic-check-export --chown=vscode:vscode \
-    /opt/classic-check/mxe/ /opt/mxe/
-
-ENV MXE_ROOT=/opt/mxe \
-    MXE_TARGET=x86_64-w64-mingw32.shared \
-    MXE_PREFIX=/opt/mxe/usr/x86_64-w64-mingw32.shared \
-    MXE_TOOLCHAIN_FILE=/opt/mxe/usr/x86_64-w64-mingw32.shared/share/cmake/mxe-conf.cmake \
-    MXE_RUNTIME_DIR=/opt/mxe/usr/x86_64-w64-mingw32.shared/bin \
-    PATH=/opt/mxe/.ccache/bin:/opt/mxe/usr/bin:${PATH}
-
-COPY windows/mxe-path.sh /etc/profile.d/mxe-path.sh
-COPY windows/classic-check-toolchain.json \
-    /usr/local/share/atrinik/classic-check-toolchain.json
-COPY classic-curl-toolchain.json /usr/local/share/atrinik/classic-curl-toolchain.json
-COPY audio-toolchain.json /usr/local/share/atrinik/audio-toolchain.json
-COPY audio-toolchain.spdx.json \
-    /usr/local/share/atrinik/audio-toolchain.spdx.json
-
-RUN test "$(command -v ccache)" = /opt/mxe/.ccache/bin/ccache \
-    && test "$(command -v x86_64-w64-mingw32.shared-gcc)" \
-        = /opt/mxe/usr/bin/x86_64-w64-mingw32.shared-gcc \
-    && test "$(readlink /opt/mxe/usr/x86_64-pc-linux-gnu/bin/x86_64-w64-mingw32.shared-gcc)" \
-        = /opt/mxe/.ccache/bin/ccache \
-    && command -v x86_64-w64-mingw32.shared-cmake \
-    && command -v x86_64-w64-mingw32.shared-objdump \
-    && command -v x86_64-w64-mingw32.shared-pkg-config \
-    && command -v cmake \
-    && command -v cpack \
-    && command -v git \
-    && command -v ninja \
-    && command -v python3 \
-    && for package in \
-        libcurl libidn2 libxml-2.0 miniupnpc openssl \
-        sdl3 sdl3-image sdl3-mixer sdl3-ttf; do \
-        x86_64-w64-mingw32.shared-pkg-config --exists "${package}"; \
-    done \
-    && test -f "${MXE_TOOLCHAIN_FILE}" \
-    && test -f "${MXE_RUNTIME_DIR}/SDL3.dll" \
-    && test -f "${MXE_RUNTIME_DIR}/SDL3_image.dll" \
-    && test -f "${MXE_RUNTIME_DIR}/SDL3_mixer.dll" \
-    && test -f "${MXE_RUNTIME_DIR}/SDL3_ttf.dll" \
-    && test -f "${MXE_RUNTIME_DIR}/atrinik-sdl3-mixer-probe.exe" \
-    && test ! -e /opt/mxe/python-runtime \
-    && test ! -e /opt/mxe/.ccache/ccache \
-    && test ! -e /opt/mxe/usr/x86_64-pc-linux-gnu/icu4c \
-    && test ! -e "${MXE_PREFIX}/include/python3.14" \
-    && test ! -e "${MXE_PREFIX}/lib/libpython314.dll.a" \
-    && su --login vscode --command \
-        'test "$(command -v ccache)" = /opt/mxe/.ccache/bin/ccache' \
-    && su --login vscode --command \
-        'test "$(command -v x86_64-w64-mingw32.shared-gcc)" = /opt/mxe/usr/bin/x86_64-w64-mingw32.shared-gcc'
-
-# Preserve the historical default build result for the general-purpose image.
+    apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates ccache cmake git ninja-build pkg-config python3
+COPY --from=windows-shared /opt/llvm-mingw /opt/llvm-mingw
+COPY --from=windows-shared --chown=vscode:vscode /opt/atrinik-windows /opt/atrinik-windows
+ENV ATRINIK_WINDOWS_TOOLCHAIN_FILE=/opt/atrinik-windows/share/cmake/llvm-mingw.cmake \
+    ATRINIK_WINDOWS_TARGET=x86_64-w64-mingw32 \
+    ATRINIK_WINDOWS_RUNTIME_DIR=/opt/atrinik-windows/bin \
+    PATH=/opt/llvm-mingw/bin:/opt/atrinik-windows/bin:${PATH}
+COPY windows/llvm-path.sh /etc/profile.d/llvm-path.sh
+COPY windows/classic-check-toolchain.json classic-curl-toolchain.json audio-toolchain.json audio-toolchain.spdx.json /usr/local/share/atrinik/
+RUN command -v ccache && x86_64-w64-mingw32-clang --version | grep -F '23.1.3' \
+    && command -v llvm-readobj && command -v llvm-ar && command -v llvm-dlltool \
+    && for package in libcurl libidn2 libxml-2.0 miniupnpc openssl sdl3 sdl3-image sdl3-mixer sdl3-ttf; do \
+        x86_64-w64-mingw32-pkg-config --exists "$package"; done \
+    && test -f "$ATRINIK_WINDOWS_TOOLCHAIN_FILE" \
+    && test -f "$ATRINIK_WINDOWS_RUNTIME_DIR/SDL3_mixer.dll" \
+    && test ! -e /opt/atrinik-windows/python-runtime \
+    && test ! -e /opt/atrinik-windows/include/python3.14 \
+    && test ! -e /opt/atrinik-windows/lib/libpython314.dll.a \
+    && su --login vscode --command 'command -v x86_64-w64-mingw32-clang'
+USER vscode
+# Preserve the general-purpose image as the default Dockerfile result.
 FROM windows-build AS windows
