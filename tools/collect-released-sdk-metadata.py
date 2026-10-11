@@ -1,7 +1,7 @@
 #!/usr/bin/python3 -I
 # Copyright (c) 2026 Atrinik contributors
 # SPDX-License-Identifier: MIT
-"""Collect bounded installed identity from two fixed released Linux SDKs.
+"""Collect bounded installed identity from three fixed released Linux SDKs.
 
 Only trusted same-repository push/dispatch on GitHub-hosted Linux may acquire.
 No image code runs: a task-owned container stays in created state until removal.
@@ -31,16 +31,18 @@ import tarfile
 import urllib.parse
 import uuid
 
-REVISION = '0571f500ede75e7661b508d8bb40354256113223'
+REVISION = '4af130578df18a1944880cd279c7f23afe9cc668'
 SOURCE = 'https://github.com/atrinik/devcontainer'
 REPOSITORY = 'atrinik/devcontainer'
 WORKFLOW = '.github/workflows/qualify-released-linux-sdk.yml'
 BRANCH = 'refs/heads/build/llvm-released-sdk-verification-final'
 TARGETS = {
-    'broad': ('atrinik/linux-build', '1.17.0',
-              'sha256:4ca8e921b616d20b18fcef901bd554488b4d5a68a7c4304268dedef23723a3bf'),
-    'portable-preliminary': ('atrinik/classic-portable-build', 'sha-' + REVISION,
-              'sha256:a3e06f45eaba721b1a413ec6a0977c9b21eb11c5092dea44b70c98163356e14f'),
+    'broad': ('atrinik/linux-build', '1.18.0',
+              'sha256:613cf43ab07634db005a28462a009c4c28c90dccb1b5175e13e8072b6dfe8d72'),
+    'classic': ('atrinik/classic-build', '1.18.0',
+              'sha256:86d3c4182dc786db8ace56d9d8dc57ff4f14c1c4f517b728547626f576280449'),
+    'portable-preliminary': ('atrinik/classic-portable-build', '1.18.0',
+              'sha256:ece5d3892db0ae7c8a13141720fdc62775b02cf67cf2b6df15bff9ccdb039527'),
 }
 INDEX = 'application/vnd.oci.image.index.v1+json'
 MANIFEST = 'application/vnd.oci.image.manifest.v1+json'
@@ -57,9 +59,20 @@ LLVM_MANIFEST = PREFIX + '/share/atrinik/llvm-toolchain.json'
 LLVM_SBOM = PREFIX + '/share/atrinik/llvm-toolchain.spdx.json'
 LLVM_MANIFEST_SHA = 'a98d2cecb17e8da941b20051ea6d4ff48cdf5db5f45fe31d21f739538eaa9bc7'
 CFG = b'--rtlib=compiler-rt\n--unwindlib=libunwind\n-fuse-ld=lld\n-L<CFGDIR>/../lib\n'
-COMMON_FILES = (LLVM_MANIFEST, LLVM_SBOM, PREFIX + '/bin/clang.cfg', PREFIX + '/bin/clang++.cfg')
+LLVM_NOTICES = tuple(PREFIX + '/share/licenses/llvm/' + component + '-LICENSE.TXT'
+                     for component in ('llvm', 'clang', 'clang-tools-extra', 'lld',
+                                       'compiler-rt', 'libunwind'))
+COMMON_FILES = (LLVM_MANIFEST, LLVM_SBOM, PREFIX + '/bin/clang.cfg',
+                PREFIX + '/bin/clang++.cfg') + LLVM_NOTICES
 BROAD_FILES = tuple('/usr/local/share/atrinik/' + path for path in (
     'llvm-toolchain.json', 'toolchains.json', 'audio-toolchain.json', 'audio-toolchain.spdx.json',
+    'classic-vulkan-toolchain.json', 'classic-vulkan-toolchain.spdx.json',
+    'classic-vulkan-packages.lock', 'classic-curl-toolchain.json',
+    'curl/curl_config.h', 'curl/config.log')) + ('/usr/local/bin/curl-config',)
+CLASSIC_FILES = tuple('/usr/local/share/atrinik/' + path for path in (
+    'llvm-toolchain.json', 'classic-toolchain.json', 'classic-packages.lock',
+    'audio-toolchain.json', 'audio-toolchain.spdx.json',
+    'classic-shader-toolchain.json', 'classic-shader-toolchain.spdx.json',
     'classic-vulkan-toolchain.json', 'classic-vulkan-toolchain.spdx.json',
     'classic-vulkan-packages.lock', 'classic-curl-toolchain.json',
     'curl/curl_config.h', 'curl/config.log')) + ('/usr/local/bin/curl-config',)
@@ -72,6 +85,8 @@ PORTABLE_FILES = tuple('/opt/atrinik-portable/' + path for path in (
     'classic-curl-toolchain.json', 'curl-toolchain.json', 'packages.lock',
     'sources/curl/curl_config.h', 'sources/curl/config.log',
     'sources/curl/apt-source-record.txt', 'sources/curl/archive-signature.txt'))
+TARGET_FILES = {'broad': BROAD_FILES, 'classic': CLASSIC_FILES,
+                'portable-preliminary': PORTABLE_FILES}
 # Role spellings and canonical targets are fixed; descriptors cannot extend this set.
 TOOL_FILES = {
     'compiler': ('bin/clang', 'bin/clang-23'),
@@ -713,7 +728,7 @@ class StoppedImage:
             self.directories.add(str(parent))
 
     def read(self, path, *, retain, executable=False):
-        allowed = set(COMMON_FILES + (BROAD_FILES if self.target == 'broad' else PORTABLE_FILES)) if retain else {
+        allowed = set(COMMON_FILES + TARGET_FILES[self.target]) if retain else {
             PREFIX + '/' + pair[1] for pair in TOOL_FILES.values()}
         require(path in allowed, 'image-path-not-allowed')
         self.fence()
@@ -801,7 +816,7 @@ def save(folder, relative, raw):
 def validate_metadata(target, data):
     require(hashlib.sha256(data[LLVM_MANIFEST]).hexdigest() == LLVM_MANIFEST_SHA,
             'installed-llvm-manifest-mismatch')
-    secondary = ('/usr/local/share/atrinik/' if target == 'broad' else '/opt/atrinik-portable/') + 'llvm-toolchain.json'
+    secondary = ('/usr/local/share/atrinik/' if target in ('broad', 'classic') else '/opt/atrinik-portable/') + 'llvm-toolchain.json'
     require(data[secondary] == data[LLVM_MANIFEST], 'installed-llvm-descriptors-disagree')
     for name in ('clang', 'clang++'):
         require(data[PREFIX + '/bin/' + name + '.cfg'] == CFG, 'installed-clang-defaults-mismatch')
@@ -814,7 +829,7 @@ def validate_metadata(target, data):
             package.get('licenseDeclared') == manifest['source']['license'] and
             package.get('checksums') == [{'algorithm': 'SHA256', 'checksumValue': manifest['source']['sha256']}],
             'llvm-spdx-identity-mismatch')
-    if target == 'broad':
+    if target in ('broad', 'classic'):
         return None
     base = '/opt/atrinik-portable/'
     installed = decode(data[base + 'installed.json'])
@@ -863,7 +878,7 @@ def collect(target, context, original, folder):
         container.create()
         receipt['container_id'] = container.identifier
         data = {}
-        for path in COMMON_FILES + (BROAD_FILES if target == 'broad' else PORTABLE_FILES):
+        for path in COMMON_FILES + TARGET_FILES[target]:
             _, raw = container.read(path, retain=True)
             data[path] = raw
         compiler = validate_metadata(target, data)

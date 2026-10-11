@@ -114,6 +114,55 @@ class OfflineTests(unittest.TestCase):
         with patch.object(M, 'registry_object', side_effect=lambda p, kind, sha, b: objects[sha]):
             return M.verified_registry(PACKAGE, M.digest(raw_index), BEARER)
 
+    def test_fixed_released_coordinates_and_target_file_sets(self):
+        self.assertEqual(M.REVISION, '4af130578df18a1944880cd279c7f23afe9cc668')
+        self.assertEqual(M.TARGETS, {
+            'broad': ('atrinik/linux-build', '1.18.0',
+                      'sha256:613cf43ab07634db005a28462a009c4c28c90dccb1b5175e13e8072b6dfe8d72'),
+            'classic': ('atrinik/classic-build', '1.18.0',
+                      'sha256:86d3c4182dc786db8ace56d9d8dc57ff4f14c1c4f517b728547626f576280449'),
+            'portable-preliminary': ('atrinik/classic-portable-build', '1.18.0',
+                      'sha256:ece5d3892db0ae7c8a13141720fdc62775b02cf67cf2b6df15bff9ccdb039527')})
+        self.assertEqual(set(M.TARGET_FILES), set(M.TARGETS))
+        for target in M.TARGETS:
+            files = M.COMMON_FILES + M.TARGET_FILES[target]
+            self.assertEqual(len(files), len(set(files)))
+            self.assertTrue(set(M.LLVM_NOTICES) <= set(files))
+        self.assertNotIn('/usr/local/share/atrinik/toolchains.json', M.CLASSIC_FILES)
+        self.assertNotIn('/opt/atrinik-portable/installed.json', M.CLASSIC_FILES)
+
+    def test_native_targets_collect_raw_oci_notices_and_all_twelve_roles(self):
+        for target in ('broad', 'classic'):
+            data, binary = self.portable_fixture()
+            data = {path: data.get(path, b'public metadata fixture')
+                    for path in M.COMMON_FILES + M.TARGET_FILES[target]}
+            data['/usr/local/share/atrinik/llvm-toolchain.json'] = data[M.LLVM_MANIFEST]
+            with self.subTest(target=target):
+                result, copied = self.collect_portable_fixture(data, binary, target)
+                self.assertEqual(result['status'], 'verified-installed-identity')
+                self.assertEqual(set(result['tool_bytes']), set(M.TOOL_FILES))
+                self.assertEqual(len(result['tool_bytes']), 12)
+                self.assertEqual(set(copied), set(data) | set(binary))
+                self.assertEqual({item['path'] for item in result['artifacts']},
+                                 {'registry/' + name + '.json' for name in ('index', 'manifest', 'config')}
+                                 | {'files' + path for path in data})
+                self.assertEqual(result['producer_revision'], M.REVISION)
+                self.assertEqual(result['display_tag'], '1.18.0')
+                self.assertEqual(result['claim'], 'installed-identity-only')
+                self.assertFalse(result['image_code_executed'])
+                self.assertFalse(result['final_portable_cohort'])
+                for identity in result['tool_bytes'].values():
+                    self.assertFalse(identity['producer_descriptor_verified'])
+
+    def test_classic_rejects_other_target_metadata_before_archive(self):
+        owned, _ = self.stopped()
+        owned.target = 'classic'
+        for path in ('/usr/local/share/atrinik/toolchains.json',
+                     '/opt/atrinik-portable/installed.json'):
+            with self.subTest(path=path), self.assertRaisesRegex(M.Stop, 'image-path-not-allowed'):
+                owned.read(path, retain=True)
+        owned.docker.request.assert_not_called()
+
     def test_trusted_runner_context(self):
         self.assertEqual(M.runner_context(context_env())['repository'], 'atrinik/devcontainer')
         env = context_env()
@@ -604,7 +653,7 @@ class OfflineTests(unittest.TestCase):
         installed['compiler_evidence_sha256'] = M.hashlib.sha256(data[base + 'compiler-evidence.json']).hexdigest()
         data[base + 'installed.json'] = encoded(installed)
 
-    def collect_portable_fixture(self, data, binary):
+    def collect_portable_fixture(self, data, binary, target='portable-preliminary'):
         """Mock only transport/lifecycle creation; real HEAD, tar and hash checks."""
         docker = Mock()
         docker.negotiate.return_value = {}
@@ -612,7 +661,7 @@ class OfflineTests(unittest.TestCase):
         docker.pull.return_value = 2
         verified = self.verified()
         context = M.runner_context(context_env())
-        owned = M.StoppedImage(docker, 'portable-preliminary', context, verified)
+        owned = M.StoppedImage(docker, target, context, verified)
         owned.identifier, owned.attempted = 'c' * 64, True
         docker.get.return_value = {
             'Id': owned.identifier, 'Name': '/' + owned.name,
@@ -658,7 +707,7 @@ class OfflineTests(unittest.TestCase):
              patch.object(M, 'verified_registry', return_value=verified), \
              patch.object(M, 'StoppedImage', return_value=owned), patch.object(owned, 'create'), \
              patch.object(M.signal, 'alarm'):
-            result = M.collect('portable-preliminary', context, SECRET, Path(temp))
+            result = M.collect(target, context, SECRET, Path(temp))
             for record in result['artifacts']:
                 raw = (Path(temp) / record['path']).read_bytes()
                 self.assertEqual(M.hashlib.sha256(raw).hexdigest(), record['sha256'])
