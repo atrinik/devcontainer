@@ -51,6 +51,7 @@ LAYERS = {'application/vnd.oci.image.layer.v1.tar+gzip',
 LIMIT = 16 * 1024 * 1024
 METADATA_LIMIT = 4 * 1024 * 1024
 BINARY_LIMIT = 1024 * 1024 * 1024
+REDIRECT_URL_LIMIT = 65536
 PREFIX = '/opt/llvm-23.1.3'
 LLVM_MANIFEST = PREFIX + '/share/atrinik/llvm-toolchain.json'
 LLVM_SBOM = PREFIX + '/share/atrinik/llvm-toolchain.spdx.json'
@@ -118,7 +119,7 @@ def redirect_diagnostics(location, sha):
               'path_segment_count_capped_at_16': 0}
     if not isinstance(location, str):
         return result
-    if len(location) > 65536:
+    if len(location) > REDIRECT_URL_LIMIT:
         result['url_parse'] = 'overlong'
         return result
     result['ascii_clean'] = all(32 < ord(c) < 127 for c in location) and '\\' not in location
@@ -141,10 +142,8 @@ def redirect_diagnostics(location, sha):
             result['namespace'] = 'ghcr1'
         elif re.fullmatch(r'ghcr[0-9]+', namespace):
             result['namespace'] = 'legacy-ghcr-numbered-other'
-        elif re.fullmatch(r'ghcrblobs[1-9][0-9]{0,2}', namespace):
-            result['namespace'] = 'ghcrblobs-numbered'
         elif re.fullmatch(r'ghcrblobs[0-9]+', namespace):
-            result['namespace'] = 'ghcrblobs-number-outside-bound'
+            result['namespace'] = 'ghcrblobs-numbered'
         for pattern, category in (
                 (r'/[^/]+/blobs/sha256:[0-9a-f]{64}', 'namespace-blobs-sha256'),
                 (r'/[^/]+/blobs/sha256%3[Aa][0-9a-f]{64}', 'namespace-blobs-encoded-sha256'),
@@ -262,7 +261,8 @@ def registry_object(package, kind, sha, bearer):
         # GHCR blob storage only; never forward Basic/Bearer to a redirect.
         require(kind == 'blobs' and status in (302, 307) and isinstance(location, str),
                 'registry-redirect-denied')
-        if not (all(32 < ord(c) < 127 for c in location) and '\\' not in location):
+        if not (len(location) <= REDIRECT_URL_LIMIT and
+                all(32 < ord(c) < 127 for c in location) and '\\' not in location):
             raise BlobRedirectDenied(location, sha)
         try:
             dest = urllib.parse.urlsplit(location)
@@ -270,10 +270,10 @@ def registry_object(package, kind, sha, bearer):
             raise BlobRedirectDenied(location, sha) from None
         if not (dest.scheme == 'https' and dest.netloc == 'pkg-containers.githubusercontent.com'
                 and not dest.username and not dest.password and not dest.fragment
-                # Public GHCR config retrieval observed ghcrblobs15. Accept only
-                # this numbered storage family (1..999) or the legacy namespace,
+                # Treat observed numeric storage identifiers as opaque strings.
+                # Bound URL length, not numeric value; keep the legacy namespace
                 # and bind the object path to the exact requested config digest.
-                and re.fullmatch(r'/(?:ghcr1|ghcrblobs[1-9][0-9]{0,2})/blobs/' +
+                and re.fullmatch(r'/(?:ghcr1|ghcrblobs[0-9]+)/blobs/' +
                                  re.escape(sha), dest.path)):
             raise BlobRedirectDenied(location, sha)
         status, _, raw = https_get(dest.hostname, dest.path + ('?' + dest.query if dest.query else ''),
@@ -792,6 +792,9 @@ def validate_metadata(target, data):
             'portable-identity-mismatch')
     require(set(compiler.get('tools', {})) == set(TOOL_FILES) - {'runtime', 'unwinder'},
             'portable-tool-roles-mismatch')
+    for entry in compiler['tools'].values():
+        require(isinstance(entry, dict) and isinstance(entry.get('version'), str) and
+                re.search(r'\b23\.1\.3\b', entry['version']), 'portable-tool-version-mismatch')
     generation = decode(data[base + 'shader-generation.json'])
     require(generation.get('output_manifest_sha256') == hashlib.sha256(data[base + 'shaders/SHA256SUMS']).hexdigest()
             and generation.get('expected_manifest_sha256') == generation['output_manifest_sha256']

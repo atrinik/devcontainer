@@ -163,7 +163,8 @@ class OfflineTests(unittest.TestCase):
     def test_blob_redirect_has_no_credentials_and_verifies_bytes(self):
         raw = b'public config'
         sha = M.digest(raw)
-        for namespace in ('ghcr1', 'ghcrblobs15', 'ghcrblobs1', 'ghcrblobs99', 'ghcrblobs999'):
+        for namespace in ('ghcr1', 'ghcrblobs15', 'ghcrblobs1', 'ghcrblobs99', 'ghcrblobs999',
+                          'ghcrblobs0', 'ghcrblobs015', 'ghcrblobs1000', 'ghcrblobs' + '9' * 128):
             location = 'https://pkg-containers.githubusercontent.com/' + namespace + '/blobs/' + sha + '?sig=FAKE_PRIVATE_URL'
             with self.subTest(namespace=namespace), patch.object(M, 'https_get', side_effect=[
                     (307, location, b''), (200, None, raw)]) as http:
@@ -206,9 +207,10 @@ class OfflineTests(unittest.TestCase):
                  valid.replace('sha256:', 'sha256%3A'), valid.replace('/blobs/', '/blobs%2F'),
                  valid.replace('/ghcrblobs15/', '/ghcrblobs15//'),
                  valid.replace('/blobs/', '/objects/'), valid.replace('/blobs/', '/blobs/./'),
-                 valid.replace('/ghcrblobs15/', '/ghcrblobs0/'),
-                 valid.replace('/ghcrblobs15/', '/ghcrblobs015/'),
-                 valid.replace('/ghcrblobs15/', '/ghcrblobs1000/'),
+                 valid.replace('/ghcrblobs15/', '/ghcrblobs/'),
+                 valid.replace('/ghcrblobs15/', '/ghcrblobs+15/'),
+                 valid.replace('/ghcrblobs15/', '/ghcrblobs%31%35/'),
+                 valid.replace('/ghcrblobs15/', '/ghcrblobs１５/'),
                  valid.replace('/ghcrblobs15/', '/ghcrblobs-1/'),
                  valid.replace('/ghcrblobs15/', '/ghcrblobsA/'),
                  valid.replace('/ghcrblobs15/', '/ghcr2/'),
@@ -222,6 +224,31 @@ class OfflineTests(unittest.TestCase):
                 self.assertEqual(http.call_count, 1)
                 self.assertNotIn('FAKE_PRIVATE_URL', str(error.exception))
                 self.assertNotIn(path, str(error.exception))
+
+    def test_blob_redirect_url_bound_covers_numeric_path_and_signed_query(self):
+        raw = b'public config'
+        sha = M.digest(raw)
+        prefix = 'https://pkg-containers.githubusercontent.com/ghcrblobs'
+        suffix = '/blobs/' + sha + '?sig=FAKE_PRIVATE_URL'
+        # Numeric identifiers are opaque strings, including zero/leading zeros.
+        # The full URL bound limits both path and signed-query processing.
+        locations = [prefix + '9' * (M.REDIRECT_URL_LIMIT - len(prefix + suffix)) + suffix,
+                     prefix + '15' + suffix]
+        locations[1] += 'x' * (M.REDIRECT_URL_LIMIT - len(locations[1]))
+        for index, location in enumerate(locations):
+            self.assertEqual(len(location), M.REDIRECT_URL_LIMIT)
+            with self.subTest(kind=index), patch.object(M, 'https_get', side_effect=[
+                    (307, location, b''), (200, None, raw)]) as http:
+                self.assertEqual(M.registry_object(PACKAGE, 'blobs', sha, BEARER), raw)
+                self.assertEqual(http.call_args_list[1].args[2], {'Accept-Encoding': 'identity'})
+            with self.subTest(kind=index), patch.object(M, 'https_get', return_value=(
+                    307, location + 'x', b'')) as http:
+                with self.assertRaises(M.BlobRedirectDenied) as caught:
+                    M.registry_object(PACKAGE, 'blobs', sha, BEARER)
+                self.assertEqual(http.call_count, 1)
+                self.assertEqual(caught.exception.diagnostics['url_parse'], 'overlong')
+                self.assertNotIn('FAKE_PRIVATE_URL', json.dumps(vars(caught.exception)))
+                self.assertNotIn(location, str(caught.exception))
 
     def test_redirect_diagnostics_report_only_fixed_categories_and_booleans(self):
         sha = INDEX_DIGEST
@@ -238,7 +265,7 @@ class OfflineTests(unittest.TestCase):
              'requested_digest_in_path': True, 'requested_digest_suffix': True,
              'path_segment_count_capped_at_16': 3}),
             (prefix + 'ghcrblobs1000/blobs/' + sha, {
-             'namespace': 'ghcrblobs-number-outside-bound', 'requested_digest_path_exact': True}),
+             'namespace': 'ghcrblobs-numbered', 'requested_digest_path_exact': True}),
             (prefix.replace('.com/', '.com:443/') + 'ghcr1/blobs/' + sha, {
              'host_exact': True, 'authority_exact': False, 'port_default': True, 'port_omitted': False}),
             (prefix.replace('.com/', '.com:8443/') + 'ghcr1/blobs/' + sha, {
@@ -249,7 +276,7 @@ class OfflineTests(unittest.TestCase):
                 for key, value in fields.items():
                     self.assertEqual(result[key], value)
                 self.assertNotIn(location, json.dumps(result))
-        result = M.redirect_diagnostics('x' * 65537, sha)
+        result = M.redirect_diagnostics('x' * (M.REDIRECT_URL_LIMIT + 1), sha)
         self.assertEqual(result['url_parse'], 'overlong')
 
     def test_denied_redirect_receipt_and_exception_discard_hostile_url_secrets(self):
@@ -672,6 +699,26 @@ class OfflineTests(unittest.TestCase):
                 self.assertEqual(result['status'], 'stopped')
                 self.assertEqual(result['reason'], 'portable-metadata-binding-mismatch')
                 self.assertFalse(set(copied) & set(binary))
+
+    def test_portable_each_tool_requires_producer_version_banner(self):
+        base = '/opt/atrinik-portable/'
+        invalid_versions = ('missing', None, 23, {}, [], '', 'LLVM version 22.1.3',
+                            'LLVM version 23.1.30', 'LLVM version 123.1.3')
+        for role in set(M.TOOL_FILES) - {'runtime', 'unwinder'}:
+            for version in invalid_versions:
+                data, binary = self.portable_fixture()
+                compiler = json.loads(data[base + 'compiler-evidence.json'])
+                if version == 'missing':
+                    del compiler['tools'][role]['version']
+                else:
+                    compiler['tools'][role]['version'] = version
+                # Keep the outer byte binding valid to exercise the version gate.
+                self.reseal_compiler_fixture(data, compiler)
+                with self.subTest(role=role, version=version):
+                    result, copied = self.collect_portable_fixture(data, binary)
+                    self.assertEqual(result['status'], 'stopped')
+                    self.assertEqual(result['reason'], 'portable-tool-version-mismatch')
+                    self.assertFalse(set(copied) & set(binary))
 
     def test_portable_missing_extra_and_misidentified_roles_are_rejected(self):
         base = '/opt/atrinik-portable/'
