@@ -87,7 +87,8 @@
     "--enable-ldap",
     "--enable-ldaps",
     "--enable-ntlm-wb",
-    "--enable-tls-srp"
+    "--enable-tls-srp",
+    "--enable-ipv6"
   ],
   "public_ca": {
     "sha256": "a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505",
