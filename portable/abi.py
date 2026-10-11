@@ -51,14 +51,27 @@ def version_symbol_indices(text: str) -> dict[int, int]:
         row = re.match(r"\s*([0-9a-f]+):\s+(.*)", line)
         if row:
             start = int(row[1], 16)
-            entries = re.findall(r"(\d+)h?\s*\([^)]*\)", row[2])
+            # Both ordinals and printed version indices are hexadecimal. Parse
+            # every entry in order; skipping an unrecognized token would bind
+            # all subsequent symbols in that row to the wrong providers.
+            entries = []
+            remaining = row[2]
+            while remaining.strip():
+                entry = re.match(r"\s*([0-9a-f]+)h?\s*\([^)]*\)(?=\s|$)", remaining)
+                if entry is None or len(entries) == 4:
+                    raise ValueError("malformed ELF version symbol row")
+                index = int(entry[1], 16)
+                if index > 0xffff:
+                    raise ValueError("invalid ELF version symbol index")
+                entries.append(index & 0x7fff)
+                remaining = remaining[entry.end():]
             if not entries:
                 raise ValueError("malformed ELF version symbol row")
             for offset, index in enumerate(entries):
                 ordinal = start + offset
                 if ordinal in result:
                     raise ValueError("duplicate ELF version symbol ordinal")
-                result[ordinal] = int(index) & 0x7fff
+                result[ordinal] = index
     return result
 
 
