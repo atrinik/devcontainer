@@ -426,24 +426,48 @@ class Docker:
         query = urllib.parse.urlencode({'platform': json.dumps({'os': 'linux', 'architecture': 'amd64'},
                                                                separators=(',', ':'))})
         local = self.get('/images/' + urllib.parse.quote(reference, safe='') + '/json?' + query)
-        verify_local(local, reference, sha, verified)
-        return {'image_config_id': local['Id'], 'os': 'linux', 'architecture': 'amd64'}
+        kind = verify_local(local, reference, sha, verified)
+        return {'local_image_id': local['Id'], 'local_image_identity_kind': kind,
+                'os': 'linux', 'architecture': 'amd64'}
+
+
+def local_descriptor_matches(value, raw, sha, media_type, platform):
+    return (isinstance(value, dict) and value.get('mediaType') == media_type and
+            value.get('digest') == sha and type(value.get('size')) is int and
+            value['size'] == len(raw) and value.get('platform') == platform and
+            not value.get('urls') and not value.get('data'))
+
+
+def selected_manifest_matches(value, verified):
+    return local_descriptor_matches(value, verified['manifest'], verified['manifest_digest'],
+                                    MANIFEST, {'os': 'linux', 'architecture': 'amd64'})
 
 
 def verify_local(local, reference, sha, verified):
-    # Image-inspect Id is the config ID. Container-inspect Image may be an index
-    # with Docker 29; this function checks image-inspect data only. StoppedImage
-    # separately fences container identity. The raw registry chain stays mandatory.
-    require(local.get('Id') == verified['config_digest'], 'local-config-id-mismatch')
+    # Platform-qualified Docker 29 containerd inspection identifies the selected
+    # manifest. Legacy stores identify its config. Neither accepts the index ID;
+    # container-inspect Image has a separate descriptor-bound check below.
+    identity = local.get('Id')
+    desc = local.get('Descriptor')
+    if identity == verified['config_digest']:
+        kind = 'config-digest'
+        if desc is not None:
+            require(selected_manifest_matches(desc, verified) or
+                    local_descriptor_matches(desc, verified['index'], sha, INDEX, None),
+                    'local-descriptor-mismatch')
+    elif identity == verified['manifest_digest']:
+        kind = 'platform-manifest-digest'
+        require(selected_manifest_matches(desc, verified), 'local-descriptor-mismatch')
+    else:
+        raise Stop('local-image-id-mismatch')
     require(local.get('Os') == 'linux' and local.get('Architecture') == 'amd64', 'local-platform-mismatch')
     require(reference in (local.get('RepoDigests') or []), 'local-repodigest-mismatch')
-    desc = local.get('Descriptor')
-    if desc is not None:
-        require(desc.get('digest') in (sha, verified['manifest_digest']), 'local-descriptor-mismatch')
     cfg = verified['config_object']
     require(local.get('RootFS', {}).get('Type') == 'layers' and
             local.get('RootFS', {}).get('Layers') == cfg['rootfs']['diff_ids'], 'local-rootfs-mismatch')
-    require(local.get('Config', {}).get('Labels') == cfg['config']['Labels'], 'local-labels-mismatch')
+    require(isinstance(local.get('Config'), dict) and local['Config'] == cfg['config'],
+            'local-config-mismatch')
+    return kind
 
 
 
@@ -653,10 +677,7 @@ class StoppedImage:
                           self.verified['manifest_digest']), 'container-image-mismatch')
         selected = value.get('ImageManifestDescriptor')
         if selected is not None or image != self.verified['config_digest']:
-            require(isinstance(selected, dict) and selected.get('digest') == self.verified['manifest_digest']
-                    and selected.get('platform', {}).get('os') == 'linux'
-                    and selected.get('platform', {}).get('architecture') == 'amd64',
-                    'container-manifest-mismatch')
+            require(selected_manifest_matches(selected, self.verified), 'container-manifest-mismatch')
         return value
 
     def stat(self, path):

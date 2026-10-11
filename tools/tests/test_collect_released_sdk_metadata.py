@@ -460,8 +460,8 @@ class OfflineTests(unittest.TestCase):
         value['Image'] = owned.index_digest
         with self.assertRaisesRegex(M.Stop, 'container-manifest-mismatch'):
             owned.fence()
-        value['ImageManifestDescriptor'] = {'digest': owned.verified['manifest_digest'],
-                                           'platform': {'os': 'linux', 'architecture': 'amd64'}}
+        value['ImageManifestDescriptor'] = dict(descriptor(owned.verified['manifest'], M.MANIFEST),
+                                                platform={'os': 'linux', 'architecture': 'amd64'})
         owned.fence()
         for field, changed in [('Image', 'sha256:' + 'd'*64),
                                ('State', {'Status': 'running', 'Running': True, 'Pid': 100}),
@@ -779,19 +779,95 @@ class OfflineTests(unittest.TestCase):
                 self.assertEqual(result['reason'], 'shader-metadata-binding-mismatch')
                 self.assertFalse(set(copied) & set(binary))
 
-    def test_local_image_identity_and_platform_fences(self):
+    def local_image_fixture(self):
         verified = self.verified()
         reference = 'ghcr.io/' + PACKAGE + '@' + INDEX_DIGEST
         local = {'Id': verified['config_digest'], 'Os': 'linux', 'Architecture': 'amd64',
-                 'RepoDigests': [reference], 'Descriptor': {'digest': INDEX_DIGEST},
+                 'RepoDigests': [reference],
                  'RootFS': {'Type': 'layers', 'Layers': verified['config_object']['rootfs']['diff_ids']},
-                 'Config': verified['config_object']['config']}
-        M.verify_local(local, reference, INDEX_DIGEST, verified)
-        for key, wrong in [('Id', INDEX_DIGEST), ('Os', 'windows'), ('Architecture', 'arm64'),
-                           ('RepoDigests', []), ('Descriptor', {'digest': 'sha256:' + 'c' * 64}),
-                           ('RootFS', {'Type': 'layers', 'Layers': []}), ('Config', {'Labels': {}})]:
-            with self.subTest(key=key), self.assertRaises(M.Stop):
-                M.verify_local(dict(local, **{key: wrong}), reference, INDEX_DIGEST, verified)
+                 'Config': copy.deepcopy(verified['config_object']['config'])}
+        selected = dict(descriptor(verified['manifest'], M.MANIFEST),
+                        platform={'os': 'linux', 'architecture': 'amd64'})
+        return verified, reference, local, selected
+
+    def test_local_image_legacy_and_platform_manifest_identity_modes(self):
+        verified, reference, local, selected = self.local_image_fixture()
+        index = {'digest': INDEX_DIGEST, 'mediaType': M.INDEX, 'size': len(verified['index'])}
+        for desc in (None, index, selected):
+            legacy = dict(local, Descriptor=desc)
+            self.assertEqual(M.verify_local(legacy, reference, INDEX_DIGEST, verified), 'config-digest')
+        local.update(Id=verified['manifest_digest'], Descriptor=selected)
+        self.assertEqual(M.verify_local(local, reference, INDEX_DIGEST, verified), 'platform-manifest-digest')
+        docker = M.Docker('/unused', (0, 0, 0))
+        with patch.object(docker, 'get', return_value=local) as get:
+            result = docker.inspect(PACKAGE, INDEX_DIGEST, verified)
+        request = urllib.parse.urlsplit(get.call_args.args[0])
+        self.assertEqual(json.loads(urllib.parse.parse_qs(request.query)['platform'][0]),
+                         {'os': 'linux', 'architecture': 'amd64'})
+        self.assertEqual(result['local_image_id'], verified['manifest_digest'])
+        self.assertEqual(result['local_image_identity_kind'], 'platform-manifest-digest')
+        self.assertNotIn('image_config_id', result)
+
+    def test_local_image_identity_and_platform_fences(self):
+        verified, reference, local, selected = self.local_image_fixture()
+        for identity in (verified['config_digest'], verified['manifest_digest']):
+            good = dict(local, Id=identity, Descriptor=selected)
+            for key, wrong in [('Id', INDEX_DIGEST), ('Id', 'sha256:' + 'c' * 64),
+                               ('Os', 'windows'), ('Architecture', 'arm64'), ('RepoDigests', []),
+                               ('RootFS', {'Type': 'layers', 'Layers': []}), ('Config', {'Labels': {}})]:
+                with self.subTest(identity=identity, key=key), self.assertRaises(M.Stop):
+                    M.verify_local(dict(good, **{key: wrong}), reference, INDEX_DIGEST, verified)
+
+    def test_local_manifest_descriptor_requires_every_bound_field(self):
+        verified, reference, local, selected = self.local_image_fixture()
+        descriptors = [None, {}, dict(selected, mediaType=M.INDEX), dict(selected, size=True),
+                       dict(selected, size=selected['size'] + 1), dict(selected, digest=INDEX_DIGEST),
+                       dict(selected, platform={'os': 'linux', 'architecture': 'arm64'}),
+                       dict(selected, platform={'os': 'linux', 'architecture': 'amd64', 'variant': 'v2'}),
+                       dict(selected, urls=['https://foreign.invalid']), dict(selected, data='foreign')]
+        descriptors += [{key: value for key, value in selected.items() if key != missing}
+                        for missing in ('mediaType', 'size', 'digest', 'platform')]
+        for identity in (verified['config_digest'], verified['manifest_digest']):
+            for index, desc in enumerate(descriptors):
+                if identity == verified['config_digest'] and desc is None:
+                    continue
+                with self.subTest(identity=identity, case=index), self.assertRaisesRegex(M.Stop, 'local-descriptor-mismatch'):
+                    M.verify_local(dict(local, Id=identity, Descriptor=desc), reference, INDEX_DIGEST, verified)
+        legacy_index = {'digest': INDEX_DIGEST, 'mediaType': M.INDEX, 'size': len(verified['index'])}
+        for key, value in (('mediaType', M.MANIFEST), ('size', 0), ('platform', {'os': 'linux'}),
+                           ('urls', ['https://foreign.invalid']), ('data', 'foreign')):
+            with self.subTest(key=key), self.assertRaisesRegex(M.Stop, 'local-descriptor-mismatch'):
+                M.verify_local(dict(local, Descriptor=dict(legacy_index, **{key: value})), reference, INDEX_DIGEST, verified)
+
+    def test_local_config_fields_are_bound_even_when_labels_match(self):
+        verified, reference, local, selected = self.local_image_fixture()
+        for identity in (verified['config_digest'], verified['manifest_digest']):
+            for key, value in (('Env', ['FOREIGN=1']), ('Cmd', ['/bin/foreign']), ('User', 'foreign'),
+                               ('WorkingDir', '/foreign'), ('Entrypoint', ['/bin/foreign'])):
+                changed = dict(local['Config'], **{key: value})
+                self.assertEqual(changed['Labels'], local['Config']['Labels'])
+                with self.subTest(identity=identity, key=key), self.assertRaisesRegex(M.Stop, 'local-config-mismatch'):
+                    M.verify_local(dict(local, Id=identity, Descriptor=selected, Config=changed),
+                                   reference, INDEX_DIGEST, verified)
+        cfg = copy.deepcopy(verified['config_object'])
+        cfg['rootfs']['diff_ids'] = ['sha256:' + 'a' * 64, 'sha256:' + 'b' * 64]
+        verified = dict(verified, config_object=cfg)
+        with self.assertRaisesRegex(M.Stop, 'local-rootfs-mismatch'):
+            M.verify_local(dict(local, RootFS={'Type': 'layers', 'Layers': list(reversed(cfg['rootfs']['diff_ids']))}),
+                           reference, INDEX_DIGEST, verified)
+
+    def test_container_selected_descriptor_rejects_wrong_type_size_and_platform(self):
+        owned, value = self.stopped()
+        selected = dict(descriptor(owned.verified['manifest'], M.MANIFEST),
+                        platform={'os': 'linux', 'architecture': 'amd64'})
+        for identity in (owned.index_digest, owned.verified['manifest_digest'], owned.verified['config_digest']):
+            value['Image'] = identity
+            for key, wrong in (('mediaType', M.INDEX), ('size', 0), ('size', True),
+                               ('platform', {'os': 'linux', 'architecture': 'amd64', 'variant': 'v2'}),
+                               ('urls', ['https://foreign.invalid']), ('data', 'foreign')):
+                value['ImageManifestDescriptor'] = dict(selected, **{key: wrong})
+                with self.subTest(identity=identity, key=key), self.assertRaisesRegex(M.Stop, 'container-manifest-mismatch'):
+                    owned.fence()
 
     def test_access_denial_stops_without_container_or_retry(self):
         docker = Mock()
