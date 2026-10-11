@@ -3,7 +3,7 @@
 $ErrorActionPreference = 'Stop'
 $bundle = $PSScriptRoot
 $metadata = Get-Content -Raw (Join-Path $bundle 'qualification.json') | ConvertFrom-Json
-if ($metadata.schema_version -ne 1 -or $metadata.tls.dll -ne 'libglib-2.0-0.dll') {
+if ($metadata.schema_version -ne 1 -or $metadata.library -notin @('glib', 'cairo')) {
     throw 'Unsupported GLib qualification bundle'
 }
 foreach ($file in $metadata.files.PSObject.Properties) {
@@ -13,16 +13,20 @@ foreach ($file in $metadata.files.PSObject.Properties) {
     $actual = (Get-FileHash -Algorithm SHA256 (Join-Path $bundle $file.Name)).Hash.ToLowerInvariant()
     if ($actual -ne $file.Value) { throw "Qualification file changed: $($file.Name)" }
 }
+$library = $metadata.library
+$dllName = if ($library -eq 'glib') { 'libglib-2.0-0.dll' } else { 'libcairo-2.dll' }
+$probeName = "atrinik-$library-tls-probe.exe"
+if ($metadata.tls.dll -ne $dllName) { throw 'TLS report library mismatch' }
 $results = @()
 foreach ($lane in @('original', 'relinked', 'candidate')) {
     $directory = Join-Path $bundle $lane
-    foreach ($name in @('atrinik-glib-tls-probe.exe', 'libglib-2.0-0.dll')) {
+    foreach ($name in @($probeName, $dllName)) {
         if (-not $metadata.files.PSObject.Properties["$lane/$name"]) { throw "Unsealed $lane/$name" }
     }
-    $dllHash = (Get-FileHash -Algorithm SHA256 (Join-Path $directory 'libglib-2.0-0.dll')).Hash.ToLowerInvariant()
+    $dllHash = (Get-FileHash -Algorithm SHA256 (Join-Path $directory $dllName)).Hash.ToLowerInvariant()
     if ($lane -eq 'candidate' -and $dllHash -ne $metadata.tls.sha256) { throw 'Candidate TLS report mismatch' }
     $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = Join-Path $directory 'atrinik-glib-tls-probe.exe'
+    $start.FileName = Join-Path $directory $probeName
     $start.WorkingDirectory = $directory
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
@@ -47,10 +51,11 @@ foreach ($lane in @('original', 'relinked', 'candidate')) {
             exit_code = $process.ExitCode; timed_out = $timedOut; passed = $false }
         if (-not $timedOut) {
             if ($lane -eq 'candidate') {
-                $result.passed = $process.ExitCode -eq 0 -and -not $err -and
-                    $out -match 'process_attach_invoked=1 private_destructors=1 explicit_unload=1'
+                $expected = if ($library -eq 'glib') { 'process_attach_invoked=1 private_destructors=1 explicit_unload=1' } else { 'process_attach_initialized=2 surface_font_smoke=1 explicit_unload=1 reload=1' }
+                $result.passed = $process.ExitCode -eq 0 -and -not $err -and $out -match $expected
             } else {
-                $result.passed = $process.ExitCode -ne 0 -and $err -match 'TLS callback not invoked'
+                $expected = if ($library -eq 'glib') { 'TLS callback not invoked' } else { 'Cairo TLS registration missing' }
+                $result.passed = $process.ExitCode -ne 0 -and $err -match $expected
             }
         }
         $results += $result

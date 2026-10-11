@@ -40,7 +40,18 @@ class PETLSTests(unittest.TestCase):
         data, symbols = fixture()
         result = TLS.inspect_glib(data, symbols)
         self.assertEqual(result['callback_rvas'], [0x1010])
-        self.assertEqual(result['glib_invoked_flag_rva'], 0x2090)
+        self.assertEqual(result['initialized_flag_rva'], 0x2090)
+
+    def test_resolves_cairo_callback_and_pre_api_initialization_flag(self):
+        data, symbols = fixture()
+        symbols = symbols.replace('glib_priv_tls_callback', 'cairo_win32_tls_callback').replace(
+            'tls_callback_invoked', '_cairo_mutex_initialized')
+        result = TLS.inspect_callback(data, symbols, 'cairo')
+        self.assertEqual(result['dll'], 'libcairo-2.dll')
+        self.assertEqual(result['initialized_value'], 2)
+        self.assertEqual(result['callback_rva'], 0x1010)
+        with self.assertRaisesRegex(ValueError, 'missing'):
+            TLS.inspect_callback(data, symbols.replace('_cairo_mutex_initialized', 'unrelated'), 'cairo')
 
     def test_rejects_retained_callback_without_tls_directory(self):
         data, symbols = fixture()
@@ -76,7 +87,7 @@ class PETLSTests(unittest.TestCase):
     def test_rejects_missing_and_duplicate_symbols(self):
         data, symbols = fixture()
         for bad in ('', symbols + symbols):
-            with self.subTest(symbols=bad), self.assertRaisesRegex(ValueError, 'GLib TLS'):
+            with self.subTest(symbols=bad), self.assertRaisesRegex(ValueError, 'library TLS'):
                 TLS.inspect_glib(data, bad)
 
     def test_rejects_truncated_and_overlapping_sections(self):

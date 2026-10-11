@@ -87,67 +87,84 @@ class PE:
         raise ValueError('unterminated PE TLS callback table')
 
 
-def inspect_glib(data: bytes, symbols: str) -> dict:
+LIBRARIES = {
+    'glib': ('libglib-2.0-0.dll', 'glib_priv_tls_callback', 'tls_callback_invoked', 1),
+    'cairo': ('libcairo-2.dll', 'cairo_win32_tls_callback', '_cairo_mutex_initialized', 2),
+}
+
+
+def inspect_callback(data: bytes, symbols: str, library: str) -> dict:
+    dll, callback_symbol, flag_symbol, initialized_value = LIBRARIES[library]
     pe = PE(data)
     callbacks = pe.callbacks()
-    wanted = {'glib_priv_tls_callback', 'tls_callback_invoked', '_tls_used', '_ptr_glib_priv_tls_callback'}
+    wanted = {callback_symbol, flag_symbol, '_tls_used', '_ptr_' + callback_symbol}
     found = {}
     for line in symbols.splitlines():
         fields = line.split()
         if fields and fields[0] in wanted:
             if len(fields) < 3 or fields[0] in found:
-                raise ValueError('invalid or duplicate GLib TLS symbol')
+                raise ValueError('invalid or duplicate library TLS symbol')
             found[fields[0]] = int(fields[2], 16) - pe.base
     if set(found) != wanted:
-        raise ValueError('missing GLib TLS callback/flag symbols')
+        raise ValueError('missing library TLS callback/flag symbols')
     if found['_tls_used'] != pe.tls_rva:
         raise ValueError('TLS directory does not identify _tls_used')
-    callback = found['glib_priv_tls_callback']
-    flag = found['tls_callback_invoked']
-    pointer, = struct.unpack('<Q', pe.at_rva(found['_ptr_glib_priv_tls_callback'], 8))
+    callback = found[callback_symbol]
+    flag = found[flag_symbol]
+    pointer, = struct.unpack('<Q', pe.at_rva(found['_ptr_' + callback_symbol], 8))
     if pointer != pe.base + callback:
-        raise ValueError('GLib declared callback pointer differs from its function')
+        raise ValueError('library declared callback pointer differs from its function')
     if callback not in callbacks:
-        raise ValueError('GLib TLS callback is not registered')
-    # GLib 2.89.3 sets this private gboolean only in DLL_PROCESS_ATTACH.
+        raise ValueError('library TLS callback is not registered')
+    # Source-private state is observed before calling any library API.
     if not pe.section(flag, 4)[4] & 0x80000000:
-        raise ValueError('GLib TLS callback flag is not writable')
-    return {'schema_version': 1, 'dll': 'libglib-2.0-0.dll',
+        raise ValueError('library TLS callback flag is not writable')
+    return {'schema_version': 1, 'dll': dll, 'library': library,
             'sha256': hashlib.sha256(data).hexdigest(),
             'tls_directory_rva': pe.tls_rva, 'callback_rvas': callbacks,
-            'glib_callback_rva': callback, 'glib_invoked_flag_rva': flag}
+            'callback_rva': callback, 'initialized_flag_rva': flag, 'initialized_value': initialized_value}
 
 
-def inspect_glib_file(path: Path, llvm: Path) -> dict:
+def inspect_file(path: Path, llvm: Path, library: str) -> dict:
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 256 * 1024 * 1024:
-        raise ValueError('GLib DLL must be a bounded normal file')
+        raise ValueError('library DLL must be a bounded normal file')
     data = path.read_bytes()
     symbols = subprocess.run([str(llvm / 'bin/llvm-nm'), '--defined-only', '--format=posix', str(path)],
                              check=True, capture_output=True, text=True, timeout=30).stdout
-    report = inspect_glib(data, symbols)
+    report = inspect_callback(data, symbols, library)
     if path.read_bytes() != data:
-        raise ValueError('GLib DLL changed during TLS inspection')
+        raise ValueError('library DLL changed during TLS inspection')
     return report
+
+
+def inspect_glib(data: bytes, symbols: str) -> dict:
+    return inspect_callback(data, symbols, 'glib')
+
+
+def inspect_glib_file(path: Path, llvm: Path) -> dict:
+    return inspect_file(path, llvm, 'glib')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--library', choices=LIBRARIES, default='glib')
     parser.add_argument('--dll', required=True, type=Path)
     parser.add_argument('--llvm', default=Path('/opt/llvm-mingw'), type=Path)
     parser.add_argument('--report', required=True, type=Path)
     parser.add_argument('--header', type=Path)
     parser.add_argument('--probe', type=Path)
     args = parser.parse_args()
-    report = inspect_glib_file(args.dll, args.llvm)
+    report = inspect_file(args.dll, args.llvm, args.library)
     if args.probe:
         if args.probe.is_symlink() or not args.probe.is_file() or args.probe.stat().st_size > 16 * 1024 * 1024:
             raise ValueError('native probe must be a bounded normal file')
         report['probe_sha256'] = hashlib.sha256(args.probe.read_bytes()).hexdigest()
     args.report.write_text(json.dumps(report, indent=2) + '\n')
     if args.header:
-        args.header.write_text('/* Generated from the inspected GLib DLL. */\n'
-                              f'#define GLIB_TLS_CALLBACK_RVA {report["glib_callback_rva"]}u\n'
-                              f'#define GLIB_TLS_INVOKED_FLAG_RVA {report["glib_invoked_flag_rva"]}u\n')
+        args.header.write_text('/* Generated from the inspected library DLL. */\n'
+                              f'#define TLS_CALLBACK_RVA {report["callback_rva"]}u\n'
+                              f'#define TLS_INITIALIZED_FLAG_RVA {report["initialized_flag_rva"]}u\n'
+                              f'#define TLS_INITIALIZED_VALUE {report["initialized_value"]}u\n')
 
 
 if __name__ == '__main__':

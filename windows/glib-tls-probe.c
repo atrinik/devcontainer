@@ -35,7 +35,7 @@ int main(void)
     if (nt->Signature != IMAGE_NT_SIGNATURE || nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC ||
         !dir->VirtualAddress || dir->Size != sizeof(IMAGE_TLS_DIRECTORY64) ||
         size < sizeof(IMAGE_TLS_DIRECTORY64) || dir->VirtualAddress > size - sizeof(IMAGE_TLS_DIRECTORY64) ||
-        GLIB_TLS_CALLBACK_RVA >= size || GLIB_TLS_INVOKED_FLAG_RVA > size - sizeof(gboolean)) return 2;
+        TLS_CALLBACK_RVA >= size || TLS_INITIALIZED_FLAG_RVA > size - sizeof(gboolean)) return 2;
     const IMAGE_TLS_DIRECTORY64 *tls = (const IMAGE_TLS_DIRECTORY64 *)(base + dir->VirtualAddress);
     const uintptr_t callbacks = (uintptr_t)tls->AddressOfCallBacks;
     const uintptr_t start = (uintptr_t)base;
@@ -45,9 +45,9 @@ int main(void)
         if (callbacks + i * sizeof(uintptr_t) > start + size - sizeof(uintptr_t)) return 4;
         const uintptr_t callback = ((const uintptr_t *)callbacks)[i];
         if (!callback) { terminated = TRUE; break; }
-        if (callback == start + GLIB_TLS_CALLBACK_RVA) registered = TRUE;
+        if (callback == start + TLS_CALLBACK_RVA) registered = TRUE;
     }
-    const gboolean invoked = *(const volatile gboolean *)(base + GLIB_TLS_INVOKED_FLAG_RVA);
+    const gboolean invoked = *(const volatile gboolean *)(base + TLS_INITIALIZED_FLAG_RVA);
     if (!registered || !terminated || invoked != TRUE) {
         fprintf(stderr, "GLib TLS callback registered=%d invoked=%d terminated=%d\n", registered, invoked, terminated);
         return 5;
@@ -65,6 +65,6 @@ int main(void)
         return 6;
     if (!FreeLibrary(module) || GetModuleHandleW(L"libglib-2.0-0.dll") != NULL) return 7;
     printf("GLib TLS pid=%lu callback_rva=%u process_attach_invoked=1 private_destructors=1 explicit_unload=1\n",
-           (unsigned long)GetCurrentProcessId(), GLIB_TLS_CALLBACK_RVA);
+           (unsigned long)GetCurrentProcessId(), TLS_CALLBACK_RVA);
     return 0;
 }

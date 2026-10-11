@@ -172,8 +172,11 @@ docker run --rm --user "$(id -u):$(id -g)" --network none \
       "${native_sources[@]}" \
       "${ATRINIK_WINDOWS_RUNTIME_DIR}/atrinik-sdl3-mixer-probe.exe" \
       "${ATRINIK_WINDOWS_RUNTIME_DIR}/atrinik-glib-tls-probe.exe" \
-      "${ATRINIK_WINDOWS_RUNTIME_DIR}/libglib-2.0-0.dll"
+      "${ATRINIK_WINDOWS_RUNTIME_DIR}/libglib-2.0-0.dll" \
+      "${ATRINIK_WINDOWS_RUNTIME_DIR}/atrinik-cairo-tls-probe.exe" \
+      "${ATRINIK_WINDOWS_RUNTIME_DIR}/libcairo-2.dll"
     cmake -E copy /opt/atrinik-windows/share/atrinik/windows-dependencies/glib-tls.json "${stage}/glib-tls.json"
+    cmake -E copy /opt/atrinik-windows/share/atrinik/windows-dependencies/cairo-tls.json "${stage}/cairo-tls.json"
     cmake -E copy_directory libatrinik/tests/fixtures "${stage}/fixtures"
     cmake -E copy /opt/atrinik-windows/share/atrinik/audio/opus-probe.opus "${stage}/opus-probe.opus"
     cmake -E copy /image-source/audio-toolchain.json "${stage}/audio-toolchain.json"

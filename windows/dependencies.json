@@ -1027,7 +1027,8 @@
         }
       ],
       "environment": {
-        "CFLAGS": "-Wno-incompatible-pointer-types"
+        "CFLAGS": "-Wno-incompatible-pointer-types",
+        "LDFLAGS": "-L{prefix}/lib -Wl,--require-defined,_tls_used"
       }
     },
     {

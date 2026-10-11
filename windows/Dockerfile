@@ -80,7 +80,7 @@ RUN python3 /tmp/windows-producer/build-dependencies.py \
         --work-dir /tmp/windows-dependencies --jobs "${WINDOWS_BUILD_JOBS}" \
     && rm -rf /tmp/windows-dependencies
 # Bind the native callback probe to the exact producer DLL's inspected symbols.
-COPY --chown=vscode:vscode windows/glib-tls-probe.c /tmp/windows-producer/
+COPY --chown=vscode:vscode windows/glib-tls-probe.c windows/cairo-tls-probe.c /tmp/windows-producer/
 RUN python3 /tmp/windows-producer/pe_tls.py \
         --dll /opt/atrinik-windows/bin/libglib-2.0-0.dll \
         --report /opt/atrinik-windows/share/atrinik/windows-dependencies/glib-tls.json \
@@ -93,6 +93,18 @@ RUN python3 /tmp/windows-producer/pe_tls.py \
         --dll /opt/atrinik-windows/bin/libglib-2.0-0.dll \
         --report /opt/atrinik-windows/share/atrinik/windows-dependencies/glib-tls.json \
         --probe /opt/atrinik-windows/bin/atrinik-glib-tls-probe.exe
+RUN python3 /tmp/windows-producer/pe_tls.py --library cairo \
+        --dll /opt/atrinik-windows/bin/libcairo-2.dll \
+        --report /opt/atrinik-windows/share/atrinik/windows-dependencies/cairo-tls.json \
+        --header /tmp/windows-producer/cairo-tls-rvas.h \
+    && x86_64-w64-mingw32-clang -std=c17 -O2 -Wall -Wextra -Werror \
+        /tmp/windows-producer/cairo-tls-probe.c \
+        $(x86_64-w64-mingw32-pkg-config --cflags cairo) \
+        -o /opt/atrinik-windows/bin/atrinik-cairo-tls-probe.exe \
+    && python3 /tmp/windows-producer/pe_tls.py --library cairo \
+        --dll /opt/atrinik-windows/bin/libcairo-2.dll \
+        --report /opt/atrinik-windows/share/atrinik/windows-dependencies/cairo-tls.json \
+        --probe /opt/atrinik-windows/bin/atrinik-cairo-tls-probe.exe
 COPY --chown=vscode:vscode tools/verify-classic-curl.sh /tmp/verify-classic-curl.sh
 RUN /tmp/verify-classic-curl.sh /opt/atrinik-windows \
     && test "$(x86_64-w64-mingw32-pkg-config --modversion openssl)" = 3.5.5 \
