@@ -5,7 +5,7 @@ name: Collect released Linux SDK identity
 on:
   push:
     branches:
-      - build/llvm-released-sdk-verification
+      - build/llvm-released-sdk-verification-final
     paths:
       - .github/workflows/qualify-released-linux-sdk.yml
       - tools/collect-released-sdk-metadata.py
@@ -26,9 +26,9 @@ jobs:
     name: Collect ${{ matrix.target }} installed identity
     if: >-
       github.repository == 'atrinik/devcontainer' &&
-      ((github.event_name == 'push' && github.ref == 'refs/heads/build/llvm-released-sdk-verification') ||
+      ((github.event_name == 'push' && github.ref == 'refs/heads/build/llvm-released-sdk-verification-final') ||
        (github.event_name == 'workflow_dispatch' &&
-        (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/build/llvm-released-sdk-verification')))
+        (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/build/llvm-released-sdk-verification-final')))
     permissions:
       contents: read
       packages: read

@@ -459,7 +459,7 @@ class OfflineTests(unittest.TestCase):
         text = (ROOT / M.WORKFLOW).read_text()
         self.assertNotIn('  pull_request:', text)
         self.assertNotIn('pull_request_target:', text)
-        self.assertIn('      - build/llvm-released-sdk-verification', text)
+        self.assertIn('      - build/llvm-released-sdk-verification-final', text)
         self.assertIn('  workflow_dispatch:', text)
         self.assertIn("github.repository == 'atrinik/devcontainer'", text)
         self.assertIn('      packages: read', text)
