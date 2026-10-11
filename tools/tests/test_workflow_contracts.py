@@ -1,6 +1,7 @@
 # Copyright (c) 2026 Atrinik contributors
 # SPDX-License-Identifier: MIT
 """Exercise workflow tag selection and image-selection fences without GitHub."""
+import json
 import os
 from pathlib import Path
 import re
@@ -24,6 +25,61 @@ def step_script(name, step):
 
 
 class WorkflowContracts(unittest.TestCase):
+    def test_portable_public_ca_command_and_failure_are_mandatory(self):
+        for name, image in (('validate.yml', 'atrinik-classic-portable:validation'),
+                            ('publish-linux.yml', 'atrinik-classic-portable:release-validation')):
+            for docker_exit in (0, 17):
+                with self.subTest(workflow=name, docker_exit=docker_exit), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    docker = root / 'docker'
+                    docker.write_text('#!/usr/bin/env python3\nimport json, os, sys\n'
+                                      'from pathlib import Path\n'
+                                      'Path(os.environ["DOCKER_CALL"]).write_text(json.dumps(sys.argv[1:]))\n'
+                                      'print(json.dumps({"fixture": "public-ca"}))\n'
+                                      'sys.exit(int(os.environ["DOCKER_EXIT"]))\n')
+                    docker.chmod(0o755)
+                    env = dict(os.environ, PATH=directory + ':' + os.environ['PATH'],
+                               GITHUB_WORKSPACE=directory, DOCKER_CALL=str(root / 'docker-call.json'),
+                               DOCKER_EXIT=str(docker_exit), HTTPS_PROXY='http://fixture-user:fixture-password@invalid')
+                    result = subprocess.run(['bash', '-euo', 'pipefail', '-c',
+                                             step_script(name, 'Verify portable candidate public CA')],
+                                            cwd=directory, env=env, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, docker_exit, result.stderr)
+                    argv = json.loads((root / 'docker-call.json').read_text())
+                    self.assertEqual(argv[:4], ['run', '--rm', '--network', 'bridge'])
+                    self.assertEqual(argv[argv.index('--user') + 1], f'{os.getuid()}:{os.getgid()}')
+                    forwarded = [argv[index + 1] for index, value in enumerate(argv) if value == '--env']
+                    self.assertEqual(set(forwarded), {'HOME=/tmp/portable-tls-home'} |
+                                     {key + '=' for key in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+                                                           'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy')})
+                    mounts = [argv[index + 1] for index, value in enumerate(argv) if value == '--volume']
+                    self.assertEqual(mounts, [directory + '/build/portable-classic/client/ca-bundle.crt:'
+                                             '/workspace/client/ca-bundle.crt:ro'])
+                    self.assertEqual(argv[argv.index(image):], [image, 'python3',
+                                     '/opt/atrinik-portable/curl_evidence.py', '--public-ca',
+                                     '/workspace/client/ca-bundle.crt'])
+                    self.assertEqual(json.loads((root / 'build/portable-reports/public-ca.json').read_text()),
+                                     {'fixture': 'public-ca'})
+
+    def test_portable_public_ca_gate_precedes_consumer_and_publication(self):
+        for name, loaded, consumer in (
+                ('validate.yml', 'Load portable image', 'Build and test real non-root Classic client on the baseline'),
+                ('publish-linux.yml', 'Load portable release candidate', 'Validate real portable consumer before publication')):
+            text = workflow(name)
+            load = text.index('      - name: ' + loaded)
+            gate = text.index('      - name: Verify portable candidate public CA')
+            consume = text.index('      - name: ' + consumer)
+            self.assertLess(load, gate)
+            self.assertLess(gate, consume)
+            block = text[gate:consume]
+            self.assertNotIn('continue-on-error', block)
+            self.assertNotIn('        if:', block)
+            self.assertIn('        shell: bash', block)
+            self.assertIn('set -euo pipefail', block)
+            if name == 'publish-linux.yml':
+                self.assertLess(gate, text.index('      - name: Publish immutable portable candidate'))
+                self.assertLess(gate, text.index('      - name: Promote validated portable aliases'))
+
     def run_step(self, name, step, **values):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'output'

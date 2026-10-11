@@ -516,6 +516,10 @@ The c-ares source pins come from `classic-curl-toolchain.json`, so changes to
 that file select portable validation alongside the other affected images.
 The broad and slim images retain curl 8.18.0 with their existing LDAP/LDAPS
 and RTMP exclusions.
+Portable validation and publication require the loaded candidate's own
+`curl_evidence.py` public-CA probe before the offline consumer and publication.
+It verifies the pinned Classic CA bundle against `https://curl.se/` with normal
+peer and hostname checks, rejects an unrelated CA, and records JSON evidence.
 
 Both LLVM Windows images retain curl 8.21.0 in the standard shared target
 prefix, add `libcares-2.dll` to that runtime directory, and explicitly pin

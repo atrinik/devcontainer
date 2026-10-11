@@ -27,7 +27,10 @@
   `portable/curl-toolchain.json`, `portable/build-curl.py`,
   `portable/curl_evidence.py` and `portable/curl-runtime-probe.c` contract
   consumes c-ares pins from `classic-curl-toolchain.json`; every portable change
-  filter must include that shared input. Never repurpose this target as a coordinator.
+  filter must include that shared input. Portable validation and publication
+  must run the loaded candidate's own public-CA probe with the pinned Classic
+  bundle before the offline consumer and publication, retaining normal TLS
+  verification and the unrelated-CA negative check. Never repurpose this target as a coordinator.
 - `classic-final` is the slim Classic Check target. Keep its Ubuntu snapshot,
   direct package lock, tool inventory, non-root ccache mount, Classic validation
   revision, shader-toolchain inventory, GPU runtime, smoke/SBOM checks, and
