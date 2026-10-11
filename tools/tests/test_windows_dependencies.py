@@ -96,9 +96,58 @@ class WindowsDependenciesTests(unittest.TestCase):
             self.assertEqual((source / "plain").stat().st_mode & 0o7777, 0o644)
             self.assertEqual((source / "configure").stat().st_mode & 0o7777, 0o755)
             self.assertEqual((source / "plain").stat().st_uid, BUILDER.os.getuid())
+            self.assertEqual((source / "plain").stat().st_gid, BUILDER.os.getgid())
             self.assertEqual((source / "plain").stat().st_mtime, 1234567890)
 
-    def test_archive_duplicates_types_and_link_chains_fail_before_writes(self):
+    def test_archive_safe_framework_symlinks_and_repeated_expansion(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "source.tar"
+            with tarfile.open(archive, "w") as tar:
+                for name in ("source/Versions/A/Headers/api.h", "source/Versions/A/Resources/info", "source/Versions/A/SDL3.tbd"):
+                    member = tarfile.TarInfo(name)
+                    member.size = 7
+                    tar.addfile(member, io.BytesIO(b"payload"))
+                for name, target in (("Versions/Current", "A"), ("Headers", "Versions/Current/Headers"),
+                                     ("Resources", "Versions/Current/Resources"), ("SDL3.tbd", "Versions/Current/SDL3.tbd"),
+                                     ("again", "."), ("repeated", "again/again/Headers/api.h"),
+                                     ("limit", "again/" * 39 + "Versions/A/SDL3.tbd")):
+                    member = tarfile.TarInfo("source/" + name)
+                    member.type = tarfile.SYMTYPE
+                    member.linkname = target
+                    tar.addfile(member)
+            source = BUILDER.extract(archive, root / "unpack")
+            for name in ("Headers/api.h", "Resources/info", "SDL3.tbd", "repeated", "limit"):
+                self.assertEqual((source / name).read_bytes(), b"payload")
+            self.assertEqual(BUILDER.os.readlink(source / "Headers"), "Versions/Current/Headers")
+
+    def test_archive_symbolic_resolution_rejects_escape_cycles_and_file_parents(self):
+        def entry(name, kind=tarfile.SYMTYPE, target=""):
+            member = tarfile.TarInfo("source/" + name)
+            member.type, member.linkname = kind, target
+            return member
+        cases = [
+            [entry("dir", tarfile.DIRTYPE), entry("dir/up", target=".."), entry("alias", target="dir/up/../..")],
+            [entry("a", target="b"), entry("b", target="a")],
+            [entry("file", tarfile.REGTYPE), entry("alias", target="file/../safe")],
+            [entry("file", tarfile.REGTYPE), entry("alias", target="file/.")],
+            [entry("file", tarfile.REGTYPE), entry("alias", target="file/")],
+            [entry("r", target="."), entry("alias", target="r/" * 40 + "safe")],
+            [entry("dir", tarfile.DIRTYPE), entry("dir/alias", target="../../outside")],
+        ]
+        for members in cases:
+            with self.subTest(names=[member.name for member in members]), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                archive = root / "source.tar"
+                with tarfile.open(archive, "w") as tar:
+                    for member in members:
+                        tar.addfile(member)
+                destination = root / "unpack"
+                with self.assertRaises(ValueError):
+                    BUILDER.extract(archive, destination)
+                self.assertFalse(destination.exists())
+
+    def test_archive_duplicates_types_and_invalid_links_fail_before_writes(self):
         bad_records = []
         first = tarfile.TarInfo("source/file")
         bad_records.append([first, tarfile.TarInfo("source/file")])

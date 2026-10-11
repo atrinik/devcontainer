@@ -261,6 +261,56 @@ def normalized_link_target(path: PurePosixPath, member: tarfile.TarInfo, root: s
     return PurePosixPath(*parts)
 
 
+def resolved_symbolic_target(path: PurePosixPath, member: tarfile.TarInfo,
+                             records: dict[PurePosixPath, tarfile.TarInfo], root: str,
+                             directories: set[PurePosixPath]) -> PurePosixPath:
+    """Resolve archive links in POSIX component order without filesystem reads."""
+    active = {path}
+    expansions = 1  # Include the initial link in POSIX's 40-traversal limit.
+
+    def walk(target: str, parent: PurePosixPath) -> PurePosixPath:
+        nonlocal expansions
+        if not target or "\\" in target or "\x00" in target or PurePosixPath(target).is_absolute():
+            raise ValueError(f"unsafe dependency archive link: {path}")
+        parts = list(parent.parts)
+        for component in target.split("/"):
+            if not component:
+                continue
+            current = PurePosixPath(*parts)
+            if current not in directories or (current in records and not records[current].isdir()):
+                raise ValueError(f"dependency archive link traverses non-directory: {path}")
+            if component == ".":
+                continue
+            if component == "..":
+                if len(parts) <= 1:
+                    raise ValueError(f"dependency archive link escapes source root: {path}")
+                parts.pop()
+                continue
+            candidate = current / component
+            target_member = records.get(candidate)
+            if target_member is not None and target_member.issym():
+                expansions += 1
+                if expansions > 40 or candidate in active:
+                    raise ValueError(f"dependency archive symbolic link cycle or expansion limit: {path}")
+                active.add(candidate)
+                try:
+                    resolved = walk(target_member.linkname, candidate.parent)
+                finally:
+                    active.remove(candidate)
+                parts = list(resolved.parts)
+            else:
+                parts.append(component)
+        resolved = PurePosixPath(*parts)
+        if not resolved.parts or resolved.parts[0] != root:
+            raise ValueError(f"dependency archive link escapes source root: {path}")
+        if target.endswith("/") and (resolved not in directories or
+                                     (resolved in records and not records[resolved].isdir())):
+            raise ValueError(f"dependency archive link traverses non-directory: {path}")
+        return resolved
+
+    return walk(member.linkname, path.parent)
+
+
 def validate_archive_members(members: list[tarfile.TarInfo], root: str) -> dict[PurePosixPath, tarfile.TarInfo]:
     records: dict[PurePosixPath, tarfile.TarInfo] = {}
     expanded = 0
@@ -280,11 +330,18 @@ def validate_archive_members(members: list[tarfile.TarInfo], root: str) -> dict[
         if expanded > 8 * 1024**3:
             raise ValueError("dependency archive exceeds extraction limits")
         records[path] = member
+    directories = {PurePosixPath(root)}
+    for path, member in records.items():
+        directories.update(path.parents)
+        if member.isdir():
+            directories.add(path)
     for path, member in records.items():
         for parent in path.parents:
             if parent in records and not records[parent].isdir():
                 raise ValueError(f"dependency archive member traverses non-directory parent: {path}")
-        if member.issym() or member.islnk():
+        if member.issym():
+            resolved_symbolic_target(path, member, records, root, directories)
+        elif member.islnk():
             target = normalized_link_target(path, member, root)
             raw_parts = list(path.parent.parts) if member.issym() else []
             for part in PurePosixPath(member.linkname).parts:
@@ -295,8 +352,7 @@ def validate_archive_members(members: list[tarfile.TarInfo], root: str) -> dict[
                 intermediate = PurePosixPath(*raw_parts)
                 if intermediate in records and (records[intermediate].issym() or records[intermediate].islnk()):
                     raise ValueError(f"dependency archive link traverses another link: {path}")
-            # Refuse link chains and link parents. Lexical '..' validation
-            # alone is insufficient when an intermediate symlink rewrites it.
+            # Hardlinks keep the shared installer's strict declared-file policy.
             for component in (target, *target.parents):
                 if component in records and (records[component].issym() or records[component].islnk()):
                     raise ValueError(f"dependency archive link traverses another link: {path}")
