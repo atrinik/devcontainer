@@ -170,6 +170,23 @@ class OfflineTests(unittest.TestCase):
                    GITHUB_WORKFLOW_REF=M.REPOSITORY + '/' + M.WORKFLOW + '@refs/heads/main')
         M.runner_context(env)
 
+    def test_exact_collector_branch_accepts_push_and_dispatch_rejects_old_branch(self):
+        self.assertEqual(M.BRANCH, 'refs/heads/build/llvm-sdk118-collector-refresh')
+        for event in ('push', 'workflow_dispatch'):
+            with self.subTest(event=event):
+                M.runner_context(dict(context_env(), GITHUB_EVENT_NAME=event))
+                old = dict(context_env(), GITHUB_EVENT_NAME=event,
+                           GITHUB_REF='refs/heads/build/llvm-released-sdk-verification-final',
+                           GITHUB_WORKFLOW_REF=M.REPOSITORY + '/' + M.WORKFLOW +
+                           '@refs/heads/build/llvm-released-sdk-verification-final')
+                with self.assertRaises(M.Stop):
+                    M.runner_context(old)
+        env = dict(context_env(), GITHUB_REF='refs/heads/main',
+                   GITHUB_WORKFLOW_REF=M.REPOSITORY + '/' + M.WORKFLOW + '@refs/heads/main')
+        with self.assertRaises(M.Stop):
+            M.runner_context(env)
+        M.runner_context(dict(env, GITHUB_EVENT_NAME='workflow_dispatch'))
+
     def test_pr_fork_wrong_branch_or_tls_override_rejected(self):
         changes = [('GITHUB_EVENT_NAME', 'pull_request'), ('GITHUB_EVENT_NAME', 'pull_request_target'),
                    ('GITHUB_REPOSITORY', 'fork/devcontainer'), ('GITHUB_REF', 'refs/heads/other'),
@@ -997,7 +1014,11 @@ class OfflineTests(unittest.TestCase):
         text = (ROOT / M.WORKFLOW).read_text()
         self.assertNotIn('  pull_request:', text)
         self.assertNotIn('pull_request_target:', text)
-        self.assertIn('      - build/llvm-released-sdk-verification-final', text)
+        self.assertIn('      - build/llvm-sdk118-collector-refresh', text)
+        self.assertNotIn('build/llvm-released-sdk-verification-final', text)
+        self.assertIn("github.event_name == 'push' && github.ref == '" + M.BRANCH + "'", text)
+        self.assertIn("github.ref == 'refs/heads/main' || github.ref == '" + M.BRANCH + "'", text)
+        self.assertIn('target: [broad, classic, portable-preliminary]', text)
         self.assertIn('  workflow_dispatch:', text)
         self.assertIn("github.repository == 'atrinik/devcontainer'", text)
         self.assertIn('      packages: read', text)

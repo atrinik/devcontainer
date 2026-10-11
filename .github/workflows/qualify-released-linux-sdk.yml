@@ -5,7 +5,7 @@ name: Collect released Linux SDK identity
 on:
   push:
     branches:
-      - build/llvm-released-sdk-verification-final
+      - build/llvm-sdk118-collector-refresh
     paths:
       - .github/workflows/qualify-released-linux-sdk.yml
       - tools/collect-released-sdk-metadata.py
@@ -26,9 +26,9 @@ jobs:
     name: Collect ${{ matrix.target }} installed identity
     if: >-
       github.repository == 'atrinik/devcontainer' &&
-      ((github.event_name == 'push' && github.ref == 'refs/heads/build/llvm-released-sdk-verification-final') ||
+      ((github.event_name == 'push' && github.ref == 'refs/heads/build/llvm-sdk118-collector-refresh') ||
        (github.event_name == 'workflow_dispatch' &&
-        (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/build/llvm-released-sdk-verification-final')))
+        (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/build/llvm-sdk118-collector-refresh')))
     permissions:
       contents: read
       packages: read
@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [broad, portable-preliminary]
+        target: [broad, classic, portable-preliminary]
     steps:
       - name: Check out reviewed collector
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

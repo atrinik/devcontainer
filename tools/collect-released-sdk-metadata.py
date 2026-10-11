@@ -35,7 +35,7 @@ REVISION = '4af130578df18a1944880cd279c7f23afe9cc668'
 SOURCE = 'https://github.com/atrinik/devcontainer'
 REPOSITORY = 'atrinik/devcontainer'
 WORKFLOW = '.github/workflows/qualify-released-linux-sdk.yml'
-BRANCH = 'refs/heads/build/llvm-released-sdk-verification-final'
+BRANCH = 'refs/heads/build/llvm-sdk118-collector-refresh'
 TARGETS = {
     'broad': ('atrinik/linux-build', '1.18.0',
               'sha256:613cf43ab07634db005a28462a009c4c28c90dccb1b5175e13e8072b6dfe8d72'),
