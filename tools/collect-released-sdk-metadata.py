@@ -96,6 +96,74 @@ class Stop(Exception):
     """Only fixed codes, never remote error bodies or exception strings."""
 
 
+class BlobRedirectDenied(Stop):
+    """A fixed failure code plus bounded routing diagnostics."""
+
+    def __init__(self, location, sha):
+        super().__init__('blob-redirect-denied')
+        self.diagnostics = redirect_diagnostics(location, sha)
+
+
+def redirect_diagnostics(location, sha):
+    # Never return any input substring: query signatures, userinfo, hostnames,
+    # fragments and object paths can all contain secrets. This does not authorize
+    # a redirect; the independent allowlist below remains the only routing gate.
+    result = {'schema_version': 1, 'url_parse': 'invalid', 'ascii_clean': False,
+              'scheme_https': False, 'host_exact': False, 'authority_exact': False,
+              'port_valid': False, 'port_default': False, 'port_omitted': False,
+              'userinfo_present': False, 'fragment_present': False,
+              'namespace': 'unknown', 'path_format': 'other',
+              'requested_digest_path_exact': False, 'requested_digest_in_path': False,
+              'requested_digest_suffix': False, 'encoded_requested_digest_in_path': False,
+              'path_segment_count_capped_at_16': 0}
+    if not isinstance(location, str):
+        return result
+    if len(location) > 65536:
+        result['url_parse'] = 'overlong'
+        return result
+    result['ascii_clean'] = all(32 < ord(c) < 127 for c in location) and '\\' not in location
+    try:
+        dest = urllib.parse.urlsplit(location)
+        result.update({'url_parse': 'parsed', 'scheme_https': dest.scheme == 'https',
+                       'host_exact': dest.hostname == 'pkg-containers.githubusercontent.com',
+                       'authority_exact': dest.netloc == 'pkg-containers.githubusercontent.com',
+                       'userinfo_present': '@' in dest.netloc, 'fragment_present': '#' in location})
+        try:
+            port = dest.port
+        except ValueError:
+            pass
+        else:
+            result.update({'port_valid': True, 'port_default': port in (None, 443),
+                           'port_omitted': port is None})
+        parts = dest.path.split('/')
+        namespace = parts[1] if len(parts) > 1 else ''
+        if namespace == 'ghcr1':
+            result['namespace'] = 'ghcr1'
+        elif re.fullmatch(r'ghcr[0-9]+', namespace):
+            result['namespace'] = 'legacy-ghcr-numbered-other'
+        elif re.fullmatch(r'ghcrblobs[1-9][0-9]{0,2}', namespace):
+            result['namespace'] = 'ghcrblobs-numbered'
+        elif re.fullmatch(r'ghcrblobs[0-9]+', namespace):
+            result['namespace'] = 'ghcrblobs-number-outside-bound'
+        for pattern, category in (
+                (r'/[^/]+/blobs/sha256:[0-9a-f]{64}', 'namespace-blobs-sha256'),
+                (r'/[^/]+/blobs/sha256%3[Aa][0-9a-f]{64}', 'namespace-blobs-encoded-sha256'),
+                (r'/[^/]+/blobs/[0-9a-f]{64}', 'namespace-blobs-hex')):
+            if re.fullmatch(pattern, dest.path):
+                result['path_format'] = category
+                break
+        result['requested_digest_path_exact'] = dest.path == '/' + namespace + '/blobs/' + sha
+        result['requested_digest_in_path'] = sha in dest.path
+        result['requested_digest_suffix'] = dest.path.endswith('/' + sha)
+        result['encoded_requested_digest_in_path'] = (sha not in dest.path and
+            sha.encode('ascii') in urllib.parse.unquote_to_bytes(dest.path))
+        result['path_segment_count_capped_at_16'] = min(16, sum(bool(part) for part in parts))
+    except ValueError:
+        # Parsing errors can quote hostile input; retain no exception text.
+        result['url_parse'] = 'invalid'
+    return result
+
+
 def require(condition, code):
     if not condition:
         raise Stop(code)
@@ -194,16 +262,20 @@ def registry_object(package, kind, sha, bearer):
         # GHCR blob storage only; never forward Basic/Bearer to a redirect.
         require(kind == 'blobs' and status in (302, 307) and isinstance(location, str),
                 'registry-redirect-denied')
-        require(all(32 < ord(c) < 127 for c in location) and '\\' not in location,
-                'blob-redirect-denied')
-        dest = urllib.parse.urlsplit(location)
-        require(dest.scheme == 'https' and dest.netloc == 'pkg-containers.githubusercontent.com'
+        if not (all(32 < ord(c) < 127 for c in location) and '\\' not in location):
+            raise BlobRedirectDenied(location, sha)
+        try:
+            dest = urllib.parse.urlsplit(location)
+        except ValueError:
+            raise BlobRedirectDenied(location, sha) from None
+        if not (dest.scheme == 'https' and dest.netloc == 'pkg-containers.githubusercontent.com'
                 and not dest.username and not dest.password and not dest.fragment
                 # Public GHCR config retrieval observed ghcrblobs15. Accept only
                 # this numbered storage family (1..999) or the legacy namespace,
                 # and bind the object path to the exact requested config digest.
                 and re.fullmatch(r'/(?:ghcr1|ghcrblobs[1-9][0-9]{0,2})/blobs/' +
-                                 re.escape(sha), dest.path), 'blob-redirect-denied')
+                                 re.escape(sha), dest.path)):
+            raise BlobRedirectDenied(location, sha)
         status, _, raw = https_get(dest.hostname, dest.path + ('?' + dest.query if dest.query else ''),
                                    {'Accept-Encoding': 'identity'})
         require(status == 200, 'blob-redirect-chain-denied')
@@ -780,6 +852,8 @@ def collect(target, context, original, folder):
         receipt['status'] = 'verified-installed-identity'
     except Stop as error:
         receipt.update({'status': 'stopped', 'reason': str(error)})
+        if isinstance(error, BlobRedirectDenied):
+            receipt['redirect_rejection'] = error.diagnostics
     except BaseException:
         receipt.update({'status': 'stopped', 'reason': 'operation-failed-no-details-retained'})
     finally:

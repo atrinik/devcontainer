@@ -223,6 +223,76 @@ class OfflineTests(unittest.TestCase):
                 self.assertNotIn('FAKE_PRIVATE_URL', str(error.exception))
                 self.assertNotIn(path, str(error.exception))
 
+    def test_redirect_diagnostics_report_only_fixed_categories_and_booleans(self):
+        sha = INDEX_DIGEST
+        prefix = 'https://pkg-containers.githubusercontent.com/'
+        cases = [
+            (prefix + 'ghcrblobs15/blobs/' + sha, {'namespace': 'ghcrblobs-numbered',
+             'path_format': 'namespace-blobs-sha256', 'requested_digest_path_exact': True}),
+            (prefix + 'ghcrblobs15/blobs/' + sha.replace(':', '%3A'), {
+             'path_format': 'namespace-blobs-encoded-sha256', 'requested_digest_path_exact': False,
+             'encoded_requested_digest_in_path': True, 'requested_digest_in_path': False}),
+            (prefix + 'ghcrblobs15/blobs/' + sha.removeprefix('sha256:'), {
+             'path_format': 'namespace-blobs-hex', 'requested_digest_path_exact': False}),
+            (prefix + 'ghcr2/blobs/' + sha, {'namespace': 'legacy-ghcr-numbered-other',
+             'requested_digest_in_path': True, 'requested_digest_suffix': True,
+             'path_segment_count_capped_at_16': 3}),
+            (prefix + 'ghcrblobs1000/blobs/' + sha, {
+             'namespace': 'ghcrblobs-number-outside-bound', 'requested_digest_path_exact': True}),
+            (prefix.replace('.com/', '.com:443/') + 'ghcr1/blobs/' + sha, {
+             'host_exact': True, 'authority_exact': False, 'port_default': True, 'port_omitted': False}),
+            (prefix.replace('.com/', '.com:8443/') + 'ghcr1/blobs/' + sha, {
+             'host_exact': True, 'authority_exact': False, 'port_default': False, 'port_omitted': False})]
+        for location, fields in cases:
+            with self.subTest(fields=fields):
+                result = M.redirect_diagnostics(location, sha)
+                for key, value in fields.items():
+                    self.assertEqual(result[key], value)
+                self.assertNotIn(location, json.dumps(result))
+        result = M.redirect_diagnostics('x' * 65537, sha)
+        self.assertEqual(result['url_parse'], 'overlong')
+
+    def test_denied_redirect_receipt_and_exception_discard_hostile_url_secrets(self):
+        secret = 'FAKE_SENSITIVE_REDIRECT_VALUE'
+        base = 'https://pkg-containers.githubusercontent.com'
+        suffix = '/ghcrblobs15/blobs/' + INDEX_DIGEST
+        locations = [
+            'https://' + secret + ':password@pkg-containers.githubusercontent.com' + suffix,
+            'https://' + secret + '.invalid' + suffix,
+            base + ':' + secret + suffix,
+            base + '/ghcrblobs15/blobs/' + secret,
+            base + suffix + '?signed=' + secret + '#' + secret,
+            secret + '://pkg-containers.githubusercontent.com' + suffix,
+            'https://[' + secret,
+            base + '/unknown/blobs/' + INDEX_DIGEST + '?signed=' + secret,
+            base + '/ghcrblobs15/blobs/' + INDEX_DIGEST.replace(':', '%3A') + '?signed=' + secret,
+            base + suffix + '\n' + secret]
+        for location in locations:
+            with self.subTest(kind=locations.index(location)), patch.object(M, 'https_get', return_value=(
+                    307, location, b'')) as http:
+                with self.assertRaises(M.BlobRedirectDenied) as caught:
+                    M.registry_object(PACKAGE, 'blobs', INDEX_DIGEST, BEARER)
+                error = caught.exception
+                self.assertEqual(http.call_count, 1)
+                self.assertNotIn(secret, str(error))
+                self.assertNotIn(secret, json.dumps(vars(error)))
+                self.assertNotIn(location, json.dumps(vars(error)))
+                docker = Mock()
+                docker.negotiate.return_value = {}
+                with tempfile.TemporaryDirectory() as temp, patch.object(M, 'runner_docker', return_value=docker), \
+                     patch.object(M, 'scoped_bearer', return_value=BEARER), \
+                     patch.object(M, 'verified_registry', side_effect=error), patch.object(M, 'StoppedImage') as create:
+                    receipt = M.collect('broad', M.runner_context(context_env()), SECRET, Path(temp))
+                self.assertEqual(receipt['status'], 'stopped')
+                self.assertEqual(receipt['reason'], 'blob-redirect-denied')
+                self.assertEqual(receipt['redirect_rejection'], error.diagnostics)
+                self.assertNotIn(secret, json.dumps(receipt))
+                self.assertNotIn(SECRET, json.dumps(receipt))
+                self.assertNotIn(BEARER, json.dumps(receipt))
+                self.assertEqual(receipt['artifacts'], [])
+                docker.pull.assert_not_called()
+                create.assert_not_called()
+
     def test_registry_chain_ignores_attestation_and_rejects_ambiguity(self):
         result = self.verified()
         self.assertEqual(result['config_digest'], M.digest(result['config']))
