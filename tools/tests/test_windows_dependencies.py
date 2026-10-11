@@ -162,6 +162,17 @@ class WindowsDependenciesTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "import"):
                 BUILDER.parse_imports(malformed)
 
+    def test_actual_llvm_delay_import_symbol_rows_are_not_providers(self):
+        output = (ROOT / "tools/tests/fixtures/llvm23-wmi-coff-imports.txt").read_text()
+        imports = BUILDER.parse_imports(output)
+        self.assertIn("ole32.dll", imports)
+        self.assertIn("python314.dll", imports)
+        self.assertNotIn("CoCreateInstance", imports)
+        for malformed in ("DelayImport {\n Name: a.dll\n Import {\n Name: hidden.dll\n }\n}\n",
+                          "Import {\n Name: a.dll\n Import {\n Symbol: hidden\n }\n}\n"):
+            with self.assertRaisesRegex(ValueError, "import"):
+                BUILDER.parse_imports(malformed)
+
     def test_nested_modules_are_owned_and_inspected(self):
         with tempfile.TemporaryDirectory() as temporary:
             prefix = Path(temporary)

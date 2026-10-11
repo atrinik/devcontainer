@@ -502,23 +502,37 @@ def run(lock: dict, prefix: Path, work: Path, llvm: Path, jobs: int, dry_run: bo
 
 
 def parse_imports(output: str) -> set[str]:
-    """Read every normal and delay import name, including Windows .drv files."""
+    """Read normal/delay providers, including nested delayed-symbol rows."""
     imports = set()
     block = None
+    outer_kind = None
+    depth = 0
     for line in output.splitlines():
         line = line.strip()
         if line in {"Import {", "DelayImport {"}:
-            if block is not None:
+            if block is None:
+                block = []
+                outer_kind = line
+                depth = 1
+            elif outer_kind == "DelayImport {" and line == "Import {" and depth == 1:
+                depth = 2
+            else:
                 raise ValueError("nested PE import block")
-            block = []
         elif block is not None:
             if line == "}":
-                if len(block) != 1 or re.fullmatch(r"[A-Za-z0-9_+.\-]+", block[0]) is None:
-                    raise ValueError("invalid PE import provider name")
-                imports.add(block[0].lower())
-                block = None
+                depth -= 1
+                if depth == 0:
+                    if len(block) != 1 or re.fullmatch(r"[A-Za-z0-9_+.\-]+", block[0]) is None:
+                        raise ValueError("invalid PE import provider name")
+                    imports.add(block[0].lower())
+                    block = None
+                    outer_kind = None
             elif line.startswith("Name:"):
+                if depth != 1:
+                    raise ValueError("delayed symbol has an unexpected import provider name")
                 block.append(line.removeprefix("Name:").strip())
+            elif line.endswith("{"):
+                raise ValueError("unknown nested PE import block")
         elif line.startswith("Name:"):
             raise ValueError("PE import name outside an import block")
     if block is not None:
