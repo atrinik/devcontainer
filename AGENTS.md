@@ -21,20 +21,28 @@
   `classic-portable-build` publication contracts synchronized. Generate shaders
   with the unchanged canonical tools in the build-only Ubuntu stage; copy only
   canonical-manifest-verified data into Debian. The consumer rejects changed
-  source commits or shader inputs. Never repurpose this target as a coordinator.
+  source commits or shader inputs. Portable curl is an LLVM rebuild of
+  security-patched Debian `7.88.1-10+deb12u15` with c-ares 1.34.6, retaining
+  existing features including LDAP/LDAPS, RTMP, SCP and SFTP. Its separate
+  `portable/curl-toolchain.json`, `portable/build-curl.py`,
+  `portable/curl_evidence.py` and `portable/curl-runtime-probe.c` contract
+  consumes c-ares pins from `classic-curl-toolchain.json`; every portable change
+  filter must include that shared input. Never repurpose this target as a coordinator.
 - `classic-final` is the slim Classic Check target. Keep its Ubuntu snapshot,
   direct package lock, tool inventory, non-root ccache mount, Classic validation
   revision, shader-toolchain inventory, GPU runtime, smoke/SBOM checks, and
   published tags synchronized. Do not make it inherit the broad
   replacement/development toolchain.
-- `classic-curl-toolchain.json` pins the Classic c-ares resolver producer. Both
-  Linux images install its curl/c-ares closure in `/usr/local` without replacing
-  system OpenSSL 3.5.5; both LLVM Windows images explicitly pin OpenSSL 3.5.5 and compile
-  curl with c-ares and no threaded resolver. Preserve generated configuration,
-  header/runtime/license closure and native cancellation qualification; ASYNCHDNS
+- `classic-curl-toolchain.json` pins the Classic c-ares resolver producer. The
+  broad and slim Linux images retain curl 8.18.0 and their explicit LDAP/LDAPS
+  and RTMP exclusions, installing its curl/c-ares closure in `/usr/local`
+  without replacing system OpenSSL 3.5.5; both LLVM Windows images explicitly
+  pin OpenSSL 3.5.5 and compile curl with c-ares and no threaded resolver.
+  Preserve generated configuration, header/runtime/license closure and native
+  cancellation qualification; ASYNCHDNS
   or a non-null c-ares field alone does not prove the selected backend.
-  Both Linux publication paths must run `tools/smoke-classic-curl.sh` against
-  their actual loaded candidate before publication; `candidate_only` retains
+  Broad and slim Linux publication paths must run `tools/smoke-classic-curl.sh`
+  against their actual loaded candidate before publication; `candidate_only` retains
   this gate. Windows validation/measurement/publication share the bundled
   native runner, including cancellation, QUIC and pinned public-CA checks.
 - The broad Linux and `classic-final` images include the snapshot-pinned Git LFS

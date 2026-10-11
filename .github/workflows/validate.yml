@@ -40,7 +40,7 @@ jobs:
             .dockerignore | llvm-toolchain.json | llvm-bootstrap-packages.lock | \
                 tools/install_llvm_toolchain.py | tools/validate_llvm_toolchain.py | \
                 tools/tests/test_install_llvm_toolchain.py | tools/tests/test_workflow_contracts.py | .github/actionlint.yaml | .github/workflows/* | \
-                portable/* | classic-packages.lock | \
+                portable/* | classic-packages.lock | classic-curl-toolchain.json | \
                 classic-shader-toolchain.json | classic-shader-toolchain.spdx.json | \
                 audio-toolchain.json | audio-toolchain.spdx.json | tools/audio/* | \
                 tools/build-sdl3-mixer.sh | tools/install_classic_shader_toolchain.py | \

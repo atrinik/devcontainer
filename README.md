@@ -506,6 +506,17 @@ CMake and pkg-config use the installed headers and libraries there, and
 remain recorded in the package lock for reproducibility; they are not the
 Classic application's selected resolver provider.
 
+The portable Debian image rebuilds security-patched Debian curl
+`7.88.1-10+deb12u15` with LLVM and c-ares 1.34.6, preserving its existing
+features including LDAP/LDAPS, RTMP, SCP and SFTP. Its source/build policy is
+`portable/curl-toolchain.json`, with `portable/build-curl.py`,
+`portable/curl_evidence.py` and `portable/curl-runtime-probe.c` retaining
+configuration and provider evidence.
+The c-ares source pins come from `classic-curl-toolchain.json`, so changes to
+that file select portable validation alongside the other affected images.
+The broad and slim images retain curl 8.18.0 with their existing LDAP/LDAPS
+and RTMP exclusions.
+
 Both LLVM Windows images retain curl 8.21.0 in the standard shared target
 prefix, add `libcares-2.dll` to that runtime directory, and explicitly pin
 OpenSSL 3.5.5. The source pins are in `classic-curl-toolchain.json`. LDAP/LDAPS and RTMP are
