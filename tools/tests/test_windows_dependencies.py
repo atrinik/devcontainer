@@ -49,6 +49,18 @@ class WindowsDependenciesTests(unittest.TestCase):
         self.assertIn("-DCMAKE_C_COMPILER=clang", host[0])
         self.assertFalse(any("TOOLCHAIN_FILE" in arg for arg in host[0]))
 
+    def test_libpng_keeps_original_shared_autotools_recipe(self):
+        lock = BUILDER.load_lock(ROOT / "windows/dependencies.json")
+        item = next(item for item in lock["dependencies"] if item["name"] == "libpng")
+        recipe = BUILDER.commands(item, Path("/source"), Path("/build"), Path("/target"), 2)
+        self.assertEqual(recipe[0][0], "/source/configure")
+        self.assertIn("--enable-shared", recipe[0])
+        self.assertIn("--disable-static", recipe[0])
+        self.assertIn("--host=x86_64-w64-mingw32", recipe[0])
+        for command in recipe[1:]:
+            for override in ("bin_PROGRAMS=", "sbin_PROGRAMS=", "noinst_PROGRAMS="):
+                self.assertIn(override, command)
+
     def test_checksum_mismatch_prevents_extraction(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary)

@@ -342,15 +342,14 @@
       "licenses": [
         "LICENSE"
       ],
-      "build_system": "cmake",
+      "build_system": "autotools",
       "depends": [
         "zlib"
       ],
-      "options": [
-        "-DPNG_SHARED=ON",
-        "-DPNG_STATIC=OFF",
-        "-DPNG_TESTS=OFF",
-        "-DPNG_TOOLS=OFF"
+      "make_options": [
+        "bin_PROGRAMS=",
+        "sbin_PROGRAMS=",
+        "noinst_PROGRAMS="
       ]
     },
     {
