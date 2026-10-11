@@ -79,13 +79,15 @@ def validate(value: dict, *, installed: bool = False) -> None:
     index = 1
     while index < len(linker):
         arg = linker[index]
-        if arg == "-L":
+        if arg in {"-L", "--library-path"}:
             index += 1
             if index == len(linker):
                 raise ValueError("missing LLD library directory")
             directory = linker[index]
         elif arg.startswith("-L"):
             directory = arg[2:]
+        elif arg.startswith("--library-path="):
+            directory = arg.split("=", 1)[1]
         else:
             index += 1
             continue

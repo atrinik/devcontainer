@@ -1,6 +1,7 @@
 """Reject LLVM metadata that no longer proves the portable compile contract."""
 import copy
 import importlib.util
+import json
 from pathlib import Path
 import unittest
 
@@ -24,6 +25,10 @@ class CompilerEvidence(unittest.TestCase):
 
     def test_baseline_invocations(self):
         evidence.validate(self.value)
+
+    def test_actual_frozen_debian_clang_driver(self):
+        fixture = Path(__file__).parent / "fixtures/llvm-readelf-23.1.3/debian-driver.json"
+        evidence.validate(json.loads(fixture.read_text()))
 
     def test_changed_command_cpu_optimization_and_linker_are_rejected(self):
         for old, new in (("x86-64", "x86-64-v2"), ("generic", "native"), ("-O2", "-O3"),
@@ -58,6 +63,7 @@ class CompilerEvidence(unittest.TestCase):
 
     def test_every_library_directory_is_checked(self):
         for option in ('"-L/tmp/foreign"', '"-L" "/tmp/foreign"',
+                       '"--library-path=/tmp/foreign"', '"--library-path" "/tmp/foreign"',
                        '"-L/usr/local/lib/foreign"', '"-Lrelative"', '"-L$ORIGIN"', '"-L"'):
             value = copy.deepcopy(self.value)
             value["compile"]["driver_output"] = value["compile"]["driver_output"].rstrip() + " " + option + "\n"

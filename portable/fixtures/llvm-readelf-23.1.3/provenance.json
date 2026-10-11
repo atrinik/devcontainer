@@ -69,5 +69,13 @@
       "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.35"
     ],
     "excerpt": "Version-symbol section header, first16rows and first hidden-version row; original ordinals retained"
+  },
+  "debian_driver": {
+    "source_revision": "45fc27cbc2d701f15779c9829f3e8672fbe3f403",
+    "portable_base_image": "sha256:be4435f94fd38da55589a17c8bb399247b5fe098e8eb68b517014e2149d63328",
+    "llvm_source_revision": "3161a464021bf20321614c3fc5125f25a92f1cfd",
+    "llvm_image": "sha256:0622269a81a566a4a71e425a14e6ecded89a4521d033a2ccb672554498d4e8b1",
+    "fixture_sha256": "9cd6dedb0286b3832e085ba068c184415d2e37a75cd4c95ad57476ea5e710af6",
+    "proof_scope": "Private offline non-root native compile/link probe from frozen Debian12 package base and freshly source-built canonicalLLVM23.1.3; applicationdependencies notyetbuilt. Thisfixture is parserregressioninput, notpublishedproduceridentity."
   }
 }
