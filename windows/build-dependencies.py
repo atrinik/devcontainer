@@ -269,7 +269,13 @@ def provider_paths(prefix: Path) -> tuple[dict[str, Path], dict[str, Path]]:
     installed = [path for root in roots for path in root.rglob("*")]
     for path in sorted(installed):
         if path.is_symlink():
-            raise ValueError("symlink in PE provider tree")
+            target = path.resolve()
+            # Pinned SDKs install aliases such as libpng.pc; these cannot hide
+            # providers. Directory, DLL, broken and external aliases fail closed.
+            if (not target.is_file() or not target.is_relative_to(prefix.resolve())
+                    or path.suffix.lower() == ".dll" or target.suffix.lower() == ".dll"):
+                raise ValueError("unsafe symlink in PE provider tree")
+            continue
         if path.suffix.lower() != ".dll":
             continue
         if path.is_symlink() or not path.is_file():

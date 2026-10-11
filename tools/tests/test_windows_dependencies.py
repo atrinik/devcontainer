@@ -212,6 +212,22 @@ class WindowsDependenciesTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "provider root"):
                 BUILDER.provider_paths(prefix)
 
+    def test_internal_sdk_file_aliases_cannot_hide_dlls(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            prefix = Path(temporary)
+            (prefix / "lib/pkgconfig").mkdir(parents=True)
+            real = prefix / "lib/pkgconfig/libpng16.pc"
+            real.write_text("prefix=/target")
+            alias = prefix / "lib/pkgconfig/libpng.pc"
+            alias.symlink_to(real.name)
+            self.assertEqual(BUILDER.provider_paths(prefix), ({}, {}))
+            real.write_bytes(b"runtime")
+            real.rename(real.with_suffix(".dll"))
+            alias.unlink()
+            alias.symlink_to("libpng16.dll")
+            with self.assertRaisesRegex(ValueError, "unsafe symlink"):
+                BUILDER.provider_paths(prefix)
+
     def test_resolved_configuration_is_retained_and_required_backends_enforced(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
