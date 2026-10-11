@@ -6,7 +6,7 @@ hashes, patches, features and licenses from the pinned MXE recipes. Libraries
 are rebuilt into `/opt/atrinik-windows` with the LLVM tools.
 
 The Classic source qualifier is
-[ac67956dffa1f463492b8996eebe45405327c53a](https://github.com/atrinik/classic/tree/ac67956dffa1f463492b8996eebe45405327c53a),
+[0771fc9dee5f0a278377fffadd817fb114588dbf](https://github.com/atrinik/classic/tree/0771fc9dee5f0a278377fffadd817fb114588dbf),
 published for review in [Classic PR 588](https://github.com/atrinik/classic/pull/588).
 `classic-check-toolchain.json` pins that source for the neutral CMake interface,
 recursive DLL and Python staging, and native test bundle.
