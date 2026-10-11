@@ -17,6 +17,13 @@ $library = $metadata.library
 $dllName = if ($library -eq 'glib') { 'libglib-2.0-0.dll' } else { 'libcairo-2.dll' }
 $probeName = "atrinik-$library-tls-probe.exe"
 if ($metadata.tls.dll -ne $dllName) { throw 'TLS report library mismatch' }
+if ($library -eq 'cairo') {
+    $glibDependency = $metadata.repaired_dependencies.glib
+    if (-not $glibDependency -or $glibDependency.tls.library -ne 'glib' -or
+        $glibDependency.sha256 -ne $glibDependency.tls.sha256) {
+        throw 'Cairo lacks sealed repaired GLib dependency evidence'
+    }
+}
 $results = @()
 foreach ($lane in @('original', 'relinked', 'candidate')) {
     $directory = Join-Path $bundle $lane
@@ -25,6 +32,14 @@ foreach ($lane in @('original', 'relinked', 'candidate')) {
     }
     $dllHash = (Get-FileHash -Algorithm SHA256 (Join-Path $directory $dllName)).Hash.ToLowerInvariant()
     if ($lane -eq 'candidate' -and $dllHash -ne $metadata.tls.sha256) { throw 'Candidate TLS report mismatch' }
+    if ($library -eq 'cairo') {
+        $glibPath = "$lane/libglib-2.0-0.dll"
+        $sealed = $metadata.files.PSObject.Properties[$glibPath]
+        if (-not $sealed -or $sealed.Value -ne $glibDependency.sha256 -or
+            (Get-FileHash -Algorithm SHA256 (Join-Path $bundle $glibPath)).Hash.ToLowerInvariant() -ne $glibDependency.sha256) {
+            throw 'Cairo controls must share the identical repaired GLib dependency'
+        }
+    }
     $start = [Diagnostics.ProcessStartInfo]::new()
     $start.FileName = Join-Path $directory $probeName
     $start.WorkingDirectory = $directory

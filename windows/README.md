@@ -42,7 +42,12 @@ all three lanes must meet their declared outcomes. This focused test does not
 replace complete candidate SDK, consumer, font, media, or GPU qualification.
 
 The same focused helper accepts `--library cairo` (GLib is the default) with
-Cairo's locked source archive and distinct work/output directories. Its native
+Cairo's locked source archive and distinct work/output directories. Build GLib
+first, then pass its output through `--glib-bundle` to the Cairo invocation. The
+helper checks that bundle's source/recipe/tool hashes, sealed files and actual
+PE callback registration, and stages the same repaired GLib bytes in all three
+Cairo lanes. This isolates Cairo's result from its FreeType/HarfBuzz/GLib
+dependency chain without changing the SDK's original ownership receipts. Its native
 probe observes `_cairo_mutex_initialized == 2` immediately after loading,
 before any API can initialize the mutexes lazily, exercises image/context and
 Win32 font APIs, releases the objects, unloads and reloads the DLL. The original

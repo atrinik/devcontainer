@@ -8,10 +8,11 @@ The SDK remains unchanged; all build outputs use a new caller-owned directory.
 """
 import argparse
 import importlib.util
+import hashlib
 import json
 import os
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 
@@ -21,6 +22,59 @@ ROOT = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location('producer', ROOT / 'build-dependencies.py')
 BUILDER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BUILDER)
+
+
+def source_provenance(items, library):
+    return {
+        'source_inputs': {name: items[name]['sha256'] for name in (library, 'meson', 'mxe-recipes')},
+        'recipe_sha256': hashlib.sha256(json.dumps(items[library], sort_keys=True).encode()).hexdigest(),
+        'tools_sha256': {name: BUILDER.file_hash(ROOT / name) for name in
+                         ('qualify-glib-tls.py', 'build-dependencies.py', 'pe_tls.py', library + '-tls-probe.c')},
+    }
+
+
+def validated_glib_dependency(bundle, items, llvm, prefix):
+    """Admit a freshly sealed repair, never the SDK's known-bad transitive DLL."""
+    if bundle is None or bundle.is_symlink() or not bundle.is_dir():
+        raise ValueError('Cairo requires --glib-bundle from the repaired GLib qualification')
+    manifest = bundle / 'qualification.json'
+    if manifest.is_symlink() or not manifest.is_file():
+        raise ValueError('missing normal GLib qualification manifest')
+    metadata = json.loads(manifest.read_text())
+    if (metadata.get('schema_version') != 1 or metadata.get('library') != 'glib'
+            or metadata.get('source_sha256') != items['glib']['sha256']
+            or metadata.get('provenance') != source_provenance(items, 'glib')):
+        raise ValueError('GLib dependency source/provenance does not match this qualification')
+    files = metadata.get('files', {})
+    required = {'candidate/libglib-2.0-0.dll', 'candidate/atrinik-glib-tls-probe.exe',
+                'build-evidence/glib-tls.json'}
+    if not required.issubset(files):
+        raise ValueError('GLib dependency bundle lacks sealed candidate evidence')
+    for relative, digest in files.items():
+        path = PurePosixPath(relative)
+        if path.is_absolute() or '..' in path.parts or not path.parts or '\\' in relative:
+            raise ValueError('unsafe GLib dependency evidence path')
+        current = bundle
+        for part in path.parts:
+            current /= part
+            if current.is_symlink():
+                raise ValueError('linked GLib dependency evidence')
+        if not current.is_file() or BUILDER.file_hash(current) != digest:
+            raise ValueError('changed GLib dependency evidence: ' + relative)
+    candidate = bundle / 'candidate/libglib-2.0-0.dll'
+    tls = inspect_file(candidate, llvm, 'glib')
+    if tls != metadata.get('tls') or tls != json.loads((bundle / 'build-evidence/glib-tls.json').read_text()):
+        raise ValueError('GLib dependency TLS report does not match actual PE registration')
+    # Its supporting runtime must also come from the same immutable SDK.
+    for path in (bundle / 'candidate').glob('*.dll'):
+        if path == candidate:
+            continue
+        relative = 'candidate/' + path.name
+        sdk = prefix / 'bin' / path.name
+        if relative not in files or not sdk.is_file() or BUILDER.file_hash(sdk) != files[relative]:
+            raise ValueError('GLib dependency uses a different supporting SDK runtime')
+    return candidate, {'sha256': tls['sha256'], 'source_sha256': metadata['source_sha256'],
+                       'qualification_sha256': BUILDER.file_hash(manifest), 'tls': tls}
 
 
 def run(args):
@@ -33,6 +87,11 @@ def run(args):
     target = 'glib/libglib-2.0-0.dll' if library == 'glib' else 'src/libcairo-2.dll'
     lock = BUILDER.load_lock(ROOT / 'dependencies.json')
     items = {item['name']: item for item in lock['dependencies']}
+    dependency = None
+    if library == 'cairo':
+        dependency = validated_glib_dependency(args.glib_bundle, items, args.llvm, args.prefix)
+    elif args.glib_bundle is not None:
+        raise ValueError('--glib-bundle is only valid for Cairo')
     inventory = args.prefix / 'share/atrinik/windows-dependencies'
     ownership = json.loads((inventory / 'runtime-ownership.json').read_text())
     BUILDER.assert_receipt(args.prefix, ownership)
@@ -53,7 +112,6 @@ def run(args):
     source = sources[library]
     for patch in items[library]['patches']:
         content = (sources['mxe-recipes'] / patch['file']).read_bytes()
-        import hashlib
         if hashlib.sha256(content).hexdigest() != patch['sha256']:
             raise ValueError('library upstream recipe patch mismatch')
         for old, new in patch.get('replacements', {}).items():
@@ -131,6 +189,8 @@ def run(args):
         return BUILDER.parse_imports(subprocess.run([readobj, '--coff-imports', str(path)],
                                                     check=True, capture_output=True, text=True).stdout)
     runtime = {p.name.lower(): p for p in (args.prefix / 'bin').glob('*.dll')}
+    if dependency is not None:
+        runtime['libglib-2.0-0.dll'] = dependency[0]
     for name, dll in (('candidate', fixed), ('original', original), ('relinked', baseline)):
         stage = args.output / name
         stage.mkdir()
@@ -147,9 +207,20 @@ def run(args):
             shutil.copy2(runtime[needed], stage / runtime[needed].name)
             copied.add(needed)
             pending.extend(imports(runtime[needed]))
+    if dependency is not None:
+        # Recheck after the build/copy and inspect every staged instance. All
+        # controls vary Cairo only; they share exactly the repaired GLib bytes.
+        if validated_glib_dependency(args.glib_bundle, items, args.llvm, args.prefix) != dependency:
+            raise ValueError('GLib dependency changed during Cairo qualification')
+        for lane in ('original', 'relinked', 'candidate'):
+            path = args.output / lane / 'libglib-2.0-0.dll'
+            if not path.is_file() or inspect_file(path, args.llvm, 'glib') != dependency[1]['tls']:
+                raise ValueError('Cairo lane lacks the identical repaired GLib dependency')
     shutil.copy2(ROOT / 'run-glib-tls-qualification.ps1', args.output)
     metadata = {'schema_version': 1, 'scope': 'focused library TLS diagnostic, not complete SDK qualification', 'library': library,
                 'source_sha256': items[library]['sha256'], 'tls': tls,
+                'provenance': source_provenance(items, library),
+                'repaired_dependencies': {'glib': dependency[1]} if dependency is not None else {},
                 'compiler': subprocess.run([compiler, '--version'], check=True, capture_output=True, text=True).stdout,
                 'files': {p.relative_to(args.output).as_posix(): BUILDER.file_hash(p)
                           for p in sorted(args.output.rglob('*')) if p.is_file()}}
@@ -165,6 +236,7 @@ if __name__ == '__main__':
     parser.add_argument('--prefix', type=Path, default=Path('/opt/atrinik-windows'))
     parser.add_argument('--llvm', type=Path, default=Path('/opt/llvm-mingw'))
     parser.add_argument('--host-llvm', type=Path, default=Path('/opt/llvm-23.1.3'))
+    parser.add_argument('--glib-bundle', type=Path)
     parser.add_argument('--source-archive', type=Path)
     parser.add_argument('--work-dir', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
