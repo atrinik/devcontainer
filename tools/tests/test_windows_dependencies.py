@@ -68,6 +68,93 @@ class WindowsDependenciesTests(unittest.TestCase):
                 BUILDER.extract(archive, root / "source")
             self.assertFalse((root / "outside").exists())
 
+    def test_archive_links_order_ownership_and_permissions_are_safe(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "source.tar"
+            with tarfile.open(archive, "w") as tar:
+                hard = tarfile.TarInfo("source/hard")
+                hard.type = tarfile.LNKTYPE
+                hard.linkname = "source/plain"
+                tar.addfile(hard)
+                for name, mode in (("plain", 0o6666), ("configure", 0o6755)):
+                    member = tarfile.TarInfo("source/" + name)
+                    member.size = 7
+                    member.uid = member.gid = 4242
+                    member.uname = member.gname = "untrusted-owner"
+                    member.mode = mode
+                    member.mtime = 1234567890
+                    tar.addfile(member, io.BytesIO(b"payload"))
+                link = tarfile.TarInfo("source/link")
+                link.type = tarfile.SYMTYPE
+                link.linkname = "plain"
+                tar.addfile(link)
+            source = BUILDER.extract(archive, root / "unpack")
+            self.assertEqual((source / "hard").read_bytes(), b"payload")
+            self.assertEqual((source / "hard").stat().st_ino, (source / "plain").stat().st_ino)
+            self.assertEqual((source / "link").read_bytes(), b"payload")
+            self.assertEqual((source / "plain").stat().st_mode & 0o7777, 0o644)
+            self.assertEqual((source / "configure").stat().st_mode & 0o7777, 0o755)
+            self.assertEqual((source / "plain").stat().st_uid, BUILDER.os.getuid())
+            self.assertEqual((source / "plain").stat().st_mtime, 1234567890)
+
+    def test_archive_duplicates_types_and_link_chains_fail_before_writes(self):
+        bad_records = []
+        first = tarfile.TarInfo("source/file")
+        bad_records.append([first, tarfile.TarInfo("source/file")])
+        for kind in (tarfile.CHRTYPE, tarfile.BLKTYPE, tarfile.FIFOTYPE, b"Z"):
+            special = tarfile.TarInfo("source/special")
+            special.type = kind
+            bad_records.append([special])
+        link = tarfile.TarInfo("source/link")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "dir"
+        chain = tarfile.TarInfo("source/chain")
+        chain.type = tarfile.SYMTYPE
+        chain.linkname = "link/../file"
+        bad_records.append([link, chain, first])
+        child = tarfile.TarInfo("source/link/child")
+        bad_records.append([link, child])
+        outside = tarfile.TarInfo("source/outside")
+        outside.type = tarfile.SYMTYPE
+        outside.linkname = "../../escape"
+        bad_records.append([outside])
+        hard = tarfile.TarInfo("source/hard")
+        hard.type = tarfile.LNKTYPE
+        hard.linkname = "source/missing"
+        bad_records.append([hard])
+        for members in bad_records:
+            with self.subTest(types=[member.type for member in members]), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                archive = root / "source.tar"
+                with tarfile.open(archive, "w") as tar:
+                    for member in members:
+                        tar.addfile(member)
+                destination = root / "unpack"
+                with self.assertRaises(ValueError):
+                    BUILDER.extract(archive, destination)
+                self.assertFalse(destination.exists())
+
+    def test_archive_stale_or_linked_destinations_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "source.tar"
+            with tarfile.open(archive, "w") as tar:
+                directory = tarfile.TarInfo("source")
+                directory.type = tarfile.DIRTYPE
+                tar.addfile(directory)
+            destination = root / "unpack"
+            destination.mkdir()
+            sentinel = destination / "sentinel"
+            sentinel.write_text("preserved")
+            with self.assertRaisesRegex(ValueError, "new or empty"):
+                BUILDER.extract(archive, destination)
+            self.assertEqual(sentinel.read_text(), "preserved")
+            linked = root / "linked"
+            linked.symlink_to(destination, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "new or empty"):
+                BUILDER.extract(archive, linked)
+
     def test_host_cross_bootstrap_and_feature_cycle(self):
         lock = BUILDER.load_lock(ROOT / "windows/dependencies.json")
         entries = {item["name"]: item for item in lock["dependencies"]}

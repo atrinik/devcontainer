@@ -12,8 +12,9 @@ import argparse
 import hashlib
 import io
 import json
+import math
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shlex
 import shutil
@@ -233,27 +234,124 @@ def verified_archive(item: dict, cache: Path) -> Path:
     return archive
 
 
+def safe_archive_path(name: str, root: str) -> PurePosixPath:
+    path = PurePosixPath(name)
+    if (not name or "\\" in name or "\x00" in name or path.is_absolute()
+            or not path.parts or ".." in path.parts or path.parts[0] != root):
+        raise ValueError(f"unsafe dependency archive path: {name!r}")
+    return path
+
+
+def normalized_link_target(path: PurePosixPath, member: tarfile.TarInfo, root: str) -> PurePosixPath:
+    target = member.linkname
+    if not target or "\\" in target or "\x00" in target or PurePosixPath(target).is_absolute():
+        raise ValueError(f"unsafe dependency archive link: {member.name!r}")
+    # Tar hardlink names start at the archive root; symlinks are relative to
+    # their containing directory. Never let '..' pop the archive root.
+    parts = list(path.parent.parts) if member.issym() else []
+    for part in PurePosixPath(target).parts:
+        if part == "..":
+            if len(parts) <= 1:
+                raise ValueError(f"dependency archive link escapes source root: {member.name!r}")
+            parts.pop()
+        elif part != ".":
+            parts.append(part)
+    if not parts or parts[0] != root:
+        raise ValueError(f"dependency archive link escapes source root: {member.name!r}")
+    return PurePosixPath(*parts)
+
+
+def validate_archive_members(members: list[tarfile.TarInfo], root: str) -> dict[PurePosixPath, tarfile.TarInfo]:
+    records: dict[PurePosixPath, tarfile.TarInfo] = {}
+    expanded = 0
+    if len(members) > 400000:
+        raise ValueError("dependency archive exceeds extraction limits")
+    for member in members:
+        path = safe_archive_path(member.name, root)
+        if path in records:
+            raise ValueError(f"duplicate dependency archive path: {path}")
+        if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
+            raise ValueError(f"unsupported dependency archive member: {path}")
+        if member.size < 0 or member.size > 512 * 1024**2:
+            raise ValueError(f"invalid dependency archive member size: {path}")
+        if not isinstance(member.mtime, (int, float)) or not math.isfinite(member.mtime):
+            raise ValueError(f"invalid dependency archive member timestamp: {path}")
+        expanded += member.size
+        if expanded > 8 * 1024**3:
+            raise ValueError("dependency archive exceeds extraction limits")
+        records[path] = member
+    for path, member in records.items():
+        for parent in path.parents:
+            if parent in records and not records[parent].isdir():
+                raise ValueError(f"dependency archive member traverses non-directory parent: {path}")
+        if member.issym() or member.islnk():
+            target = normalized_link_target(path, member, root)
+            raw_parts = list(path.parent.parts) if member.issym() else []
+            for part in PurePosixPath(member.linkname).parts:
+                if part == "..":
+                    raw_parts.pop()
+                elif part != ".":
+                    raw_parts.append(part)
+                intermediate = PurePosixPath(*raw_parts)
+                if intermediate in records and (records[intermediate].issym() or records[intermediate].islnk()):
+                    raise ValueError(f"dependency archive link traverses another link: {path}")
+            # Refuse link chains and link parents. Lexical '..' validation
+            # alone is insufficient when an intermediate symlink rewrites it.
+            for component in (target, *target.parents):
+                if component in records and (records[component].issym() or records[component].islnk()):
+                    raise ValueError(f"dependency archive link traverses another link: {path}")
+            if member.islnk() and (target not in records or not records[target].isfile()):
+                raise ValueError(f"dependency archive hardlink target is not a regular file: {path}")
+    return records
+
+
 def extract(archive: Path, directory: Path) -> Path:
-    directory.mkdir(parents=True)
+    """Extract prevalidated sources without depending on Python's filter API."""
+    if directory.is_symlink() or (directory.exists() and (not directory.is_dir() or any(directory.iterdir()))):
+        raise ValueError("dependency extraction requires a new or empty destination")
     if archive.suffix == ".lz":
         content = subprocess.run(["lzip", "--decompress", "--stdout", str(archive)], capture_output=True, check=True).stdout
         opened = tarfile.open(fileobj=io.BytesIO(content))
     else:
         opened = tarfile.open(archive)
     with opened as tar:
-        for member in tar.getmembers():
-            path = Path(member.name)
-            if path.is_absolute() or ".." in path.parts or member.isdev():
-                raise ValueError("unsafe source archive member")
-            if member.issym() or member.islnk():
-                destination = path.parent / member.linkname if member.issym() else Path(member.linkname)
-                if destination.is_absolute() or not (directory / destination).resolve().is_relative_to(directory.resolve()):
-                    raise ValueError("unsafe source archive link")
-        tar.extractall(directory, filter="data")
-    roots = list(directory.iterdir())
-    if len(roots) != 1 or not roots[0].is_dir():
-        raise ValueError("source archive must have one root directory")
-    return roots[0]
+        members = tar.getmembers()
+        roots = {PurePosixPath(member.name).parts[0] for member in members if PurePosixPath(member.name).parts}
+        if len(roots) != 1:
+            raise ValueError("source archive must have one root directory")
+        root_name = next(iter(roots))
+        records = validate_archive_members(members, root_name)
+        root_member = records.get(PurePosixPath(root_name))
+        if root_member is not None and not root_member.isdir():
+            raise ValueError("source archive root must be a directory")
+        directory.mkdir(parents=True, exist_ok=True)
+        # Match the shared LLVM installer's exclusive writes and delayed links.
+        # Restoring ordinary-file timestamps preserves release build inputs.
+        for path, member in records.items():
+            output = directory.joinpath(*path.parts)
+            if member.isdir():
+                output.mkdir(parents=True, exist_ok=True)
+                output.chmod(0o755)
+            elif member.isfile():
+                output.parent.mkdir(parents=True, exist_ok=True)
+                contents = tar.extractfile(member)
+                if contents is None:
+                    raise ValueError(f"cannot read dependency archive member: {path}")
+                with contents, output.open("xb") as target:
+                    shutil.copyfileobj(contents, target)
+                output.chmod(0o755 if member.mode & 0o111 else 0o644)
+                os.utime(output, (member.mtime, member.mtime), follow_symlinks=False)
+        for path, member in records.items():
+            if not (member.issym() or member.islnk()):
+                continue
+            output = directory.joinpath(*path.parts)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            if member.issym():
+                os.symlink(member.linkname, output)
+            else:
+                target = normalized_link_target(path, member, root_name)
+                os.link(directory.joinpath(*target.parts), output, follow_symlinks=False)
+    return directory / root_name
 
 
 def file_hash(path: Path) -> str:
