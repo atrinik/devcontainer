@@ -856,6 +856,54 @@ class OfflineTests(unittest.TestCase):
             M.verify_local(dict(local, RootFS={'Type': 'layers', 'Layers': list(reversed(cfg['rootfs']['diff_ids']))}),
                            reference, INDEX_DIGEST, verified)
 
+    def test_local_config_documented_api_absence_defaults_only(self):
+        defaults = {'Cmd': None, 'Entrypoint': None, 'Env': None, 'Labels': None,
+                    'OnBuild': None, 'Volumes': None, 'User': '', 'WorkingDir': ''}
+        for key, default in defaults.items():
+            self.assertTrue(M.local_config_matches({key: default}, {}))
+            for value in (None, [], {}, '', False, 0, ['foreign'], {'foreign': {}}, 'foreign'):
+                if type(value) is type(default) and value == default:
+                    continue
+                with self.subTest(key=key, value=value):
+                    self.assertFalse(M.local_config_matches({key: value}, {}))
+        self.assertTrue(M.local_config_matches(defaults, {}))
+        self.assertFalse(M.local_config_matches({'Unknown': None}, {}))
+        self.assertFalse(M.local_config_matches({'Unknown': ''}, {}))
+        verified, reference, local, selected = self.local_image_fixture()
+        actual = {**defaults, **local['Config']}
+        for identity in (verified['config_digest'], verified['manifest_digest']):
+            M.verify_local(dict(local, Id=identity, Descriptor=selected, Config=actual),
+                           reference, INDEX_DIGEST, verified)
+        self.assertEqual(set(actual), set(defaults) | set(local['Config']))
+
+    def test_local_config_broad_shape_preserves_declared_fields(self):
+        # Retained broad OCI config has exactly Cmd, Env and Labels. Use that
+        # shape here; the private replay separately checks the actual raw bytes.
+        expected = {'Cmd': ['/bin/bash'], 'Env': ['CC=clang'], 'Labels': {'fixed': 'label'}}
+        actual = dict(expected, Entrypoint=None, OnBuild=None, Volumes=None, User='', WorkingDir='')
+        self.assertTrue(M.local_config_matches(actual, expected))
+        for key in expected:
+            changed = dict(actual, **{key: None})
+            self.assertFalse(M.local_config_matches(changed, expected))
+        self.assertFalse(M.local_config_matches(dict(actual, Unknown=None), expected))
+        self.assertFalse(M.local_config_matches(dict(actual, User='foreign'), expected))
+        self.assertFalse(M.local_config_matches(dict(actual, WorkingDir='/foreign'), expected))
+
+    def test_local_config_preserves_every_raw_declared_field(self):
+        for key in ('Cmd', 'Entrypoint', 'Env', 'Labels', 'OnBuild', 'Volumes', 'User', 'WorkingDir'):
+            for expected_value in (None, [], {}, '', ['declared'], {'declared': {}}):
+                expected = {key: expected_value}
+                self.assertTrue(M.local_config_matches(copy.deepcopy(expected), expected))
+                self.assertFalse(M.local_config_matches({}, expected))
+                for actual_value in (None, [], {}, '', ['different'], {'different': {}}):
+                    if actual_value == expected_value:
+                        continue
+                    with self.subTest(key=key, expected=expected_value, actual=actual_value):
+                        self.assertFalse(M.local_config_matches(dict(expected, **{key: actual_value}), expected))
+        for wrong in (None, [], '', 0):
+            self.assertFalse(M.local_config_matches(wrong, {}))
+            self.assertFalse(M.local_config_matches({}, wrong))
+
     def test_container_selected_descriptor_rejects_wrong_type_size_and_platform(self):
         owned, value = self.stopped()
         selected = dict(descriptor(owned.verified['manifest'], M.MANIFEST),

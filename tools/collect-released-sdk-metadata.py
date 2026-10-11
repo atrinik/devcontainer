@@ -443,6 +443,22 @@ def selected_manifest_matches(value, verified):
                                     MANIFEST, {'os': 'linux', 'architecture': 'amd64'})
 
 
+def local_config_matches(local, expected):
+    if not isinstance(local, dict) or not isinstance(expected, dict):
+        return False
+    local = dict(local)
+    # API <=1.51 emits these empty defaults; API 1.52 omits unset fields:
+    # https://docs.docker.com/reference/api/engine/version-history/#v152-api-changes
+    # Normalize only API-side absence defaults; preserve every raw-declared key.
+    defaults = {'Cmd': None, 'Entrypoint': None, 'Env': None, 'Labels': None,
+                'OnBuild': None, 'Volumes': None, 'User': '', 'WorkingDir': ''}
+    for key, default in defaults.items():
+        if (key not in expected and key in local and type(local[key]) is type(default)
+                and local[key] == default):
+            del local[key]
+    return local == expected
+
+
 def verify_local(local, reference, sha, verified):
     # Platform-qualified Docker 29 containerd inspection identifies the selected
     # manifest. Legacy stores identify its config. Neither accepts the index ID;
@@ -465,8 +481,7 @@ def verify_local(local, reference, sha, verified):
     cfg = verified['config_object']
     require(local.get('RootFS', {}).get('Type') == 'layers' and
             local.get('RootFS', {}).get('Layers') == cfg['rootfs']['diff_ids'], 'local-rootfs-mismatch')
-    require(isinstance(local.get('Config'), dict) and local['Config'] == cfg['config'],
-            'local-config-mismatch')
+    require(local_config_matches(local.get('Config'), cfg['config']), 'local-config-mismatch')
     return kind
 
 
