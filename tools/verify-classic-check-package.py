@@ -94,8 +94,7 @@ def is_system_dll(name: str) -> bool:
     normalized = name.lower()
     return (
         normalized in SYSTEM_DLLS
-        or normalized.startswith("api-ms-win-")
-        or normalized.startswith("ext-ms-win-")
+        or (normalized.endswith(".dll") and normalized.startswith(("api-ms-win-", "ext-ms-win-")))
     )
 
 

@@ -563,7 +563,7 @@ def verify(prefix: Path, llvm: Path, lock: dict | None = None) -> dict:
             siblings = {path.name.lower() for path in scoped_paths.values() if path.parent == dll.parent}
             available = root_names | siblings
             unresolved = {imported for imported in names if imported not in available and imported not in SYSTEM_DLLS
-                          and not imported.startswith(("api-ms-win-", "ext-ms-win-"))}
+                          and not (imported.endswith(".dll") and imported.startswith(("api-ms-win-", "ext-ms-win-")))}
             if unresolved:
                 raise ValueError(f"unresolved runtime imports in {name}: {sorted(unresolved)}")
             imports.update(names)
