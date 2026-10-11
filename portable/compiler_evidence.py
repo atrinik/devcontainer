@@ -8,7 +8,6 @@ from pathlib import Path
 import posixpath
 import re
 import shlex
-import shutil
 import subprocess
 import tempfile
 
@@ -25,10 +24,13 @@ LIBRARY_DIRECTORIES = frozenset({
     "/usr/lib/gcc/x86_64-linux-gnu/12/../../../../lib64", "/lib/../lib64",
 })
 CC1_EXECUTABLE = "/opt/llvm-23.1.3/bin/clang-23"
+TOOL_NAMES = {
+    "compiler": "clang", "linker": "ld.lld", "readelf": "llvm-readelf",
+    "archiver": "llvm-ar", "ranlib": "llvm-ranlib", "nm": "llvm-nm",
+    "strip": "llvm-strip", "objcopy": "llvm-objcopy", "objdump": "llvm-objdump",
+}
 IDENTITY_PATHS = {
-    "compiler": "/opt/llvm-23.1.3/bin/clang",
-    "linker": "/opt/llvm-23.1.3/bin/ld.lld",
-    "readelf": "/opt/llvm-23.1.3/bin/llvm-readelf",
+    **{role: "/opt/llvm-23.1.3/bin/" + name for role, name in TOOL_NAMES.items()},
     "runtime": "/opt/llvm-23.1.3/lib/clang/23/lib/linux/libclang_rt.builtins-x86_64.a",
     "unwinder": "/opt/llvm-23.1.3/lib/libunwind.a",
 }
@@ -59,12 +61,11 @@ def digest(path: Path) -> str:
 
 
 def tool(name: str) -> dict:
-    executable = shutil.which(name)
-    if executable is None:
+    path = Path("/opt/llvm-23.1.3/bin") / name
+    if not path.is_file():
         raise ValueError(f"missing LLVM tool: {name}")
-    path = Path(executable).absolute()
     version = subprocess.check_output([str(path), "--version"], text=True).strip()
-    if VERSION not in version:
+    if not re.search(r"\b23\.1\.3\b", version):
         raise ValueError(f"wrong LLVM tool version: {name}: {version}")
     return {"path": str(path), "sha256": digest(path), "version": version}
 
@@ -74,7 +75,7 @@ def validate(value: dict, *, installed: bool = False) -> None:
     if value["schema_version"] != 2 or value["toolchain_version"] != VERSION or value["flags"] != FLAGS:
         raise ValueError("wrong portable compiler evidence contract")
     tools = value["tools"]
-    if set(tools) != {"compiler", "linker", "readelf"}:
+    if set(tools) != set(TOOL_NAMES):
         raise ValueError("wrong LLVM tool identity roles")
     for role, expected in IDENTITY_PATHS.items():
         entry = tools[role] if role in tools else value[role]
@@ -84,7 +85,7 @@ def validate(value: dict, *, installed: bool = False) -> None:
             raise ValueError("invalid LLVM identity digest")
         if installed and digest(Path(expected)) != entry["sha256"]:
             raise ValueError("changed installed LLVM identity: " + expected)
-    if any(VERSION not in entry["version"] for entry in tools.values()):
+    if any(not re.search(r"\b23\.1\.3\b", entry["version"]) for entry in tools.values()):
         raise ValueError("wrong installed LLVM version")
     if not re.fullmatch(r"[0-9a-f]{64}", value["compile"]["output_sha256"]):
         raise ValueError("invalid portable probe output digest")
@@ -154,7 +155,7 @@ def validate(value: dict, *, installed: bool = False) -> None:
 
 def record() -> dict:
     tools = {key: tool(name) for key, name in
-             {"compiler": "clang", "linker": "ld.lld", "readelf": "llvm-readelf"}.items()}
+             TOOL_NAMES.items()}
     runtime = Path(subprocess.check_output(
         [tools["compiler"]["path"], "--rtlib=compiler-rt", "--print-libgcc-file-name"], text=True).strip()).resolve()
     with tempfile.TemporaryDirectory(prefix="portable-compiler-") as temp:

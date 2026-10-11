@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import unittest
+from unittest import mock
 
 spec = importlib.util.spec_from_file_location("compiler_evidence", Path(__file__).with_name("compiler_evidence.py"))
 evidence = importlib.util.module_from_spec(spec)
@@ -47,6 +48,30 @@ class CompilerEvidence(unittest.TestCase):
             value["tools"]["readelf"][field] = {"path": "/usr/bin/readelf", "sha256": "bad", "version": "LLVM 14.0.6"}[field]
             with self.subTest(field=field), self.assertRaises(ValueError):
                 evidence.validate(value)
+
+    def test_all_selected_llvm_tools_are_required_and_versioned(self):
+        for role in evidence.TOOL_NAMES:
+            for change in ("missing", "path", "version", "digest"):
+                value = copy.deepcopy(self.value)
+                if change == "missing":
+                    del value["tools"][role]
+                else:
+                    field, replacement = {"path": ("path", "/tmp/foreign-tool"),
+                                          "version": ("version", "LLVM version 23.1.30"),
+                                          "digest": ("sha256", "bad")}[change]
+                    value["tools"][role][field] = replacement
+                with self.subTest(role=role, change=change), self.assertRaises(ValueError):
+                    evidence.validate(value)
+
+    def test_replaced_archive_tool_bytes_fail_installed_verification(self):
+        for role in ("archiver", "ranlib"):
+            records = {record["path"]: record["sha256"]
+                       for record in [*self.value["tools"].values(),
+                                      self.value["runtime"], self.value["unwinder"]]}
+            records[self.value["tools"][role]["path"]] = "0" * 64
+            with self.subTest(role=role), mock.patch.object(evidence, "digest", side_effect=lambda path: records[str(path)]), \
+                 self.assertRaisesRegex(ValueError, "changed installed LLVM identity"):
+                evidence.validate(self.value, installed=True)
 
     def test_compile_command_and_driver_command_must_agree(self):
         self.value["compile"]["command"].append("-flto=thin")

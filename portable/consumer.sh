@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH=/opt/llvm-23.1.3/bin:/usr/bin:/bin
 if [[ $# != 2 ]]; then
   echo "usage: $0 CLASSIC_SOURCE REPORT_DIRECTORY" >&2
   exit 2
@@ -23,7 +24,9 @@ work=$(mktemp -d)
 trap 'rm -rf -- "${work}"' EXIT
 # Resolve pinned providers through the baseline loader cache; omit transient
 # CMake build-tree RPATH padding, whose empty entries mean the current directory.
-cmake -S "${source}" -B "${work}/build" -G Ninja \
+/usr/bin/cmake -S "${source}" -B "${work}/build" -G Ninja \
+  -DCMAKE_MAKE_PROGRAM=/usr/bin/ninja -DPKG_CONFIG_EXECUTABLE=/usr/bin/pkg-config \
+  -DCMAKE_AR=/opt/llvm-23.1.3/bin/llvm-ar -DCMAKE_RANLIB=/opt/llvm-23.1.3/bin/llvm-ranlib \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
   '-DCMAKE_C_FLAGS_RELEASE=-O2 -DNDEBUG' \
@@ -33,7 +36,8 @@ cmake -S "${source}" -B "${work}/build" -G Ninja \
   -DATRINIK_GPU_SHADER_DIRECTORY="${root}/shaders" \
   '-DCMAKE_C_FLAGS=-O2 -march=x86-64 -mtune=generic' \
   '-DCMAKE_CXX_FLAGS=-O2 -march=x86-64 -mtune=generic'
-cmake --build "${work}/build" --parallel 2
+python3 "${root}/compiler_evidence.py" --verify "${root}/compiler-evidence.json"
+/usr/bin/cmake --build "${work}/build" --parallel 2
 ctest --test-dir "${work}/build" --output-on-failure --timeout 120
 python3 - "${work}/build/compile_commands.json" <<'CHECK'
 import json, shlex, sys
@@ -51,4 +55,5 @@ python3 "${root}/abi.py" --output "${reports}/consumer-abi.json" "${clients[0]}"
 cp "${work}/build/compile_commands.json" "${reports}/compile_commands.json"
 cp "${work}/build/Testing/Temporary/LastTest.log" "${reports}/consumer-tests.log"
 printf '%s\n' "${expected}" > "${reports}/classic-commit.txt"
+python3 "${root}/compiler_evidence.py" --verify "${root}/compiler-evidence.json"
 cp "${root}/installed.json" "${root}/contract.json" "${root}/compiler-evidence.json" "${reports}/"
