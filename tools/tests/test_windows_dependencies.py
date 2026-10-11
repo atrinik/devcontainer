@@ -63,8 +63,11 @@ class WindowsDependenciesTests(unittest.TestCase):
                 self.assertIn(override, command)
 
     def test_shared_configuration_requires_actual_resolved_settings(self):
-        formats = [("libpng", "libtool", "build_libtool_libs=yes\nbuild_old_libs=no\n"),
-                   ("freetype", "builds/unix/libtool", "build_libtool_libs=yes\nbuild_old_libs=no\n"),
+        libtool = ("# ### BEGIN LIBTOOL CONFIG\nbuild_libtool_libs=yes\nbuild_old_libs=no\n# ### END LIBTOOL CONFIG\n"
+                   "# ### BEGIN LIBTOOL TAG CONFIG: disable-shared\nbuild_libtool_libs=no\nbuild_old_libs=yes\n"
+                   "# ### END LIBTOOL TAG CONFIG: disable-shared\n")
+        formats = [("libpng", "libtool", libtool),
+                   ("freetype", "builds/unix/libtool", libtool),
                    ("icu4c", "icudefs.mk", "ENABLE_SHARED = YES\nENABLE_STATIC =\n"),
                    ("sqlite", "Makefile", "ENABLE_LIB_SHARED = 1\nENABLE_LIB_STATIC = 0\n")]
         for name, relative, valid in formats:

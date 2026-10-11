@@ -589,6 +589,14 @@ def require_shared_configuration(item: dict, build: Path, destination: Path) -> 
         if path.is_symlink() or not path.is_file():
             raise ValueError(f"unsafe resolved shared configuration: {item['name']}/{relative}")
         text = path.read_text()
+        if relative.name == "libtool":
+            # The script also contains optional disable-shared/static tags.
+            # Only its generated default configuration describes this build.
+            starts = list(re.finditer(r"^# ### BEGIN LIBTOOL CONFIG$", text, re.MULTILINE))
+            ends = list(re.finditer(r"^# ### END LIBTOOL CONFIG$", text, re.MULTILINE))
+            if len(starts) != 1 or len(ends) != 1 or starts[0].end() >= ends[0].start():
+                raise ValueError(f"required shared/static configuration absent: {item['name']}: libtool default scope")
+            text = text[starts[0].end():ends[0].start()]
         for key, expected in required.items():
             values = re.findall(r"^" + re.escape(key) + r"[ \t]*=[ \t]*([^\n]*)$", text, re.MULTILINE)
             if len(values) != 1 or values[0].strip() != expected:
