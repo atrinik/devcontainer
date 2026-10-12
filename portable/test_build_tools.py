@@ -17,7 +17,7 @@ spec.loader.exec_module(tools)
 
 def installed_fixture():
     versions = {"cmake": "cmake version 3.25.1\n\nCMake suite maintained and supported by Kitware (kitware.com/cmake).\n",
-                "ninja": "1.11.1\n"}
+                "ninja": "1.11.1\n", "pkg_config": "1.8.1\n"}
     return {"tools": {role: version.splitlines()[0] for role, version in versions.items()},
             "build_tools": {"schema_version": 1, "tools": {
                 role: {"path": path, "resolved_path": path,
@@ -44,6 +44,7 @@ class SchemaTests(unittest.TestCase):
             lambda v: v["build_tools"].update(schema_version=2),
             lambda v: v["build_tools"].update(tools=[]),
             lambda v: v["build_tools"]["tools"].pop("ninja"),
+            lambda v: v["build_tools"]["tools"].pop("pkg_config"),
             lambda v: v["build_tools"]["tools"].update(ctest={}),
             lambda v: v.update(tools=[]),
         ]
@@ -88,11 +89,13 @@ class ExecutionTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.log = self.root / "execution.log"
         self.paths = {}
-        for role, version in (("cmake", "cmake version 3.25.1\n\ncomplete banner\n"), ("ninja", "1.11.1\n")):
+        for role, version in (("cmake", "cmake version 3.25.1\n\ncomplete banner\n"), ("ninja", "1.11.1\n"),
+                              ("pkg_config", "1.8.1\n")):
             path = self.root / role
             path.write_text("#!/usr/bin/python3\nimport sys\nfrom pathlib import Path\n"
                             f"with Path({str(self.log)!r}).open('a') as log: log.write({role!r} + ' ' + repr(sys.argv[1:]) + '\\n')\n"
-                            f"if sys.argv[1:] == ['--version']: sys.stdout.write({version!r})\n")
+                            f"if sys.argv[1:] == ['--version']: sys.stdout.write({version!r})\n"
+                            "elif sys.argv[1:2] == ['--modversion']: sys.stdout.write('1.2.3\\n')\n")
             path.chmod(0o755)
             self.paths[role] = str(path)
         # A test-owned tree intentionally has a consumer UID and writable /tmp
@@ -126,6 +129,7 @@ class ExecutionTests(unittest.TestCase):
             self.assertTrue(item["version"].endswith("\n"))
         tools.verify(self.installed, role="cmake", arguments=["-S", "fixture", "-G", "Ninja"])
         self.assertEqual(self.log.read_text().splitlines(), ["cmake ['--version']", "ninja ['--version']",
+                                                            "pkg_config ['--version']",
                                                             "cmake ['-S', 'fixture', '-G', 'Ninja']"])
 
     def test_changed_tool_or_size_rejected_before_any_probe(self):
@@ -144,6 +148,64 @@ class ExecutionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "changed installed"):
             tools.verify(self.installed, role="cmake", arguments=["--configure"])
         self.assertFalse(self.log.exists())
+
+    def test_missing_pkgconf_role_rejects_old_receipt_before_any_execution(self):
+        value = copy.deepcopy(self.installed)
+        del value["build_tools"]["tools"]["pkg_config"]
+        with self.assertRaisesRegex(ValueError, "schema or roles"):
+            tools.capture(value, "pkg_config", ["--modversion", "fixture"])
+        self.assertFalse(self.log.exists())
+
+    def test_replaced_pkgconf_bytes_fail_before_any_version_or_module_query(self):
+        path = Path(self.paths["pkg_config"])
+        path.write_bytes(path.read_bytes() + b"# changed pkgconf bytes\n")
+        with self.assertRaisesRegex(ValueError, "changed installed"):
+            tools.capture(self.installed, "pkg_config", ["--modversion", "fixture"])
+        self.assertFalse(self.log.exists())
+
+    def test_curl_consumer_changed_pkgconf_is_rejected_before_any_probe(self):
+        import curl_evidence
+
+        manifest = self.root / "curl-toolchain.json"
+        manifest.write_text(json.dumps({"cares_manifest": "classic-curl-toolchain.json",
+                                        "prefix": "/usr/local", "version": "7.88.1"}))
+        (self.root / "classic-curl-toolchain.json").write_text(json.dumps({"cares": {"version": "1.34.6"}}))
+        retained = self.root / "sources/curl"
+        retained.mkdir(parents=True)
+        (retained / "curl_config.h").write_text("#define USE_ARES 1\n")
+        path = Path(self.paths["pkg_config"])
+        path.write_bytes(path.read_bytes() + b"# changed before curl probe\n")
+        with mock.patch.object(curl_evidence, "load_installed", return_value=self.installed) as loader, \
+                mock.patch.object(curl_evidence, "capture", side_effect=tools.capture), \
+                self.assertRaisesRegex(ValueError, "changed installed"):
+            curl_evidence.record(manifest)
+        loader.assert_called_once_with(self.root / "installed.json")
+        self.assertFalse(self.log.exists())
+
+    def test_module_query_uses_admitted_pkgconf_with_complete_stdout(self):
+        self.assertEqual(tools.capture(self.installed, "pkg_config", ["--modversion", "fixture"]), "1.2.3\n")
+        self.assertEqual(self.log.read_text().splitlines(), ["cmake ['--version']", "ninja ['--version']",
+                                                            "pkg_config ['--version']",
+                                                            "pkg_config ['--modversion', 'fixture']"])
+
+    def test_module_query_mutation_is_fenced_including_failure(self):
+        original = tools.subprocess.check_output
+        for failed in (False, True):
+            path = Path(self.paths["pkg_config"])
+            before = path.read_bytes()
+
+            def mutate_query(*args, **kwargs):
+                if args[0][1:] == ["--modversion", "fixture"]:
+                    path.write_bytes(before + b"# changed during module query\n")
+                    if failed:
+                        raise tools.subprocess.CalledProcessError(1, args[0])
+                    return b"1.2.3\n"
+                return original(*args, **kwargs)
+
+            with self.subTest(failed=failed), mock.patch.object(tools.subprocess, "check_output", side_effect=mutate_query), \
+                    self.assertRaisesRegex(ValueError, "changed across execution"):
+                tools.capture(self.installed, "pkg_config", ["--modversion", "fixture"])
+            path.write_bytes(before)
 
     def test_full_stdout_mismatch_fails_before_configure(self):
         value = copy.deepcopy(self.installed)
@@ -303,10 +365,20 @@ class ProtectionTests(unittest.TestCase):
         self.assertEqual(source.count('--run cmake --'), 2)
         self.assertNotIn('/usr/bin/cmake ', source)
         self.assertIn('-DCMAKE_MAKE_PROGRAM=/usr/bin/ninja', source)
+        self.assertIn('-DPKG_CONFIG_EXECUTABLE=/usr/bin/pkgconf', source)
+        self.assertLess(source.index('build_tools.py'), source.index('"${root}/smoke.sh"'))
         inventory = Path(__file__).with_name("inventory.py").read_text()
         self.assertIn('"build_tools": build_tools', inventory)
         self.assertNotIn('["cmake", "--version"]', inventory)
         self.assertNotIn('["ninja", "--version"]', inventory)
+        self.assertIn('capture(producer_installed, "pkg_config", ["--modversion", name])', inventory)
+        self.assertNotIn('output("pkg-config"', inventory)
+        smoke = Path(__file__).with_name("smoke.sh").read_text()
+        self.assertIn('--run pkg_config --', smoke)
+        self.assertNotIn('$(pkg-config ', smoke)
+        curl = Path(__file__).with_name("curl_evidence.py").read_text()
+        self.assertNotIn('["pkg-config"', curl)
+        self.assertEqual(curl.count('capture(installed, "pkg_config"'), 3)
 
 
 class MetadataTests(unittest.TestCase):

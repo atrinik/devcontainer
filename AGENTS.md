@@ -25,11 +25,14 @@
   selected LLVM utility, including separate Clang C/C++ drivers and
   archiver/ranlib, with canonical paths, versions and hashes; rehash before
   consumer builds and publication. The separate schema-1 `installed.json.build_tools`
-  receipt binds fixed `/usr/bin/cmake` and `/usr/bin/ninja` paths, canonical
-  executables, hashes, sizes and full version stdout. Verify both protected
-  identities before probing either tool and fence configure/build execution;
+  receipt binds fixed `/usr/bin/cmake`, `/usr/bin/ninja` and `/usr/bin/pkgconf`
+  paths, canonical executables, hashes, sizes and full version stdout. Verify
+  all three protected identities before probing any tool and fence
+  configure/build execution;
+  the mandatory `pkg_config` role also fences inventory module-version and
+  consumer/smoke/curl package queries through the canonical executable.
   reject symlinks in these fixed Debian executable and metadata paths.
-  missing receipts require a rebuilt producer. The producer OS, libraries and
+  Missing or incomplete receipts require a rebuilt producer. The producer OS, libraries and
   CMake modules and earlier library-production builds remain trusted; this
   receipt does not attest historical execution. Portable curl is an LLVM rebuild of
   security-patched Debian `7.88.1-10+deb12u15` with c-ares 1.34.6, retaining

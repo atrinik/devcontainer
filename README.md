@@ -464,15 +464,20 @@ versions and hashes for every selected LLVM utility, including independent
 `llvm-ranlib`; incomplete earlier evidence is rejected. Consumers rehash these
 identities before building and publication.
 
-`installed.json.build_tools` separately seals CMake and Ninja with schema 1,
-fixed `/usr/bin` paths, canonical executable paths, SHA-256 hashes, byte sizes,
+`installed.json.build_tools` separately seals CMake, Ninja and pkgconf with schema 1,
+fixed `/usr/bin/cmake`, `/usr/bin/ninja` and `/usr/bin/pkgconf` paths,
+canonical executable paths, SHA-256 hashes, byte sizes,
 executable status and complete version stdout. Its first lines agree with the
 existing installed tool version strings. The consumer verifies both protected
 root-owned executables through open descriptors before any version probe and
 fences their resolution, bytes and file identity around configure and build.
+The mandatory `pkg_config` role also supplies the installed tool version string,
+inventory module-version queries, and consumer/smoke/curl package probes through
+the same admission and execution fences. Module versions and feature selections
+retain their existing contract.
 Every directory component must be protected, and these fixed Debian executable
 and metadata paths must not contain symlinks.
-SDKs without this producer receipt require a rebuild. This check trusts the
+SDKs without all three producer identities require a rebuild. This check trusts the
 producer OS, dynamic libraries and CMake modules; it does not attest the full
 transitive execution environment.
 It binds the installed executables used by the later consumer; earlier library

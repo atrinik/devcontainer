@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bind portable CMake/Ninja execution to the producer's installed bytes.
+"""Bind portable CMake/Ninja/pkgconf execution to the producer's installed bytes.
 
 The producer OS, dynamic libraries and CMake modules remain trusted. These
 receipts protect the selected executables against an unprivileged consumer;
@@ -18,7 +18,7 @@ import re
 import stat
 import subprocess
 
-PATHS = {"cmake": "/usr/bin/cmake", "ninja": "/usr/bin/ninja"}
+PATHS = {"cmake": "/usr/bin/cmake", "ninja": "/usr/bin/ninja", "pkg_config": "/usr/bin/pkgconf"}
 FIELDS = {"path", "resolved_path", "sha256", "size", "executable", "version"}
 MAX_BINARY_SIZE = 512 * 1024 * 1024
 
@@ -28,11 +28,11 @@ def validate(installed: dict) -> dict:
         raise ValueError("invalid producer installed metadata object")
     receipt = installed.get("build_tools")
     if receipt is None:
-        raise ValueError("missing producer build_tools receipt; rebuild the portable SDK with CMake/Ninja identities")
+        raise ValueError("missing producer build_tools receipt; rebuild the portable SDK with CMake/Ninja/pkgconf identities")
     if (type(receipt) is not dict or set(receipt) != {"schema_version", "tools"}
             or type(receipt["schema_version"]) is not int or receipt["schema_version"] != 1
             or type(receipt["tools"]) is not dict or set(receipt["tools"]) != set(PATHS)):
-        raise ValueError("invalid producer build_tools schema or roles")
+        raise ValueError("invalid producer build_tools schema or roles; rebuild the portable SDK with all three identities")
     legacy = installed.get("tools")
     if type(legacy) is not dict:
         raise ValueError("missing installed tool version strings")
@@ -168,10 +168,29 @@ def record() -> dict:
         return receipt
 
 
-def verify(installed: dict, *, role: str | None = None, arguments: list[str] | None = None) -> None:
+@contextmanager
+def admitted_tools(installed: dict):
+    """Admit all three roles before any version or selected tool execution."""
     receipt = validate(installed)
     with protected_tools(receipt["tools"]) as (items, fence):
         _versions(items, fence, receipt["tools"])
+        yield items, fence
+
+
+def capture(installed: dict, role: str, arguments: list[str]) -> str:
+    """Query the sealed executable, preserving stdout and failure-time fencing."""
+    if role not in PATHS:
+        raise ValueError("unsupported portable build tool role")
+    with admitted_tools(installed) as (items, fence):
+        fence()
+        try:
+            return subprocess.check_output([items[role]["path"], *arguments]).decode("utf-8")
+        finally:
+            fence()
+
+
+def verify(installed: dict, *, role: str | None = None, arguments: list[str] | None = None) -> None:
+    with admitted_tools(installed) as (_, fence):
         if role is not None:
             if role not in PATHS:
                 raise ValueError("unsupported portable build tool role")
