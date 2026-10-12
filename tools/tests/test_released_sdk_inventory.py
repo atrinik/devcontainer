@@ -156,9 +156,8 @@ class InventoryTests(unittest.TestCase):
 
     def test_single_file_zero_and_extra_member(self):
         raw = tar([('empty', b'', tarfile.REGTYPE, {})])
-        record, data = P.single_file_archive(Response(raw), '/empty', regular('/empty', b''), retain=False)
-        self.assertEqual(record['size'], 0)
-        self.assertIsNone(data)
+        with self.assertRaisesRegex(P.Stop, 'file-size-limit'):
+            P.single_file_archive(Response(raw), '/empty', regular('/empty', b''), retain=False)
         with self.assertRaises(P.Stop):
             P.single_file_archive(Response(tar([('a', b'x', tarfile.REGTYPE, {}),
                                                ('extra', b'x', tarfile.REGTYPE, {})])),
@@ -454,6 +453,27 @@ class InventoryTests(unittest.TestCase):
         paths = [urllib.parse.parse_qs(urllib.parse.urlsplit(call.args[1]).query)['path'][0]
                  for call in image.docker.request.call_args_list]
         self.assertEqual(set(paths), {M.COMMON + '/' + name for name in M.COMMON_LICENSE_NAMES})
+
+    def test_empty_inventory_notices_and_build_tools_are_rejected(self):
+        runtime, debian = self.documents()
+        for path in (M.DOC + '/foo/copyright', M.COMMON + '/BSD', *M.BUILD_TOOLS.values()):
+            image = self.fake_image()
+            executable = path in M.BUILD_TOOLS.values()
+            expected = regular(path, b'')
+            if executable:
+                expected['mode'] = 0o755
+            image.stat.side_effect = lambda value: expected if value == path else directory(value)
+            conn = Mock()
+            image.docker.request.return_value = (
+                conn, Response(tar([(Path(path).name, b'', tarfile.REGTYPE,
+                                     {'mode': expected['mode']})]), expected))
+            reader = M.InstalledInventory(image, P)
+            with self.subTest(path=path), self.assertRaisesRegex(P.Stop, 'file-size-limit'):
+                if path.startswith(M.DOC + '/'):
+                    reader.debian_notices(runtime, debian)
+                else:
+                    reader._regular(path, executable=executable)
+            conn.close.assert_called_once()
 
     def build_receipt(self):
         entries = {role: {'path': path, 'resolved_path': path, 'sha256': hashlib.sha256(b'tool').hexdigest(),
