@@ -1066,7 +1066,7 @@ class OfflineTests(unittest.TestCase):
         self.assertIn('      packages: read', text)
         self.assertNotIn(': write', text)
         self.assertIn('persist-credentials: false', text)
-        self.assertIn('python3 -I tools/collect-released-sdk-metadata.py', text)
+        self.assertIn('python3 -I -B tools/collect-released-sdk-metadata.py', text)
         self.assertIn('env -u SSLKEYLOGFILE -u OPENSSL_CONF -u OPENSSL_MODULES', text)
         for line in text.splitlines():
             if 'uses:' in line:

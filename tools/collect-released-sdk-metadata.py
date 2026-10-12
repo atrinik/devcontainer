@@ -15,6 +15,7 @@ import argparse
 import base64
 import hashlib
 import http.client
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -30,6 +31,12 @@ import sys
 import tarfile
 import urllib.parse
 import uuid
+from types import SimpleNamespace
+
+_INVENTORY_SPEC = importlib.util.spec_from_file_location('released_sdk_inventory',
+    Path(__file__).resolve().with_name('released_sdk_inventory.py'))
+INVENTORY = importlib.util.module_from_spec(_INVENTORY_SPEC)
+_INVENTORY_SPEC.loader.exec_module(INVENTORY)
 
 REVISION = '4af130578df18a1944880cd279c7f23afe9cc668'
 SOURCE = 'https://github.com/atrinik/devcontainer'
@@ -44,6 +51,14 @@ TARGETS = {
     'portable-preliminary': ('atrinik/classic-portable-build', '1.18.0',
               'sha256:ece5d3892db0ae7c8a13141720fdc62775b02cf67cf2b6df15bff9ccdb039527'),
 }
+HISTORICAL_TARGETS = frozenset(TARGETS)
+# No final image is admitted until the actual released coordinates are reviewed.
+# Each future entry requires exactly producer_revision, consumer_commit,
+# manifest_digest and config_digest; TARGETS must separately pin its index.
+FINAL_TARGETS = {}
+SCANNER_FILES = ('scan-released-sdk-filesystem.py', 'released_sdk_inventory.py')
+SCANNER_LIMIT = 64 * 1024 * 1024
+
 INDEX = 'application/vnd.oci.image.index.v1+json'
 MANIFEST = 'application/vnd.oci.image.manifest.v1+json'
 CONFIG = 'application/vnd.oci.image.config.v1+json'
@@ -206,8 +221,8 @@ def valid_digest(value):
 
 
 class LocalConnection(http.client.HTTPConnection):
-    def __init__(self, path, identity):
-        super().__init__('localhost', timeout=90)
+    def __init__(self, path, identity, timeout=90):
+        super().__init__('localhost', timeout=timeout)
         self.path, self.identity = path, identity
 
     def connect(self):
@@ -306,7 +321,10 @@ def descriptor(value, media_types):
     return value
 
 
-def verified_registry(package, index_digest, bearer):
+def verified_registry(package, index_digest, bearer, *, target=None):
+    policy = target_policy(target) if target is not None else {'producer_revision': REVISION}
+    if target is not None:
+        require(TARGETS[target][0] == package and TARGETS[target][2] == index_digest, 'fixed-target-mismatch')
     index_raw = registry_object(package, 'manifests', index_digest, bearer)
     index = decode(index_raw)
     require(isinstance(index, dict) and index.get('schemaVersion') == 2 and
@@ -338,7 +356,10 @@ def verified_registry(package, index_digest, bearer):
     config = decode(config_raw)
     require(config.get('os') == 'linux' and config.get('architecture') == 'amd64', 'config-platform-mismatch')
     labels = config.get('config', {}).get('Labels', {})
-    require(labels.get('org.opencontainers.image.revision') == REVISION and
+    if target in FINAL_TARGETS:
+        require(selected['digest'] == policy['manifest_digest'] and
+                cfg_descriptor['digest'] == policy['config_digest'], 'final-image-coordinate-mismatch')
+    require(labels.get('org.opencontainers.image.revision') == policy['producer_revision'] and
             labels.get('org.opencontainers.image.source') == SOURCE, 'producer-label-mismatch')
     rootfs = config.get('rootfs', {})
     require(rootfs.get('type') == 'layers' and isinstance(rootfs.get('diff_ids'), list) and
@@ -387,8 +408,8 @@ class Docker:
         self.path, self.identity = path, identity
         self.api = ''
 
-    def request(self, method, path, headers=None, body=None, expected=200):
-        conn = LocalConnection(self.path, self.identity)
+    def request(self, method, path, headers=None, body=None, expected=200, timeout=90):
+        conn = LocalConnection(self.path, self.identity, timeout=timeout)
         try:
             conn.request(method, self.api + path, body=body, headers=headers or {})
             response = conn.getresponse()
@@ -731,7 +752,7 @@ class StoppedImage:
             self.directories.add(str(parent))
 
     def read(self, path, *, retain, executable=False):
-        allowed = set(COMMON_FILES + TARGET_FILES[self.target]) if retain else {
+        allowed = set(COMMON_FILES + (PORTABLE_FILES if self.target in FINAL_TARGETS else TARGET_FILES[self.target])) if retain else {
             PREFIX + '/' + pair[1] for pair in TOOL_FILES.values()}
         require(path in allowed, 'image-path-not-allowed')
         self.fence()
@@ -857,10 +878,237 @@ def validate_metadata(target, data):
     return compiler
 
 
+
+def canonical_json(value):
+    return (json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False) + '\n').encode()
+
+
+def target_policy(target):
+    require(target in TARGETS, 'target-not-allowed')
+    if target not in FINAL_TARGETS:
+        require(target in HISTORICAL_TARGETS, 'final-target-policy-missing')
+        return {'producer_revision': REVISION}
+    value = FINAL_TARGETS[target]
+    require(isinstance(value, dict) and set(value) == {
+        'producer_revision', 'consumer_commit', 'manifest_digest', 'config_digest'}
+        and TARGETS[target][0] == 'atrinik/classic-portable-build'
+        and all(isinstance(value[key], str) and re.fullmatch(r'[0-9a-f]{40}', value[key])
+                for key in ('producer_revision', 'consumer_commit'))
+        and all(valid_digest(value[key]) for key in ('manifest_digest', 'config_digest')),
+        'final-target-policy-incomplete')
+    return value
+
+
+def collect_final_inventory(container, data, file_records, llvm_tools, policy):
+    protocol = SimpleNamespace(stat_matches=stat_matches, regular_mode=regular_mode,
+        path_stat=path_stat, single_file_archive=single_file_archive, pax_times=pax_times)
+    reader = INVENTORY.InstalledInventory(container, protocol)
+    raw = {path.removeprefix(INVENTORY.ROOT + '/'): value for path, value in data.items()
+           if path.startswith(INVENTORY.ROOT + '/')}
+    records = {name: file_records[INVENTORY.ROOT + '/' + name] for name in raw}
+    documents = {name: decode(raw[name]) for name in INVENTORY.METADATA_FILES}
+    contract, shader = documents['contract.json'], documents['shader-generation.json']
+    require(contract.get('consumer', {}).get('commit') == policy['consumer_commit'] and
+            contract['consumer'].get('repository') == 'atrinik/classic' and
+            shader.get('source_commit') == policy['consumer_commit'], 'final-consumer-mismatch')
+    maps = {'producer': reader.producer()}
+    INVENTORY.bind_metadata(maps['producer'], raw, records)
+    INVENTORY.crosscheck_archives(maps['producer'], documents['runtime-sources.json'], contract)
+    inputs = shader.get('source_inputs')
+    require(isinstance(inputs, dict) and 0 < len(inputs) <= INVENTORY.MAX_MEMBERS, 'final-shader-inputs')
+    for path, sha in inputs.items():
+        INVENTORY.relative_path(path)
+        item = maps['producer'].get('sources/classic-shaders/' + path)
+        require(isinstance(item, dict) and item.get('sha256') == sha, 'final-shader-input-bytes')
+    maps['debian_notices'] = reader.debian_notices(documents['runtime-sources.json'], documents['debian-sources.json'])
+    maps['common_licenses'] = reader.common_licenses()
+    tools = reader.build_tools(documents['installed.json'])
+    require(set(llvm_tools) == set(TOOL_FILES) == set(INVENTORY.LLVM_TOOL_FILES), 'final-llvm-roles')
+    llvm = {role: {key: item[key] for key in ('path', 'canonical_path', 'sha256', 'size')}
+            | {'executable': bool(int(item['mode'], 8) & 0o111)} for role, item in llvm_tools.items()}
+    return INVENTORY.expected_scan(maps, {name: records[name] for name in INVENTORY.METADATA_FILES}, tools, llvm)
+
+
+def scanner_sources():
+    result = {}
+    for name in SCANNER_FILES:
+        path = Path(__file__).resolve().with_name(name)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            before = os.fstat(fd)
+            require(stat.S_ISREG(before.st_mode) and before.st_uid == os.getuid()
+                    and before.st_mode & 0o022 == 0 and 0 < before.st_size <= 1024 * 1024,
+                    'unsafe-scanner-source')
+            raw = os.read(fd, before.st_size + 1)
+            def identity(value):
+                return (value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid,
+                        value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+            require(len(raw) == before.st_size and identity(os.fstat(fd)) == identity(before)
+                    and identity(path.stat(follow_symlinks=False)) == identity(before), 'scanner-source-changed')
+            result[name] = {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest(), 'size': len(raw)}
+        finally:
+            os.close(fd)
+    return result
+
+
+def scanner_logs(response):
+    require(response.chunked or response.length is not None, 'scanner-logs-unframed')
+    result = bytearray()
+    while True:
+        header = response.read(8)
+        if not header:
+            break
+        require(len(header) == 8 and header[:4] == b'\x01\0\0\0', 'scanner-logs-invalid')
+        size = struct.unpack('>I', header[4:])[0]
+        require(0 < size <= 1024 * 1024 and len(result) + size <= SCANNER_LIMIT, 'scanner-logs-limit')
+        result.extend(exact_read(response, size))
+    require(response.length in (None, 0) and result, 'scanner-logs-incomplete')
+    return decode(bytes(result))
+
+
+class ScannerImage(StoppedImage):
+    """Separate executed qualification; never weakens StoppedImage's fence."""
+    def __init__(self, docker, target, context, verified, sources):
+        require(target in FINAL_TARGETS, 'final-target-required')
+        policy = target_policy(target)
+        require(verified['manifest_digest'] == policy['manifest_digest'] and
+                verified['config_digest'] == policy['config_digest'], 'final-image-coordinate-mismatch')
+        require(set(sources) == set(SCANNER_FILES), 'scanner-source-set')
+        super().__init__(docker, target, context, verified)
+        self.name = 'atrinik-sdk-filesystem-' + self.owner
+        self.sources = sources
+        self.entrypoint = ['/usr/bin/python3', '-I', '-B', '/scan/scan-released-sdk-filesystem.py']
+        self.mounts = [{'Type': 'bind', 'Source': item['path'], 'Target': '/scan/' + name,
+                        'ReadOnly': True} for name, item in sources.items()]
+
+    def create(self):
+        require(not self.verified['config_object'].get('config', {}).get('Volumes'), 'image-volumes-not-allowed')
+        body = {'Image': self.reference, 'Entrypoint': self.entrypoint, 'Cmd': [], 'Env': [],
+                'Labels': {OWNER_LABEL: self.owner}, 'User': '65534:65534', 'WorkingDir': '/',
+                'NetworkDisabled': True, 'Healthcheck': {'Test': ['NONE']},
+                'HostConfig': {'NetworkMode': 'none', 'ReadonlyRootfs': True, 'CapDrop': ['ALL'],
+                    'SecurityOpt': ['no-new-privileges'], 'RestartPolicy': {'Name': 'no'},
+                    'Mounts': self.mounts, 'LogConfig': {'Type': 'local', 'Config': {'max-size': '128m', 'max-file': '1'}}}}
+        self.attempted = True
+        conn, response = self.docker.request('POST', '/containers/create?' + urllib.parse.urlencode({
+            'name': self.name, 'platform': 'linux/amd64'}), {'Content-Type': 'application/json'},
+            json.dumps(body).encode(), expected=201)
+        try:
+            value = decode(bounded_read(response))
+        finally:
+            conn.close()
+        identifier = value.get('Id')
+        require(isinstance(identifier, str) and re.fullmatch(r'[0-9a-f]{64}', identifier), 'invalid-created-container')
+        self.identifier = identifier
+        self.fence()
+
+    def fence(self, states=('created',)):
+        require(self.identifier is not None, 'container-not-created')
+        value = self.docker.get('/containers/' + self.identifier + '/json')
+        config, host = value.get('Config', {}), value.get('HostConfig', {})
+        state = value.get('State', {})
+        require(value.get('Id') == self.identifier and value.get('Name') == '/' + self.name and
+                config.get('Labels', {}).get(OWNER_LABEL) == self.owner and config.get('Image') == self.reference,
+                'scanner-ownership-mismatch')
+        require(config.get('Entrypoint') == self.entrypoint and config.get('Cmd') in (None, [])
+                and config.get('User') == '65534:65534' and config.get('WorkingDir') == '/',
+                'scanner-command-mismatch')
+        require(state.get('Status') in states and state.get('Running') is (state.get('Status') == 'running')
+                and (state.get('Status') == 'running' or state.get('Pid') == 0), 'scanner-state-mismatch')
+        require(host.get('ReadonlyRootfs') is True and host.get('NetworkMode') == 'none'
+                and not host.get('Privileged') and not host.get('Binds')
+                and host.get('CapDrop') == ['ALL'] and host.get('SecurityOpt') == ['no-new-privileges']
+                and host.get('RestartPolicy', {}).get('Name') == 'no', 'scanner-isolation-mismatch')
+        mounts = value.get('Mounts')
+        require(isinstance(mounts, list) and len(mounts) == len(self.mounts), 'scanner-mount-mismatch')
+        actual = {(item.get('Source'), item.get('Destination')) for item in mounts
+                  if item.get('Type') == 'bind' and item.get('RW') is False}
+        require(actual == {(item['Source'], item['Target']) for item in self.mounts}, 'scanner-mount-mismatch')
+        image = value.get('Image')
+        require(image in (self.verified['config_digest'], self.index_digest, self.verified['manifest_digest']),
+                'container-image-mismatch')
+        selected = value.get('ImageManifestDescriptor')
+        if selected is not None or image != self.verified['config_digest']:
+            require(selected_manifest_matches(selected, self.verified), 'container-manifest-mismatch')
+        return value
+
+    def execute(self):
+        self.fence()
+        conn, _ = self.docker.request('POST', '/containers/' + self.identifier + '/start', expected=204)
+        conn.close()
+        conn, response = self.docker.request('POST', '/containers/' + self.identifier + '/wait?condition=not-running',
+                                             timeout=INVENTORY.MAX_SECONDS + 30)
+        try:
+            result = decode(bounded_read(response))
+            require(type(result.get('StatusCode')) is int and result['StatusCode'] == 0 and
+                    not result.get('Error'), 'scanner-process-failed')
+        finally:
+            conn.close()
+        self.fence(('exited',))
+        conn, response = self.docker.request('GET', '/containers/' + self.identifier + '/logs?stdout=1&stderr=1')
+        try:
+            return scanner_logs(response)
+        finally:
+            conn.close()
+
+    def cleanup(self):
+        if not self.attempted:
+            return
+        if self.identifier is None:
+            # Resolve only our unique name after an ambiguous create response.
+            value = self.docker.get('/containers/' + self.name + '/json')
+            identifier = value.get('Id')
+            require(isinstance(identifier, str) and re.fullmatch(r'[0-9a-f]{64}', identifier), 'cleanup-identity-invalid')
+            self.identifier = identifier
+        value = self.fence(('created', 'running', 'exited'))
+        if value['State']['Status'] == 'running':
+            conn, _ = self.docker.request('POST', '/containers/' + self.identifier + '/stop?t=10', expected=204)
+            conn.close()
+            self.fence(('exited',))
+        conn, _ = self.docker.request('DELETE', '/containers/' + self.identifier, expected=204)
+        conn.close()
+        self.attempted = False
+
+
+def qualify_filesystem(docker, target, context, verified, expected):
+    policy = target_policy(target)
+    require(target in FINAL_TARGETS, 'final-target-required')
+    receipt = {**context, 'schema_version': 1, 'claim': 'trusted-producer-filesystem-equality',
+        'image_code_executed': True, 'final_portable_cohort': False, 'target': target,
+        'index_digest': TARGETS[target][2], 'manifest_digest': verified['manifest_digest'],
+        'config_digest': verified['config_digest'], **policy, 'status': 'started'}
+    scanner = None
+    try:
+        require(verified['manifest_digest'] == policy['manifest_digest'] and
+                verified['config_digest'] == policy['config_digest'], 'final-image-coordinate-mismatch')
+        sources = scanner_sources()
+        receipt['scanner_sources'] = {name: {key: item[key] for key in ('sha256', 'size')}
+                                      for name, item in sources.items()}
+        scanner = ScannerImage(docker, target, context, verified, sources)
+        scanner.create()
+        receipt['container_id'] = scanner.identifier
+        observed = scanner.execute()
+        require(scanner_sources() == sources, 'scanner-source-changed')
+        INVENTORY.compare_scan(observed, expected)
+        receipt['scan'] = observed
+        receipt['status'] = 'verified-filesystem-equality'
+    except BaseException:
+        receipt.update(status='stopped', reason='filesystem-qualification-failed')
+    finally:
+        if scanner is not None:
+            try:
+                signal.alarm(120)
+                scanner.cleanup()
+                receipt['owned_container_removed'] = True
+            except BaseException:
+                receipt.update(status='stopped', reason='owned-cleanup-failed', owned_container_removed=False)
+    return receipt
+
 def collect(target, context, original, folder):
     package, tag, sha = TARGETS[target]
+    policy = target_policy(target)
     receipt = {**context, 'schema_version': 1, 'target': target, 'package': package,
-               'display_tag': tag, 'index_digest': sha, 'producer_revision': REVISION,
+               'display_tag': tag, 'index_digest': sha, 'producer_revision': policy['producer_revision'],
                'source': SOURCE, 'platform': 'linux/amd64', 'status': 'started',
                'claim': 'installed-identity-only', 'image_code_executed': False,
                'final_portable_cohort': False, 'artifacts': [], 'tool_bytes': {}}
@@ -869,7 +1117,7 @@ def collect(target, context, original, folder):
         docker = runner_docker()
         receipt.update(docker.negotiate())
         bearer = scoped_bearer(package, original, context['actor'])
-        verified = verified_registry(package, sha, bearer)
+        verified = verified_registry(package, sha, bearer, target=target)
         for name in ('index', 'manifest', 'config'):
             receipt['artifacts'].append(save(folder, 'registry/' + name + '.json', verified[name]))
         receipt.update({'manifest_digest': verified['manifest_digest'],
@@ -880,10 +1128,12 @@ def collect(target, context, original, folder):
         container = StoppedImage(docker, target, context, verified)
         container.create()
         receipt['container_id'] = container.identifier
-        data = {}
-        for path in COMMON_FILES + TARGET_FILES[target]:
-            _, raw = container.read(path, retain=True)
+        data, file_records = {}, {}
+        for path in COMMON_FILES + (PORTABLE_FILES if target in FINAL_TARGETS else TARGET_FILES[target]):
+            observed_file, raw = container.read(path, retain=True)
             data[path] = raw
+            file_records[path] = {'sha256': observed_file['sha256'], 'size': observed_file['size'],
+                                  'executable': bool(int(observed_file['mode'], 8) & 0o111)}
         compiler = validate_metadata(target, data)
         for path, raw in data.items():
             receipt['artifacts'].append(save(folder, 'files' + path, raw))
@@ -906,6 +1156,17 @@ def collect(target, context, original, folder):
                 identity['producer_descriptor_verified'] = False
             receipt['tool_bytes'][role] = identity
         container.fence()
+        if target in FINAL_TARGETS:
+            final_inventory = collect_final_inventory(container, data, file_records, receipt['tool_bytes'], policy)
+            for name, records in final_inventory['inventories'].items():
+                receipt['artifacts'].append(save(folder, 'inventories/' + name + '.json', canonical_json(records)))
+            receipt['inventory_sha256'] = final_inventory['inventory_sha256']
+            receipt['metadata_sha256'] = {name: item['sha256'] for name, item in final_inventory['metadata'].items()}
+            receipt['build_tools'] = final_inventory['build_tools']
+            # Keep acquisition and execution claims separate, including failure.
+            qualification = qualify_filesystem(docker, target, context, verified, final_inventory)
+            receipt['artifacts'].append(save(folder, 'filesystem-qualification.json', canonical_json(qualification)))
+            require(qualification['status'] == 'verified-filesystem-equality', 'filesystem-qualification-failed')
         receipt['status'] = 'verified-installed-identity'
     except Stop as error:
         receipt.update({'status': 'stopped', 'reason': str(error)})
@@ -945,7 +1206,7 @@ def main():
         signal.signal(signal.SIGALRM, stop)
         signal.signal(signal.SIGTERM, stop)
         signal.signal(signal.SIGINT, stop)
-        signal.alarm(1800)
+        signal.alarm(3600 if args.target in FINAL_TARGETS else 1800)
         context = runner_context(os.environ)
         root = verify_checkout(context)
         require(isinstance(original, str) and 0 < len(original) < 16384 and
@@ -954,6 +1215,8 @@ def main():
         receipt = collect(args.target, context, original, folder)
         del original
         receipt['collector_sha256'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        receipt['inventory_helper_sha256'] = hashlib.sha256(
+            Path(__file__).with_name('released_sdk_inventory.py').read_bytes()).hexdigest()
         save(folder, 'receipt.json', (json.dumps(receipt, indent=2, sort_keys=True) + '\n').encode())
         # The receipt itself is bound by a separate hash; never print raw registry,
         # archive, daemon, auth or exception content.

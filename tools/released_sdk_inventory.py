@@ -33,6 +33,25 @@ MAX_HOPS = 16
 SOURCE_MANIFESTS = ('audio-toolchain.json', 'llvm-toolchain.json',
                     'curl-toolchain.json', 'classic-curl-toolchain.json')
 MAX_MANIFEST = 1024 * 1024
+METADATA_FILES = ('contract.json', 'installed.json', 'compiler-evidence.json',
+                  'runtime-abi.json', 'runtime-sources.json', 'debian-sources.json',
+                  'shader-generation.json')
+LLVM_PREFIX = '/opt/llvm-23.1.3'
+LLVM_TOOL_FILES = {
+    'compiler': ('bin/clang', 'bin/clang-23'),
+    'cxx_compiler': ('bin/clang++', 'bin/clang-23'),
+    'linker': ('bin/ld.lld', 'bin/lld'),
+    'readelf': ('bin/llvm-readelf', 'bin/llvm-readobj'),
+    'archiver': ('bin/llvm-ar', 'bin/llvm-ar'),
+    'ranlib': ('bin/llvm-ranlib', 'bin/llvm-ar'),
+    'nm': ('bin/llvm-nm', 'bin/llvm-nm'),
+    'strip': ('bin/llvm-strip', 'bin/llvm-objcopy'),
+    'objcopy': ('bin/llvm-objcopy', 'bin/llvm-objcopy'),
+    'objdump': ('bin/llvm-objdump', 'bin/llvm-objdump'),
+    'runtime': ('lib/clang/23/lib/linux/libclang_rt.builtins-x86_64.a',
+                'lib/clang/23/lib/linux/libclang_rt.builtins-x86_64.a'),
+    'unwinder': ('lib/libunwind.a', 'lib/libunwind.a'),
+}
 GO_DIRECTORY = 1 << 31
 GO_SYMLINK = 1 << 27
 
@@ -624,33 +643,73 @@ class InstalledInventory(ProviderReader):
 
 
     def build_tools(self, installed):
-        require(isinstance(installed, dict), 'build-tool-schema')
-        receipt = installed.get('build_tools')
-        require(isinstance(receipt, dict) and set(receipt) == {'schema_version', 'tools'}
-                and type(receipt['schema_version']) is int and receipt['schema_version'] == 1
-                and isinstance(receipt['tools'], dict) and set(receipt['tools']) == set(BUILD_TOOLS),
-                'build-tool-schema')
-        result = {}
-        for role, path in BUILD_TOOLS.items():
-            entry = receipt['tools'][role]
-            require(isinstance(entry, dict) and set(entry) == {
-                'path', 'resolved_path', 'sha256', 'size', 'executable', 'version'}, 'build-tool-fields')
-            require(entry['path'] == path and entry['resolved_path'] == path,
-                    'build-tool-path')
-            require(isinstance(entry['sha256'], str) and re.fullmatch(r'[0-9a-f]{64}', entry['sha256'])
-                    and type(entry['size']) is int and 0 < entry['size'] <= MAX_BUILD_TOOL
-                    and entry['executable'] is True and isinstance(entry['version'], str)
-                    and 0 < len(entry['version']) <= 65536
-                    and not any((ord(char) < 32 and char != '\n') or ord(char) == 127
-                                for char in entry['version'])
-                    and re.fullmatch(r'cmake version [0-9]+\.[0-9]+\.[0-9]+' if role == 'cmake'
-                                     else r'[0-9]+\.[0-9]+(?:\.[0-9]+)?',
-                                     entry['version'].splitlines()[0]) is not None
-                    and isinstance(installed.get('tools'), dict)
-                    and installed['tools'].get(role) == entry['version'].splitlines()[0],
-                    'build-tool-identity')
-            observed = self._regular(path, executable=True)
-            require(all(observed[key] == entry[key] for key in ('sha256', 'size', 'executable')),
-                    'build-tool-bytes-mismatch')
-            result[role] = dict(entry)
-        return result
+        return build_tool_records(installed, lambda path: self._regular(path, executable=True))
+
+
+def build_tool_records(installed, read):
+    require(isinstance(installed, dict), 'build-tool-schema')
+    receipt = installed.get('build_tools')
+    require(isinstance(receipt, dict) and set(receipt) == {'schema_version', 'tools'}
+            and type(receipt['schema_version']) is int and receipt['schema_version'] == 1
+            and isinstance(receipt['tools'], dict) and set(receipt['tools']) == set(BUILD_TOOLS),
+            'build-tool-schema')
+    result = {}
+    for role, path in BUILD_TOOLS.items():
+        entry = receipt['tools'][role]
+        require(isinstance(entry, dict) and set(entry) == {
+            'path', 'resolved_path', 'sha256', 'size', 'executable', 'version'}, 'build-tool-fields')
+        require(entry['path'] == path and entry['resolved_path'] == path,
+                'build-tool-path')
+        require(isinstance(entry['sha256'], str) and re.fullmatch(r'[0-9a-f]{64}', entry['sha256'])
+                and type(entry['size']) is int and 0 < entry['size'] <= MAX_BUILD_TOOL
+                and entry['executable'] is True and isinstance(entry['version'], str)
+                and 0 < len(entry['version']) <= 65536
+                and not any((ord(char) < 32 and char != '\n') or ord(char) == 127
+                            for char in entry['version'])
+                and re.fullmatch(r'cmake version [0-9]+\.[0-9]+\.[0-9]+' if role == 'cmake'
+                                 else r'[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+                                 entry['version'].splitlines()[0]) is not None
+                and isinstance(installed.get('tools'), dict)
+                and installed['tools'].get(role) == entry['version'].splitlines()[0],
+                'build-tool-identity')
+        observed = read(path)
+        require(all(observed[key] == entry[key] for key in ('sha256', 'size', 'executable')),
+                'build-tool-bytes-mismatch')
+        result[role] = dict(entry)
+    return result
+
+
+def bind_metadata(producer, raw, records):
+    """Bind every retained producer file and require the seven-file handoff."""
+    require(isinstance(producer, dict) and isinstance(raw, dict) and isinstance(records, dict)
+            and set(METADATA_FILES) <= set(raw) and set(records) == set(raw),
+            'inventory-metadata-files')
+    for name, value in raw.items():
+        relative_path(name)
+        require(isinstance(value, bytes) and len(value) <= 4 * 1024 * 1024,
+                'inventory-metadata-size')
+        record = records[name]
+        require(isinstance(record, dict) and set(record) == {'sha256', 'size', 'executable'}
+                and type(record['size']) is int and type(record['executable']) is bool
+                and record['size'] == len(value) and record['sha256'] == hashlib.sha256(value).hexdigest()
+                and name in producer and producer[name] == record, 'inventory-metadata-binding')
+
+
+def expected_scan(inventories, metadata, build_tools, llvm_tools):
+    require(set(inventories) == {'producer', 'debian_notices', 'common_licenses'}
+            and set(metadata) == set(METADATA_FILES) and set(build_tools) == set(BUILD_TOOLS)
+            and set(llvm_tools) == set(LLVM_TOOL_FILES), 'inventory-report-roles')
+    return {'schema_version': 1, 'claim': 'trusted-producer-filesystem-inventory',
+            'image_code_executed': True, 'final_portable_cohort': False,
+            'inventories': inventories,
+            'inventory_sha256': {key: inventory_digest(value) for key, value in inventories.items()},
+            'metadata': metadata, 'build_tools': build_tools, 'llvm_tools': llvm_tools}
+
+
+def compare_scan(observed, expected):
+    # Compare complete JSON structures, not a claimed digest or Python's bool/int
+    # equality. This catches omitted unrelated files and every role/field change.
+    require(isinstance(observed, dict) and set(observed) == set(expected), 'scanner-report-shape')
+    require(json.dumps(observed, sort_keys=True, separators=(',', ':'), allow_nan=False) ==
+            json.dumps(expected, sort_keys=True, separators=(',', ':'), allow_nan=False),
+            'scanner-inventory-mismatch')

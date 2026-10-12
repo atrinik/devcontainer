@@ -10,6 +10,11 @@ on:
       - .github/workflows/qualify-released-linux-sdk.yml
       - tools/collect-released-sdk-metadata.py
       - tools/tests/test_collect_released_sdk_metadata.py
+      - tools/released_sdk_inventory.py
+      - tools/scan-released-sdk-filesystem.py
+      - tools/tests/test_released_sdk_inventory.py
+      - tools/tests/test_released_sdk_filesystem.py
+      - tools/RELEASED_SDK_INVENTORY.md
   workflow_dispatch:
 
 permissions:
@@ -20,7 +25,9 @@ concurrency:
   cancel-in-progress: false
 
 # Private packages stay on trusted same-repository push/dispatch. This workflow
-# never runs pull-request code, starts image code, publishes, or changes aliases.
+# never runs pull-request code, publishes, or changes aliases. Historical targets
+# never start image code. Only a future reviewed fixed final target can execute
+# the separately receipted read-only filesystem scanner after created-only reads.
 jobs:
   collect:
     name: Collect ${{ matrix.target }} installed identity
@@ -33,7 +40,9 @@ jobs:
       contents: read
       packages: read
     runs-on: ubuntu-26.04
-    timeout-minutes: 35
+    timeout-minutes: 65
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -45,7 +54,7 @@ jobs:
           persist-credentials: false
 
       - name: Test offline collection boundaries
-        run: python3 -I -m unittest discover -s tools/tests -p 'test_collect_released_sdk_metadata.py' -v
+        run: python3 -I -B -m unittest discover -s tools/tests -p 'test*released*sdk*.py' -v
 
       - name: Collect fixed released image metadata
         env:
@@ -55,7 +64,7 @@ jobs:
         run: |
           set -euo pipefail
           env -u SSLKEYLOGFILE -u OPENSSL_CONF -u OPENSSL_MODULES \
-            python3 -I tools/collect-released-sdk-metadata.py --target "${TARGET}"
+            python3 -I -B tools/collect-released-sdk-metadata.py --target "${TARGET}"
 
       - name: Retain bounded identity receipts
         if: ${{ always() && !cancelled() }}
