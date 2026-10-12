@@ -24,7 +24,13 @@
   source commits or shader inputs. Schema 2 compiler evidence requires every
   selected LLVM utility, including separate Clang C/C++ drivers and
   archiver/ranlib, with canonical paths, versions and hashes; rehash before
-  consumer builds and publication. Portable curl is an LLVM rebuild of
+  consumer builds and publication. The separate schema-1 `installed.json.build_tools`
+  receipt binds fixed `/usr/bin/cmake` and `/usr/bin/ninja` paths, canonical
+  executables, hashes, sizes and full version stdout. Verify both protected
+  identities before probing either tool and fence configure/build execution;
+  missing receipts require a rebuilt producer. The producer OS, libraries and
+  CMake modules and earlier library-production builds remain trusted; this
+  receipt does not attest historical execution. Portable curl is an LLVM rebuild of
   security-patched Debian `7.88.1-10+deb12u15` with c-ares 1.34.6, retaining
   existing features including LDAP/LDAPS, RTMP, SCP and SFTP. Its separate
   `portable/curl-toolchain.json`, `portable/build-curl.py`,

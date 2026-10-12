@@ -462,8 +462,23 @@ shader-generation record under
 versions and hashes for every selected LLVM utility, including independent
 `compiler` (`clang`) and `cxx_compiler` (`clang++`) records plus `llvm-ar` and
 `llvm-ranlib`; incomplete earlier evidence is rejected. Consumers rehash these
-identities before building and publication. Shared application libraries live under `/usr/local`;
-Debian packages provide the baseline transitive libraries. Compiler flags use
+identities before building and publication.
+
+`installed.json.build_tools` separately seals CMake and Ninja with schema 1,
+fixed `/usr/bin` paths, canonical executable paths, SHA-256 hashes, byte sizes,
+executable status and complete version stdout. Its first lines agree with the
+existing installed tool version strings. The consumer verifies both protected
+root-owned executables through open descriptors before any version probe and
+fences their resolution, bytes and file identity around configure and build.
+SDKs without this producer receipt require a rebuild. This check trusts the
+producer OS, dynamic libraries and CMake modules; it does not attest the full
+transitive execution environment.
+It binds the installed executables used by the later consumer; earlier library
+builds remain part of trusted SDK production and are not historical execution
+attestations.
+
+Shared application libraries live under `/usr/local`; Debian packages provide
+the baseline transitive libraries. Compiler flags use
 `-march=x86-64 -mtune=generic`. Verification checks actual ELF dependency
 providers, versioned symbols, loader relocations and CPU notes, plus device-free
 image/font decoding, audio decoding and OpenSSL provider loading. The
