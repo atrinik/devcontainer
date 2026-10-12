@@ -913,7 +913,7 @@ def collect_final_inventory(container, data, file_records, llvm_tools, policy):
             shader.get('source_commit') == policy['consumer_commit'], 'final-consumer-mismatch')
     maps = {'producer': reader.producer()}
     INVENTORY.bind_metadata(maps['producer'], raw, records)
-    INVENTORY.crosscheck_archives(maps['producer'], documents['runtime-sources.json'], contract)
+    INVENTORY.crosscheck_archives(maps['producer'], documents['runtime-sources.json'], contract, reader=reader)
     inputs = shader.get('source_inputs')
     require(isinstance(inputs, dict) and 0 < len(inputs) <= INVENTORY.MAX_MEMBERS, 'final-shader-inputs')
     for path, sha in inputs.items():

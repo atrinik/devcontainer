@@ -13,6 +13,7 @@ import stat
 import struct
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,6 +48,19 @@ class FilesystemTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        # Fixture permissions remain real/non-root; emulate root-owned image
+        # stat ownership only, with explicit wrong-owner/drift controls below.
+        self.stat_uid = 0
+        self.stat_gid = 0
+        for name in ('stat', 'fstat'):
+            original = getattr(S.os, name)
+            def owned_stat(*args, _original=original, **kwargs):
+                info = _original(*args, **kwargs)
+                fields = {key: getattr(info, key) for key in dir(info) if key.startswith('st_')}
+                return SimpleNamespace(**(fields | {'st_uid': self.stat_uid, 'st_gid': self.stat_gid}))
+            operation = patch.object(S.os, name, side_effect=owned_stat)
+            operation.start()
+            self.addCleanup(operation.stop)
         self.root_fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
         self.addCleanup(os.close, self.root_fd)
         for operation in (patch.object(C, 'https_get', side_effect=AssertionError('network forbidden')),
@@ -88,6 +102,8 @@ class FilesystemTests(unittest.TestCase):
         docs['installed.json'] = {'build_tools': {'schema_version': 1, 'tools': tools},
                                   'tools': {role: item['version'].splitlines()[0] for role, item in tools.items()}}
         docs['runtime-sources.json'] = {**runtime, 'source_packages': {'foo': '1'}}
+        for role, provider in runtime['custom_providers'].items():
+            self.put(provider['path'], role.encode())
         docs['debian-sources.json'] = [{'package': 'foo', 'source': 'foo', 'source_version': '1',
                                        'notice_directory': I.DOC + '/foo'}]
         docs['shader-generation.json'] = {'source_commit': POLICY['consumer_commit'],
@@ -222,6 +238,74 @@ class FilesystemTests(unittest.TestCase):
                 S.scan(self.root_fd)
         self.put(I.ROOT + '/runtime-sources.json', encoded(docs['runtime-sources.json']))
 
+    def test_provider_namespace_ownership_and_uid_gid_fences(self):
+        docs = self.fixture()
+        path = docs['runtime-sources.json']['custom_providers']['libcurl']['path']
+        for bad in ('/usr/local/lib/libcurl.so', '/usr/lib/libcurl.so.1',
+                    '/usr/local/lib/libother.so.1', '/usr/local/lib/../lib/libcurl.so.1'):
+            with self.subTest(path=bad), self.assertRaisesRegex(I.InventoryError, 'scanner-provider-path'):
+                S.Filesystem(self.root_fd).read_provider(bad)
+        for target in ('/', '/usr', '/usr/local', '/usr/local/lib', path):
+            fs = S.Filesystem(self.root_fd)
+            # Inject each ancestor/file owner at the stat boundary, before guards.
+            original_stat, original_fstat = S.os.stat, S.os.fstat
+            def wrong_owner(*args, _call, **kwargs):
+                info = _call(*args, **kwargs)
+                fd = args[0] if _call is original_fstat else kwargs.get('dir_fd')
+                actual = os.readlink('/proc/self/fd/' + str(fd)) if fd is not None else str(args[0])
+                if _call is original_stat and fd is not None:
+                    actual += '/' + str(args[0])
+                if actual == str(self.root) + ('' if target == '/' else target):
+                    info.st_uid = 1000
+                return info
+            with self.subTest(owner=target), patch.object(S.os, 'stat', side_effect=lambda *a, **k: wrong_owner(*a, _call=original_stat, **k)), \
+                    patch.object(S.os, 'fstat', side_effect=lambda *a, **k: wrong_owner(*a, _call=original_fstat, **k)):
+                with self.assertRaisesRegex(I.InventoryError, 'scanner-provider-owner'):
+                    fs.read_provider(path)
+        for field in ('stat_uid', 'stat_gid'):
+            fs = S.Filesystem(self.root_fd)
+            fs.read_provider(path)
+            setattr(self, field, 17)
+            with self.subTest(field=field), self.assertRaises(I.InventoryError):
+                fs.fence()
+            setattr(self, field, 0)
+
+    def test_provider_read_fences_gid_drift_and_rejects_writable_root(self):
+        docs = self.fixture()
+        path = docs['runtime-sources.json']['custom_providers']['libcurl']['path']
+        fs = S.Filesystem(self.root_fd)
+        original = fs.record
+        def drift(*args, **kwargs):
+            value = original(*args, **kwargs)
+            self.stat_gid = 17
+            return value
+        with patch.object(fs, 'record', side_effect=drift), self.assertRaises(I.InventoryError):
+            fs.read_provider(path)
+        self.stat_gid = 0
+        self.root.chmod(0o777)
+        self.addCleanup(self.root.chmod, 0o700)
+        with self.assertRaisesRegex(I.InventoryError, 'scanner-provider-owner'):
+            S.Filesystem(self.root_fd).read_provider(path)
+
+    def test_provider_missing_changed_empty_symlink_and_unsafe_mode_fail(self):
+        docs = self.fixture()
+        for role, provider in docs['runtime-sources.json']['custom_providers'].items():
+            actual = self.root / provider['path'].removeprefix('/')
+            for state in ('missing', 'changed', 'empty', 'symlink', 'writable'):
+                saved = actual.read_bytes()
+                actual.unlink()
+                if state == 'symlink':
+                    actual.symlink_to('another-library')
+                elif state != 'missing':
+                    actual.write_bytes(b'' if state == 'empty' else b'wrong' if state == 'changed' else saved)
+                    actual.chmod(0o666 if state == 'writable' else 0o644)
+                with self.subTest(role=role, state=state), self.assertRaises((I.InventoryError, FileNotFoundError)):
+                    S.scan(self.root_fd)
+                if actual.exists() or actual.is_symlink():
+                    actual.unlink()
+                actual.write_bytes(saved)
+                actual.chmod(0o644)
+
     def test_notices_and_common_licenses_remain_nonempty(self):
         self.fixture()
         for path in (I.DOC + '/foo/copyright', I.COMMON + '/' + I.COMMON_LICENSE_NAMES[0]):
@@ -329,13 +413,45 @@ class FilesystemTests(unittest.TestCase):
         records = {I.ROOT + '/' + name: value for name, value in actual['metadata'].items()}
         llvm = {role: {**item, 'mode': '0o755' if item['executable'] else '0o644'}
                 for role, item in actual['llvm_tools'].items()}
-        reader = Mock()
+        reader = C.INVENTORY.InstalledInventory(Mock(), Mock())
+        reader.producer = Mock()
+        reader.debian_notices = Mock()
+        reader.common_licenses = Mock()
+        reader.build_tools = Mock()
+        providers = docs['runtime-sources.json']['custom_providers']
+        def provider_bytes(path, *, provider):
+            self.assertTrue(provider)
+            role = next(name for name, item in providers.items() if item['path'] == path)
+            raw = role.encode()
+            return {'sha256': hashlib.sha256(raw).hexdigest(), 'size': len(raw), 'executable': False}
+        reader._regular = Mock(side_effect=provider_bytes)
         reader.producer.return_value = actual['inventories']['producer']
         reader.debian_notices.return_value = actual['inventories']['debian_notices']
         reader.common_licenses.return_value = actual['inventories']['common_licenses']
         reader.build_tools.return_value = actual['build_tools']
-        with patch.object(C.INVENTORY, 'InstalledInventory', return_value=reader):
+        # The combined dependency test uses the real provider-reader interface.
+        source_check = C.INVENTORY.crosscheck_archives
+        def reader_check(producer, runtime, contract, *, reader):
+            self.assertIs(reader, expected_reader)
+            return source_check(producer, runtime, contract, reader=reader)
+        expected_reader = reader
+        reader_class = C.INVENTORY.InstalledInventory
+        def new_reader(cls, *args):
+            return expected_reader
+        with patch.object(reader_class, '__new__', new_reader), \
+                patch.object(C.INVENTORY, 'crosscheck_archives', side_effect=reader_check) as crosscheck:
             self.assertEqual(C.collect_final_inventory(Mock(), raw, records, llvm, POLICY), actual)
+            self.assertIs(crosscheck.call_args.kwargs['reader'], reader)
+            reader.debian_notices.reset_mock()
+            reader.common_licenses.reset_mock()
+            reader.build_tools.reset_mock()
+            with patch.object(C.INVENTORY, 'crosscheck_archives', side_effect=C.INVENTORY.InventoryError(
+                    'inventory-provider-bytes-mismatch')):
+                with self.assertRaisesRegex(C.INVENTORY.InventoryError, 'inventory-provider-bytes-mismatch'):
+                    C.collect_final_inventory(Mock(), raw, records, llvm, POLICY)
+            reader.debian_notices.assert_not_called()
+            reader.common_licenses.assert_not_called()
+            reader.build_tools.assert_not_called()
             for name in ('contract.json', 'shader-generation.json'):
                 changed = copy.deepcopy(docs)
                 if name == 'contract.json':

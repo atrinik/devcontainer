@@ -85,7 +85,8 @@ tool to obtain a version. LLVM compiler evidence retains its separate roles.
 
 The collector's internal final path now binds every retained portable metadata
 file to the producer map, checks corresponding source and shader-input hashes,
-checks the consumer in both contract and shader record, retains all twelve LLVM
+passes that same authenticated `InstalledInventory` reader to source/provider
+closure validation, checks the consumer in both contract and shader record, retains all twelve LLVM
 roles, and acquires the three build-tool identities. It writes complete
 `inventories/{producer,debian_notices,common_licenses}.json` artifacts, canonical
 map digests and seven metadata hashes. Saved acquisition receipts retain
@@ -103,7 +104,11 @@ hash and size before archive checks; payloads are excluded from serialized maps.
 Producer-tree zero-byte files remain valid. Notices, licenses and single-file
 metadata reads remain nonempty. Unlike directory
 tar generation, any unreadable entry fails the scan. It inventories the same
-fixed roots and seven files, resolves and fences notice links, hashes the three
+fixed roots and seven files, resolves and fences notice links, and implements
+the shared `ProviderReader` interface for actual libcurl/libcares bytes. Provider
+reads admit only versioned canonical regular paths under `/usr/local/lib`, require
+UID 0 for the file and every ancestor including `/`, and fence UID/GID with the
+other descriptor identities before and after reading. The scanner hashes the three
 build tools and twelve LLVM roles, and checks final filesystem identities.
 `ScannerImage` uses a separate task-owned container: UID/GID 65534, read-only
 root and reviewed scanner/helper mounts, no network, dropped capabilities, no

@@ -13,6 +13,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import stat
@@ -44,11 +45,11 @@ def decode(raw):
 
 
 def identity(info):
-    return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_uid, info.st_gid,
             info.st_mtime_ns, info.st_ctime_ns)
 
 
-class Filesystem:
+class Filesystem(I.ProviderReader):
     """All paths are fixed by scan(); root_fd exists only for offline fixtures."""
     def __init__(self, root_fd):
         self.root_fd = root_fd
@@ -67,14 +68,17 @@ class Filesystem:
         self.observed[path] = value
         I.require(len(self.observed) <= I.MAX_MEMBERS, 'scanner-member-limit')
 
-    def directory(self, path):
+    def directory(self, path, *, protected=False):
         I.require(path.startswith('/'), 'scanner-path')
         if path != '/':
             I.relative_path(path[1:])
         fd = os.dup(self.root_fd)
         current = ''
         try:
-            self.remember('/', os.fstat(fd))
+            root = os.fstat(fd)
+            I.require(not protected or (root.st_uid == 0 and root.st_mode & 0o022 == 0),
+                      'scanner-provider-owner')
+            self.remember('/', root)
             for part in path.split('/')[1:]:
                 if not part:
                     continue
@@ -86,21 +90,23 @@ class Filesystem:
                 info = os.fstat(fd)
                 I.require(stat.S_ISDIR(info.st_mode) and info.st_mode & 0o022 == 0,
                           'scanner-unsafe-directory')
+                I.require(not protected or info.st_uid == 0, 'scanner-provider-owner')
                 self.remember(current, info)
             return fd
         except BaseException:
             os.close(fd)
             raise
 
-    def record(self, path, *, retain=False, executable=False, allow_empty=False, max_size=None):
+    def record(self, path, *, retain=False, executable=False, allow_empty=False, max_size=None, protected=False):
         parent, name = path.rsplit('/', 1)
         I.relative_path(name)
-        directory = self.directory(parent)
+        directory = self.directory(parent, protected=protected)
         fd = None
         try:
             before = os.stat(name, dir_fd=directory, follow_symlinks=False)
             I.require(stat.S_ISREG(before.st_mode) and before.st_mode & 0o6022 == 0
                       and before.st_mode & 0o444 == 0o444, 'scanner-unsafe-file')
+            I.require(not protected or before.st_uid == 0, 'scanner-provider-owner')
             if executable:
                 I.require(before.st_mode & 0o111 == 0o111, 'scanner-tool-not-executable')
             limit = 4 * 1024 * 1024 if retain else I.MAX_FILE
@@ -134,6 +140,15 @@ class Filesystem:
             if fd is not None:
                 os.close(fd)
             os.close(directory)
+
+    def read_provider(self, path):
+        I.require(isinstance(path, str) and len(path) <= I.MAX_PATH and re.fullmatch(
+            r'/usr/local/lib/lib(?:curl|cares)\.so(?:\.[0-9]+)+', path),
+            'scanner-provider-path')
+        self.fence()
+        record, _ = self.record(path, protected=True)
+        self.fence()
+        return record
 
     def tree(self):
         # Retain only the four fixed source manifests, with bounds before reads.
@@ -255,7 +270,7 @@ def scan(root_fd):
     documents = {name: decode(value) for name, value in raw.items()}
     maps = {'producer': fs.tree()}
     I.bind_metadata(maps['producer'], raw, metadata_records)
-    I.crosscheck_archives(maps['producer'], documents['runtime-sources.json'], documents['contract.json'])
+    I.crosscheck_archives(maps['producer'], documents['runtime-sources.json'], documents['contract.json'], reader=fs)
     maps['debian_notices'] = {}
     for requested in I.notice_requests(documents['runtime-sources.json'], documents['debian-sources.json']):
         resolved = fs.resolve(requested, I.DOC)
