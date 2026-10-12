@@ -115,6 +115,11 @@
   for permissions, pinned actions, check names, and ruleset compatibility.
   Never expose private-package permissions or images to `pull_request` code;
   authenticated measurements belong to the same-repository push/dispatch path.
+- Advisory `Dependency review` covers revisions where the workflow exists. Before
+  merge, Codex reads the latest current-HEAD job summary even if a bot comment
+  exists; fix actionable introduced risk or record explicit maintainer-accepted
+  existing risk. License metadata does not certify compatibility; existing
+  repository license policies apply.
 - Commits and pull-request titles use Conventional Commits. Preserve unrelated
   work and finish with `git diff --check`.
 - Update this `AGENTS.md` in the same change when major rework alters image
