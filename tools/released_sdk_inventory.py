@@ -29,9 +29,9 @@ MAX_BUILD_TOOL = 512 * 1024 * 1024
 MAX_TOTAL = 8 * 1024 ** 3
 MAX_SECONDS = 900
 MAX_HOPS = 16
-SOURCE_MANIFESTS = ('audio-toolchain.json', 'llvm-toolchain.json')
+SOURCE_MANIFESTS = ('audio-toolchain.json', 'llvm-toolchain.json',
+                    'curl-toolchain.json', 'classic-curl-toolchain.json')
 MAX_MANIFEST = 1024 * 1024
-MAX_MANIFEST_SOURCES = 128
 GO_DIRECTORY = 1 << 31
 GO_SYMLINK = 1 << 27
 
@@ -239,11 +239,13 @@ def source_manifest(records, reference, expected):
     """Parse only fixed manifests authenticated by the producer tree read."""
     require(reference == expected, 'inventory-manifest-path')
     payloads = getattr(records, 'source_manifests', {})
+    require(isinstance(payloads, dict), 'inventory-manifest-payloads')
     raw = payloads.get(expected)
     require(isinstance(raw, bytes) and 0 < len(raw) <= MAX_MANIFEST,
             'inventory-manifest-missing-or-size')
     identity = records.get(expected)
-    require(isinstance(identity, dict) and identity.get('size') == len(raw)
+    require(isinstance(identity, dict) and type(identity.get('size')) is int
+            and identity['size'] == len(raw)
             and identity.get('sha256') == hashlib.sha256(raw).hexdigest(),
             'inventory-manifest-bytes-mismatch')
 
@@ -268,6 +270,11 @@ def source_manifest(records, reference, expected):
 
 
 def crosscheck_archives(records, runtime, contract):
+    require(isinstance(records, dict) and isinstance(runtime, dict)
+            and isinstance(contract, dict), 'inventory-source-documents')
+    require(type(contract.get('schema_version')) is int and contract['schema_version'] == 2
+            and contract.get('target') == 'portable-final' and contract.get('platform') == 'linux/amd64',
+            'inventory-contract-schema')
     archives, sources = runtime.get('archives'), contract.get('sources')
     require(isinstance(archives, dict) and 0 < len(archives) <= MAX_MEMBERS
             and isinstance(sources, list) and 0 < len(sources) <= MAX_MEMBERS,
@@ -281,49 +288,90 @@ def crosscheck_archives(records, runtime, contract):
     for name, sha in archives.items():
         require(isinstance(name, str) and '/' not in name, 'inventory-source-name')
         add('sources/debian/' + name, sha)
+    source_names = set()
     for source in sources:
         require(isinstance(source, dict), 'inventory-source-row')
+        name = source.get('name')
+        require(isinstance(name, str) and name in {'openssl', 'sdl3', 'sdl3-image', 'sdl3-ttf'}
+                and name not in source_names, 'inventory-source-cohort')
+        source_names.add(name)
         sha = source.get('sha256')
         require(isinstance(sha, str), 'inventory-source-digest')
         add('sources/' + sha + '.tar.gz', sha)
-    if 'audio_manifest' in contract:
-        audio = source_manifest(records, contract['audio_manifest'], 'audio-toolchain.json')
-        dependencies = audio.get('dependencies')
-        require(isinstance(dependencies, list) and 0 < len(dependencies) < MAX_MANIFEST_SOURCES,
-                'inventory-audio-sources')
-        names = set()
-        for entry in [audio.get('sdl_mixer'), *dependencies]:
-            require(isinstance(entry, dict), 'inventory-audio-source')
-            name, source = entry.get('name'), entry.get('source')
-            require(isinstance(name, str) and re.fullmatch(r'[A-Za-z0-9_.+-]{1,128}', name)
-                    and name not in names and isinstance(source, dict), 'inventory-audio-source')
-            names.add(name)
-            sha = source.get('sha256')
-            require(isinstance(sha, str), 'inventory-source-digest')
-            add('sources/' + sha + '.tar.gz', sha)
-    compiler = contract.get('compiler', {})
+    require(source_names == {'openssl', 'sdl3', 'sdl3-image', 'sdl3-ttf'}, 'inventory-source-cohort')
+    audio = source_manifest(records, contract.get('audio_manifest'), 'audio-toolchain.json')
+    dependencies = audio.get('dependencies')
+    require(isinstance(dependencies, list) and len(dependencies) == 3,
+            'inventory-audio-sources')
+    mixer = audio.get('sdl_mixer')
+    require(isinstance(mixer, dict) and mixer.get('name') == 'SDL3_mixer', 'inventory-audio-source')
+    names = set()
+    for entry in [mixer, *dependencies]:
+        require(isinstance(entry, dict), 'inventory-audio-source')
+        name, source = entry.get('name'), entry.get('source')
+        require(isinstance(name, str) and re.fullmatch(r'[A-Za-z0-9_.+-]{1,128}', name)
+                and name not in names and isinstance(source, dict), 'inventory-audio-source')
+        names.add(name)
+        sha = source.get('sha256')
+        require(isinstance(sha, str), 'inventory-source-digest')
+        add('sources/' + sha + '.tar.gz', sha)
+    require(names == {'SDL3_mixer', 'libogg', 'libopus', 'libopusfile'}, 'inventory-audio-sources')
+    compiler = contract.get('compiler')
     require(isinstance(compiler, dict), 'inventory-compiler-schema')
-    if 'toolchain_manifest' in compiler:
-        llvm = source_manifest(records, compiler['toolchain_manifest'], 'llvm-toolchain.json')
-        version, source, metadata = llvm.get('version'), llvm.get('source'), llvm.get('metadata')
-        require(isinstance(version, str) and re.fullmatch(r'[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}', version)
-                and isinstance(source, dict) and isinstance(metadata, dict), 'inventory-llvm-source')
-        # The installer writes this exact filename, and portable/Dockerfile
-        # copies its source directory into sources/llvm without flattening it.
-        archive = 'llvm-project-' + version + '.src.tar.xz'
-        require(metadata.get('source_archive') == 'share/atrinik/sources/' + archive,
-                'inventory-llvm-archive-path')
-        add('sources/llvm/' + archive, source.get('sha256'))
-    providers = runtime.get('custom_providers', {})
-    require(isinstance(providers, dict) and len(providers) <= MAX_MEMBERS, 'inventory-custom-providers')
-    for provider in providers.values():
-        require(isinstance(provider, dict) and isinstance(provider.get('source_archives'), dict)
-                and 0 < len(provider['source_archives']) <= MAX_MEMBERS, 'inventory-custom-provider')
-        for path, sha in provider['source_archives'].items():
-            require(isinstance(path, str) and path.startswith('sources/'), 'inventory-source-name')
+    llvm = source_manifest(records, compiler.get('toolchain_manifest'), 'llvm-toolchain.json')
+    version, source, metadata = llvm.get('version'), llvm.get('source'), llvm.get('metadata')
+    require(isinstance(version, str) and re.fullmatch(r'[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}', version)
+            and isinstance(source, dict) and isinstance(metadata, dict), 'inventory-llvm-source')
+    # The installer writes this exact filename, and portable/Dockerfile
+    # copies its source directory into sources/llvm without flattening it.
+    archive = 'llvm-project-' + version + '.src.tar.xz'
+    require(metadata.get('source_archive') == 'share/atrinik/sources/' + archive,
+            'inventory-llvm-archive-path')
+    add('sources/llvm/' + archive, source.get('sha256'))
+
+    # legal.py emits both providers. Bind their complete archive declarations
+    # to the producer manifests, so dropping a provider or one archive cannot
+    # shrink the corresponding-source requirements.
+    curl = source_manifest(records, contract.get('curl_manifest'), 'curl-toolchain.json')
+    shared = source_manifest(records, curl.get('cares_manifest'), 'classic-curl-toolchain.json')
+    version, source_version, archives = curl.get('version'), curl.get('source_version'), curl.get('archives')
+    require(curl.get('source_package') == 'curl' and isinstance(version, str)
+            and re.fullmatch(r'[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}', version)
+            and isinstance(source_version, str) and len(source_version) <= 128
+            and re.fullmatch(re.escape(version) + r'-[0-9A-Za-z.+~]+', source_version),
+            'inventory-curl-source')
+    require(isinstance(archives, dict) and set(archives) == {
+        'curl_' + source_version + '.debian.tar.xz', 'curl_' + source_version + '.dsc',
+        'curl_' + version + '.orig.tar.gz', 'curl_' + version + '.orig.tar.gz.asc'},
+        'inventory-curl-archives')
+    cares = shared.get('cares')
+    require(isinstance(cares, dict) and isinstance(cares.get('version'), str)
+            and re.fullmatch(r'[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}', cares['version'])
+            and isinstance(cares.get('sha256'), str), 'inventory-cares-source')
+    expected_sources = {
+        'libcurl': {'sources/curl/' + name: sha for name, sha in archives.items()},
+        'libcares': {'sources/' + cares['sha256'] + '.tar.gz': cares['sha256']}}
+    providers = runtime.get('custom_providers')
+    require(isinstance(providers, dict) and set(providers) == set(expected_sources),
+            'inventory-custom-providers')
+    for name, sources in expected_sources.items():
+        provider = providers[name]
+        require(isinstance(provider, dict) and set(provider) == {
+            'path', 'sha256', 'version', 'source_archives', 'build_receipt'}, 'inventory-custom-provider')
+        require(isinstance(provider['path'], str) and re.fullmatch(
+            r'/usr/local/lib/' + name + r'\.so(?:\.[0-9]+)+', provider['path'])
+            and isinstance(provider['sha256'], str) and re.fullmatch(r'[0-9a-f]{64}', provider['sha256'])
+            and provider['version'] == (version if name == 'libcurl' else cares['version'])
+            and provider['build_receipt'] == 'curl-source-receipt.json'
+            and isinstance(provider['source_archives'], dict) and provider['source_archives'] == sources,
+            'inventory-custom-provider')
+        for path, sha in sources.items():
             add(path, sha)
     for path, sha in required.items():
-        require(path in records and records[path]['sha256'] == sha, 'inventory-source-bytes-mismatch')
+        record = records.get(path)
+        require(isinstance(record, dict) and type(record.get('size')) is int
+                and 0 < record['size'] <= MAX_FILE and record.get('sha256') == sha,
+                'inventory-source-bytes-mismatch')
 
 
 class BudgetResponse:

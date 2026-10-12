@@ -7,12 +7,13 @@ It is not yet imported or invoked by `collect-released-sdk-metadata.py`; the
 three fixed 1.18.0 targets and their producer mapping remain authoritative.
 
 The helper streams `/opt/atrinik-portable` without extraction. It retains only
-the fixed `audio-toolchain.json` and `llvm-toolchain.json` payloads, each nonempty
+the fixed `audio-toolchain.json`, `llvm-toolchain.json`, `curl-toolchain.json`
+and `classic-curl-toolchain.json` payloads, each nonempty
 and at most 1 MiB, as private validation inputs on `ProducerInventory`. Before
-parsing either manifest, it binds the retained bytes to the streamed record's
+parsing a manifest, it binds the retained bytes to the streamed record's
 SHA-256 and size. These payloads are excluded from serialized inventory maps and
 their digests; copying the records to a plain dictionary loses the payloads and
-fails closed when a contract references a manifest. All other file payloads are
+fails closed during source-archive validation. All other file payloads are
 discarded after hashing. It requires a root directory entry, parents before children, unique
 canonical relative paths, regular files and safe directory/file modes. It
 rejects links, special/sparse files, path/size PAX overrides, malformed headers,
@@ -31,8 +32,27 @@ rows. Their records retain the requested absolute path as key and add
 `resolved_path`. Source archives named by the authenticated runtime and contract
 documents must match the complete producer inventory, including custom provider
 archives and the audio and LLVM archives declared by their referenced manifests.
+Every declared archive record requires an integer size greater than zero and at
+most 1 GiB, plus the declared SHA-256; even the matching digest of an empty file
+cannot satisfy an archive declaration.
 Debian notices, common licenses and build-tool executables must be nonempty;
-only producer-tree inventory records may describe legitimate zero-byte files.
+other producer-tree files may legitimately have zero bytes.
+
+Archive validation requires the schema-2 `portable-final`, `linux/amd64`
+contract, including the fixed audio, LLVM and curl manifest references. The
+curl manifest must reference the fixed shared Classic curl manifest. Historical
+contracts with absent references cannot qualify through this helper. The
+contract's source cohort is exactly `openssl`, `sdl3`, `sdl3-image` and
+`sdl3-ttf`; the audio cohort is `SDL3_mixer` with `libogg`, `libopus` and
+`libopusfile`. Missing, duplicate or renamed components fail validation.
+`runtime-sources.json.custom_providers` must contain exactly `libcurl` and
+`libcares`, with the fields emitted by `portable/legal.py`. Their complete
+archive maps must match the authenticated curl manifests: the four Debian
+curl source/signature files under `sources/curl/`, and the digest-named c-ares
+archive under `sources/`. Removing an individual archive from a provider's
+declaration cannot bypass its byte check. These checks validate declared source
+closure; they do not parse Debian `.dsc` dependency semantics or independently
+establish completeness of the producer's Debian source-package archive map.
 
 Docker HEAD's `LinkTarget` is a fully resolved result, so it cannot establish a
 safe link traversal by itself. The notice resolver reads each raw symbolic link

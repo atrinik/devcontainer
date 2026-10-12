@@ -218,12 +218,10 @@ class InventoryTests(unittest.TestCase):
             M.notice_requests(runtime, [])
 
     def test_archive_crosschecks(self):
-        runtime, _ = self.documents()
-        contract = {'sources': [{'sha256': 'b' * 64}]}
-        records = {'sources/debian/foo.tar.xz': {'sha256': 'a' * 64},
-                   'sources/' + 'b' * 64 + '.tar.gz': {'sha256': 'b' * 64}}
+        payloads, runtime, contract = self.manifest_fixture()
+        records = self.producer_fixture(payloads)
         M.crosscheck_archives(records, runtime, contract)
-        for path in records:
+        for path in (path for path in records if path.startswith('sources/')):
             bad = copy.deepcopy(records)
             bad[path]['sha256'] = 'c' * 64
             with self.assertRaisesRegex(M.InventoryError, 'inventory-source-bytes-mismatch'):
@@ -238,6 +236,8 @@ class InventoryTests(unittest.TestCase):
         contract = json.loads((ROOT / 'portable/contract.json').read_text())
         audio = json.loads((ROOT / 'audio-toolchain.json').read_text())
         llvm = json.loads((ROOT / 'llvm-toolchain.json').read_text())
+        curl = json.loads((ROOT / 'portable/curl-toolchain.json').read_text())
+        shared = json.loads((ROOT / 'classic-curl-toolchain.json').read_text())
         payloads = {'sources/debian/foo.tar.xz': b'debian source'}
         runtime = {'archives': {'foo.tar.xz': hashlib.sha256(b'debian source').hexdigest()}}
         for entry in contract['sources']:
@@ -252,6 +252,24 @@ class InventoryTests(unittest.TestCase):
         payloads['sources/llvm/' + Path(llvm['metadata']['source_archive']).name] = b'llvm source'
         payloads['audio-toolchain.json'] = json.dumps(audio).encode()
         payloads['llvm-toolchain.json'] = json.dumps(llvm).encode()
+        provider_sources = {'libcurl': {}}
+        for name in curl['archives']:
+            raw = ('source ' + name).encode()
+            sha = hashlib.sha256(raw).hexdigest()
+            curl['archives'][name] = sha
+            payloads['sources/curl/' + name] = raw
+            provider_sources['libcurl']['sources/curl/' + name] = sha
+        sha = hashlib.sha256(b'cares source').hexdigest()
+        shared['cares']['sha256'] = sha
+        payloads['sources/' + sha + '.tar.gz'] = b'cares source'
+        provider_sources['libcares'] = {'sources/' + sha + '.tar.gz': sha}
+        runtime['custom_providers'] = {
+            name: {'path': '/usr/local/lib/' + name + '.so.1.0.0',
+                   'sha256': hashlib.sha256(name.encode()).hexdigest(), 'version': version,
+                   'source_archives': provider_sources[name], 'build_receipt': 'curl-source-receipt.json'}
+            for name, version in (('libcurl', curl['version']), ('libcares', shared['cares']['version']))}
+        payloads['curl-toolchain.json'] = json.dumps(curl).encode()
+        payloads['classic-curl-toolchain.json'] = json.dumps(shared).encode()
         return payloads, runtime, contract
 
     def producer_fixture(self, payloads):
@@ -274,6 +292,206 @@ class InventoryTests(unittest.TestCase):
         # A hash-only inventory cannot manufacture authenticated manifest data.
         with self.assertRaisesRegex(M.InventoryError, 'inventory-manifest-missing-or-size'):
             M.crosscheck_archives(dict(records), runtime, contract)
+
+    def test_contract_schema_and_manifest_references_are_mandatory(self):
+        payloads, runtime, contract = self.manifest_fixture()
+        for key in ('audio_manifest', 'curl_manifest', 'compiler'):
+            bad = copy.deepcopy(contract)
+            del bad[key]
+            # Removing both the declaration and all its archives cannot reduce
+            # the qualification requirements to the remaining subset.
+            partial = {name: raw for name, raw in payloads.items() if not name.startswith('sources/')}
+            with self.subTest(missing=key), self.assertRaises(M.InventoryError):
+                M.crosscheck_archives(self.producer_fixture(partial), runtime, bad)
+        bad = copy.deepcopy(contract)
+        del bad['compiler']['toolchain_manifest']
+        with self.assertRaisesRegex(M.InventoryError, 'inventory-manifest-path'):
+            M.crosscheck_archives(self.producer_fixture(payloads), runtime, bad)
+        for key, values in (('schema_version', [None, True, 1, 2.0, '2']),
+                            ('target', [None, 'classic-final']), ('platform', [None, 'linux/arm64']),
+                            ('compiler', [None, [], 'llvm-toolchain.json'])):
+            for value in values:
+                bad = copy.deepcopy(contract)
+                bad[key] = value
+                with self.subTest(key=key, value=value), self.assertRaises(M.InventoryError):
+                    M.crosscheck_archives(self.producer_fixture(payloads), runtime, bad)
+
+    def test_contract_source_cohort_cannot_be_shortened_or_duplicated(self):
+        payloads, runtime, contract = self.manifest_fixture()
+        for index in range(len(contract['sources'])):
+            bad = copy.deepcopy(contract)
+            removed = bad['sources'].pop(index)
+            partial = dict(payloads)
+            del partial['sources/' + removed['sha256'] + '.tar.gz']
+            with self.subTest(removed=removed['name']), self.assertRaisesRegex(
+                    M.InventoryError, 'inventory-source-cohort'):
+                M.crosscheck_archives(self.producer_fixture(partial), runtime, bad)
+        for rows in ([*contract['sources'], contract['sources'][0]],
+                     [{**row, 'name': 'other'} for row in contract['sources']], [], None, {}):
+            bad = {**contract, 'sources': rows}
+            with self.subTest(rows=rows), self.assertRaises(M.InventoryError):
+                M.crosscheck_archives(self.producer_fixture(payloads), runtime, bad)
+
+    def test_audio_cohort_cannot_be_shortened_or_renamed(self):
+        payloads, runtime, contract = self.manifest_fixture()
+        original = json.loads(payloads['audio-toolchain.json'])
+        for index in range(len(original['dependencies'])):
+            audio = copy.deepcopy(original)
+            removed = audio['dependencies'].pop(index)
+            partial = dict(payloads)
+            del partial['sources/' + removed['source']['sha256'] + '.tar.gz']
+            partial['audio-toolchain.json'] = json.dumps(audio).encode()
+            with self.subTest(removed=removed['name']), self.assertRaises(M.InventoryError):
+                M.crosscheck_archives(self.producer_fixture(partial), runtime, contract)
+        for role in ('sdl_mixer', 'dependency'):
+            audio = copy.deepcopy(original)
+            entry = audio['sdl_mixer'] if role == 'sdl_mixer' else audio['dependencies'][0]
+            entry['name'] = 'other'
+            partial = {**payloads, 'audio-toolchain.json': json.dumps(audio).encode()}
+            with self.subTest(role=role), self.assertRaises(M.InventoryError):
+                M.crosscheck_archives(self.producer_fixture(partial), runtime, contract)
+
+    def test_both_custom_providers_and_all_fields_are_mandatory(self):
+        payloads, runtime, contract = self.manifest_fixture()
+        variants = [{}]
+        for value in (None, [], {}, {'other': runtime['custom_providers']['libcurl']}):
+            variants.append({**runtime, 'custom_providers': value})
+        variants.append({key: value for key, value in runtime.items() if key != 'custom_providers'})
+        for name in runtime['custom_providers']:
+            bad = copy.deepcopy(runtime)
+            del bad['custom_providers'][name]
+            variants.append(bad)
+            for field in runtime['custom_providers'][name]:
+                bad = copy.deepcopy(runtime)
+                del bad['custom_providers'][name][field]
+                variants.append(bad)
+            for field, value in (('path', '/etc/passwd'), ('path', []), ('sha256', True),
+                                 ('version', None), ('build_receipt', '../curl-source-receipt.json'),
+                                 ('source_archives', None), ('source_archives', []), ('source_archives', {})):
+                bad = copy.deepcopy(runtime)
+                bad['custom_providers'][name][field] = value
+                variants.append(bad)
+        bad = copy.deepcopy(runtime)
+        bad['custom_providers']['other'] = copy.deepcopy(bad['custom_providers']['libcurl'])
+        variants.append(bad)
+        for bad in variants:
+            with self.subTest(runtime=bad), self.assertRaises(M.InventoryError):
+                M.crosscheck_archives(self.producer_fixture(payloads), bad, contract)
+        for name, provider in runtime['custom_providers'].items():
+            bad = copy.deepcopy(runtime)
+            del bad['custom_providers'][name]
+            partial = {path: raw for path, raw in payloads.items() if path not in provider['source_archives']}
+            with self.subTest(missing_provider_and_archives=name), self.assertRaisesRegex(
+                    M.InventoryError, 'inventory-custom-providers'):
+                M.crosscheck_archives(self.producer_fixture(partial), bad, contract)
+
+    def test_custom_provider_archives_cannot_be_omitted_replaced_or_substituted(self):
+        payloads, runtime, contract = self.manifest_fixture()
+        for name, provider in runtime['custom_providers'].items():
+            for path in provider['source_archives']:
+                for change in ('missing', 'replaced', 'omitted-declaration'):
+                    partial, bad = dict(payloads), copy.deepcopy(runtime)
+                    if change == 'replaced':
+                        partial[path] = b'replaced source'
+                    else:
+                        del partial[path]
+                    if change == 'omitted-declaration':
+                        del bad['custom_providers'][name]['source_archives'][path]
+                    with self.subTest(path=path, change=change), self.assertRaises(M.InventoryError):
+                        M.crosscheck_archives(self.producer_fixture(partial), bad, contract)
+            bad = copy.deepcopy(runtime)
+            sha = contract['sources'][0]['sha256']
+            bad['custom_providers'][name]['source_archives'] = {'sources/' + sha + '.tar.gz': sha}
+            with self.subTest(substituted=name), self.assertRaisesRegex(M.InventoryError, 'inventory-custom-provider'):
+                M.crosscheck_archives(self.producer_fixture(payloads), bad, contract)
+
+    def test_curl_manifests_require_complete_archive_set_and_reference_chain(self):
+        payloads, runtime, contract = self.manifest_fixture()
+        original = json.loads(payloads['curl-toolchain.json'])
+        for name in original['archives']:
+            curl, bad = copy.deepcopy(original), copy.deepcopy(runtime)
+            del curl['archives'][name]
+            del bad['custom_providers']['libcurl']['source_archives']['sources/curl/' + name]
+            partial = {**payloads, 'curl-toolchain.json': json.dumps(curl).encode()}
+            del partial['sources/curl/' + name]
+            with self.subTest(archive=name), self.assertRaisesRegex(M.InventoryError, 'inventory-curl-archives'):
+                M.crosscheck_archives(self.producer_fixture(partial), bad, contract)
+        for key, value in (('cares_manifest', None), ('cares_manifest', '../classic-curl-toolchain.json'),
+                           ('cares_manifest', '/etc/passwd'), ('source_package', 'other'),
+                           ('source_version', None), ('source_version', '../7.88.1'),
+                           ('version', True), ('archives', [])):
+            curl = {**original, key: value}
+            partial = {**payloads, 'curl-toolchain.json': json.dumps(curl).encode()}
+            with self.subTest(key=key, value=value), self.assertRaises(M.InventoryError):
+                M.crosscheck_archives(self.producer_fixture(partial), runtime, contract)
+        shared = json.loads(payloads['classic-curl-toolchain.json'])
+        for value in (None, [], {}, {'version': True, 'sha256': 'a' * 64},
+                      {'version': '1.34.6', 'sha256': None}, {'version': '1.34.6', 'sha256': '../escape'}):
+            bad = {**shared, 'cares': value}
+            partial = {**payloads, 'classic-curl-toolchain.json': json.dumps(bad).encode()}
+            with self.subTest(cares=value), self.assertRaises(M.InventoryError):
+                M.crosscheck_archives(self.producer_fixture(partial), runtime, contract)
+
+    def test_source_document_types_fail_with_fixed_errors(self):
+        payloads, runtime, contract = self.manifest_fixture()
+        records = self.producer_fixture(payloads)
+        for index in range(3):
+            for value in (None, [], True, 'document'):
+                args = [records, runtime, contract]
+                args[index] = value
+                with self.subTest(index=index, value=value), self.assertRaisesRegex(
+                        M.InventoryError, 'inventory-source-documents'):
+                    M.crosscheck_archives(*args)
+
+    def test_all_declared_archive_records_require_typed_nonempty_bounded_bytes(self):
+        payloads, runtime, contract = self.manifest_fixture()
+        records = self.producer_fixture(payloads)
+        for path in (path for path in records if path.startswith('sources/')):
+            original = records[path]
+            malformed = [None, [], 'record', True, {}, {'sha256': original['sha256']}]
+            malformed += [{**original, 'size': size} for size in (None, False, True, 0, -1, '1', 1.0, M.MAX_FILE + 1)]
+            malformed += [{**original, 'sha256': sha} for sha in (None, [], 'A' * 64, '0' * 64)]
+            for record in malformed:
+                bad = copy.deepcopy(records)
+                bad[path] = record
+                with self.subTest(path=path, record=record), self.assertRaisesRegex(
+                        M.InventoryError, 'inventory-source-bytes-mismatch'):
+                    M.crosscheck_archives(bad, runtime, contract)
+
+    def test_matching_empty_archive_digest_is_rejected_for_every_source_family(self):
+        empty = hashlib.sha256(b'').hexdigest()
+        for family in ('debian', 'contract', 'audio', 'llvm', 'libcurl', 'libcares'):
+            payloads, runtime, contract = self.manifest_fixture()
+            if family == 'debian':
+                path = 'sources/debian/foo.tar.xz'
+                runtime['archives']['foo.tar.xz'] = empty
+            elif family == 'contract':
+                contract['sources'][0]['sha256'] = empty
+                path = 'sources/' + empty + '.tar.gz'
+            elif family in ('audio', 'llvm'):
+                name = 'audio-toolchain.json' if family == 'audio' else 'llvm-toolchain.json'
+                manifest = json.loads(payloads[name])
+                source = manifest['sdl_mixer']['source'] if family == 'audio' else manifest['source']
+                source['sha256'] = empty
+                payloads[name] = json.dumps(manifest).encode()
+                path = ('sources/' + empty + '.tar.gz' if family == 'audio'
+                        else 'sources/llvm/' + Path(manifest['metadata']['source_archive']).name)
+            elif family == 'libcurl':
+                curl = json.loads(payloads['curl-toolchain.json'])
+                name = next(iter(curl['archives']))
+                curl['archives'][name] = empty
+                payloads['curl-toolchain.json'] = json.dumps(curl).encode()
+                path = 'sources/curl/' + name
+                runtime['custom_providers'][family]['source_archives'][path] = empty
+            else:
+                shared = json.loads(payloads['classic-curl-toolchain.json'])
+                shared['cares']['sha256'] = empty
+                payloads['classic-curl-toolchain.json'] = json.dumps(shared).encode()
+                path = 'sources/' + empty + '.tar.gz'
+                runtime['custom_providers'][family]['source_archives'] = {path: empty}
+            payloads[path] = b''
+            with self.subTest(family=family), self.assertRaisesRegex(M.InventoryError, 'inventory-source-bytes-mismatch'):
+                M.crosscheck_archives(self.producer_fixture(payloads), runtime, contract)
 
     def test_each_declared_audio_and_llvm_source_missing_or_replaced_fails(self):
         payloads, runtime, contract = self.manifest_fixture()
@@ -305,6 +523,10 @@ class InventoryTests(unittest.TestCase):
                 M.crosscheck_archives(self.producer_fixture(bad), runtime, contract)
             records = self.producer_fixture(payloads)
             records.source_manifests[name] += b' '
+            with self.assertRaisesRegex(M.InventoryError, 'inventory-manifest-bytes-mismatch'):
+                M.crosscheck_archives(records, runtime, contract)
+            records = self.producer_fixture(payloads)
+            records[name]['size'] = float(records[name]['size'])
             with self.assertRaisesRegex(M.InventoryError, 'inventory-manifest-bytes-mismatch'):
                 M.crosscheck_archives(records, runtime, contract)
             for raw in (b'', b' ' * (M.MAX_MANIFEST + 1)):
