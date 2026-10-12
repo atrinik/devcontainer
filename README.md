@@ -468,7 +468,7 @@ identities before building and publication.
 fixed `/usr/bin/cmake`, `/usr/bin/ninja` and `/usr/bin/pkgconf` paths,
 canonical executable paths, SHA-256 hashes, byte sizes,
 executable status and complete version stdout. Its first lines agree with the
-existing installed tool version strings. The consumer verifies both protected
+existing installed tool version strings. The consumer verifies all three protected
 root-owned executables through open descriptors before any version probe and
 fences their resolution, bytes and file identity around configure and build.
 The mandatory `pkg_config` role also supplies the installed tool version string,

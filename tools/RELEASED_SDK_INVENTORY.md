@@ -6,8 +6,14 @@ has no CLI, credentials, registry operations, release pins or image execution.
 It is not yet imported or invoked by `collect-released-sdk-metadata.py`; the
 three fixed 1.18.0 targets and their producer mapping remain authoritative.
 
-The helper streams `/opt/atrinik-portable` without extraction or retaining file
-payloads. It requires a root directory entry, parents before children, unique
+The helper streams `/opt/atrinik-portable` without extraction. It retains only
+the fixed `audio-toolchain.json` and `llvm-toolchain.json` payloads, each nonempty
+and at most 1 MiB, as private validation inputs on `ProducerInventory`. Before
+parsing either manifest, it binds the retained bytes to the streamed record's
+SHA-256 and size. These payloads are excluded from serialized inventory maps and
+their digests; copying the records to a plain dictionary loses the payloads and
+fails closed when a contract references a manifest. All other file payloads are
+discarded after hashing. It requires a root directory entry, parents before children, unique
 canonical relative paths, regular files and safe directory/file modes. It
 rejects links, special/sparse files, path/size PAX overrides, malformed headers,
 truncated members, missing end markers and nonzero trailing data. Timestamp-only
@@ -24,7 +30,9 @@ wrapper's fourteen fixed names. Debian notices are selected only by matching
 rows. Their records retain the requested absolute path as key and add
 `resolved_path`. Source archives named by the authenticated runtime and contract
 documents must match the complete producer inventory, including custom provider
-archives.
+archives and the audio and LLVM archives declared by their referenced manifests.
+Debian notices, common licenses and build-tool executables must be nonempty;
+only producer-tree inventory records may describe legitimate zero-byte files.
 
 Docker HEAD's `LinkTarget` is a fully resolved result, so it cannot establish a
 safe link traversal by itself. The notice resolver reads each raw symbolic link
