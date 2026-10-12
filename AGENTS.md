@@ -120,6 +120,10 @@
   exists; fix actionable introduced risk or record explicit maintainer-accepted
   existing risk. License metadata does not certify compatibility; existing
   repository license policies apply.
+  For programmatic access, read every runner-scrubbed report in the
+  `dependency-review-job-summary-<head-sha>-<run-id>-<run-attempt>` artifact after
+  verifying its digest and latest current-head run/attempt identity; an absent
+  or unreadable actual report remains unknown, not clean.
 - Commits and pull-request titles use Conventional Commits. Preserve unrelated
   work and finish with `git diff --check`.
 - Update this `AGENTS.md` in the same change when major rework alters image
