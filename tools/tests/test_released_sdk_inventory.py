@@ -307,10 +307,58 @@ class InventoryTests(unittest.TestCase):
 
     def build_receipt(self):
         entries = {role: {'path': path, 'resolved_path': path, 'sha256': hashlib.sha256(b'tool').hexdigest(),
-                         'size': 4, 'executable': True, 'version': role + ' fixture\nsecond line\n'}
+                         'size': 4, 'executable': True,
+                         'version': ('cmake version 3.25.1' if role == 'cmake' else '1.11.1') + '\nsecond line\n'}
                    for role, path in M.BUILD_TOOLS.items()}
         return {'build_tools': {'schema_version': 1, 'tools': entries},
                 'tools': {role: entry['version'].splitlines()[0] for role, entry in entries.items()}}
+
+    def test_build_tools_accept_full_stdout_with_or_without_final_newline(self):
+        for cmake, ninja in (('cmake version 3.25.1', '1.11'),
+                             ('cmake version 3.25.1\n\nCMake suite maintained and supported by Kitware.',
+                              '1.11.1\n'),
+                             ('cmake version 3.25.1\nfull stdout\n', '1.11.1')):
+            installed = self.build_receipt()
+            for role, version in (('cmake', cmake), ('ninja', ninja)):
+                installed['build_tools']['tools'][role]['version'] = version
+                installed['tools'][role] = version.splitlines()[0]
+            reader = M.InstalledInventory(self.fake_image(), P)
+            identity = {'sha256': hashlib.sha256(b'tool').hexdigest(), 'size': 4, 'executable': True}
+            with self.subTest(cmake=cmake, ninja=ninja), patch.object(reader, '_regular', return_value=identity):
+                self.assertEqual(reader.build_tools(installed), installed['build_tools']['tools'])
+
+    def test_build_tools_enforce_shared_512_mib_boundary(self):
+        for size in (512 * 1024 * 1024, 512 * 1024 * 1024 + 1):
+            installed = self.build_receipt()
+            for entry in installed['build_tools']['tools'].values():
+                entry['size'] = size
+            identity = {'sha256': hashlib.sha256(b'tool').hexdigest(), 'size': size, 'executable': True}
+            reader = M.InstalledInventory(self.fake_image(), P)
+            with self.subTest(size=size), patch.object(reader, '_regular', return_value=identity) as read:
+                if size == 512 * 1024 * 1024:
+                    self.assertEqual(reader.build_tools(installed), installed['build_tools']['tools'])
+                else:
+                    with self.assertRaisesRegex(M.InventoryError, 'build-tool-identity'):
+                        reader.build_tools(installed)
+                    read.assert_not_called()
+
+    def test_build_tools_reject_role_grammar_controls_and_del(self):
+        cases = {'cmake': ('3.25.1', 'cmake version 3.25', 'cmake version 3.25.1-rc1'),
+                 'ninja': ('ninja 1.11.1', 'cmake version 3.25.1', '1.11.1-rc1')}
+        for role in M.BUILD_TOOLS:
+            valid = 'cmake version 3.25.1' if role == 'cmake' else '1.11.1'
+            cases[role] += tuple(valid + '\nextra' + chr(code)
+                                 for code in (*range(10), *range(11, 32), 127))
+            for version in cases[role]:
+                installed = self.build_receipt()
+                installed['build_tools']['tools'][role]['version'] = version
+                installed['tools'][role] = version.splitlines()[0]
+                reader = M.InstalledInventory(self.fake_image(), P)
+                identity = {'sha256': hashlib.sha256(b'tool').hexdigest(), 'size': 4, 'executable': True}
+                with self.subTest(role=role, version=version), patch.object(reader, '_regular', return_value=identity) as read:
+                    with self.assertRaisesRegex(M.InventoryError, 'build-tool-identity'):
+                        reader.build_tools(installed)
+                    self.assertNotIn(M.BUILD_TOOLS[role], [call.args[0] for call in read.call_args_list])
 
     def test_build_tools_require_nonroot_executable_before_get(self):
         for mode in (0o744, 0o644):

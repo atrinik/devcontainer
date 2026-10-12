@@ -24,6 +24,7 @@ COMMON_LICENSE_NAMES = ('Apache-2.0', 'Artistic', 'BSD', 'CC0-1.0', 'GFDL-1.2',
 MAX_MEMBERS = 20000
 MAX_PATH = 1024
 MAX_FILE = 1024 ** 3
+MAX_BUILD_TOOL = 512 * 1024 * 1024
 MAX_TOTAL = 8 * 1024 ** 3
 MAX_SECONDS = 900
 MAX_HOPS = 16
@@ -430,6 +431,7 @@ class InstalledInventory:
 
 
     def build_tools(self, installed):
+        require(isinstance(installed, dict), 'build-tool-schema')
         receipt = installed.get('build_tools')
         require(isinstance(receipt, dict) and set(receipt) == {'schema_version', 'tools'}
                 and type(receipt['schema_version']) is int and receipt['schema_version'] == 1
@@ -443,9 +445,14 @@ class InstalledInventory:
             require(entry['path'] == path and entry['resolved_path'] == path,
                     'build-tool-path')
             require(isinstance(entry['sha256'], str) and re.fullmatch(r'[0-9a-f]{64}', entry['sha256'])
-                    and type(entry['size']) is int and 0 < entry['size'] <= MAX_FILE
+                    and type(entry['size']) is int and 0 < entry['size'] <= MAX_BUILD_TOOL
                     and entry['executable'] is True and isinstance(entry['version'], str)
-                    and 0 < len(entry['version']) <= 65536 and entry['version'].endswith('\n')
+                    and 0 < len(entry['version']) <= 65536
+                    and not any((ord(char) < 32 and char != '\n') or ord(char) == 127
+                                for char in entry['version'])
+                    and re.fullmatch(r'cmake version [0-9]+\.[0-9]+\.[0-9]+' if role == 'cmake'
+                                     else r'[0-9]+\.[0-9]+(?:\.[0-9]+)?',
+                                     entry['version'].splitlines()[0]) is not None
                     and isinstance(installed.get('tools'), dict)
                     and installed['tools'].get(role) == entry['version'].splitlines()[0],
                     'build-tool-identity')
