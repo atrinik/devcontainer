@@ -54,8 +54,9 @@ class SchemaTests(unittest.TestCase):
                 tools.validate(value)
         changes = {"path": ["cmake", "/usr/local/bin/cmake", "/usr/bin/../bin/cmake"],
                    "resolved_path": ["relative", "/usr/bin/../bin/cmake", "//usr/bin/cmake", "/", None],
-                   "sha256": ["x" * 64, "A" * 64, None], "size": [True, "5", 0, -1],
-                   "executable": [False, 1, "true"], "version": ["", None, "wrong\n", "cmake version 3.25.1\r\n"]}
+                   "sha256": ["x" * 64, "A" * 64, None], "size": [True, "5", 0, -1, tools.MAX_BINARY_SIZE + 1],
+                   "executable": [False, 1, "true"], "version": ["", None, "wrong\n", "cmake version 3.25.1\r\n",
+                                                                "cmake version 3.25.1\n\tcontrol\n", "cmake version 3.25.1\n\x7f"]}
         for field, values in changes.items():
             for replacement in values:
                 value = installed_fixture()
@@ -132,7 +133,8 @@ class ExecutionTests(unittest.TestCase):
             for field, change in (("sha256", "0" * 64), ("size", 1234), ("resolved_path", "/different")):
                 value = copy.deepcopy(self.installed)
                 value["build_tools"]["tools"][role][field] = change
-                with self.subTest(role=role, field=field), self.assertRaisesRegex(ValueError, "changed installed"):
+                message = "invalid canonical" if field == "resolved_path" else "changed installed"
+                with self.subTest(role=role, field=field), self.assertRaisesRegex(ValueError, message):
                     tools.verify(value, role="cmake", arguments=["--configure"])
                 self.assertFalse(self.log.exists())
 
@@ -181,19 +183,112 @@ class ExecutionTests(unittest.TestCase):
                 self.assertRaisesRegex(ValueError, "changed across execution"):
             tools.verify(self.installed, role="cmake", arguments=["--configure"])
 
+    def test_failed_configure_still_fences_mutation(self):
+        original = tools.subprocess.run
+
+        def fail_configure(*args, **kwargs):
+            if args[0][1:] == ["--configure"]:
+                path = Path(self.paths["ninja"])
+                path.write_bytes(path.read_bytes() + b"# mutated failed configure\n")
+                raise tools.subprocess.CalledProcessError(1, args[0])
+            return original(*args, **kwargs)
+
+        with mock.patch.object(tools.subprocess, "run", side_effect=fail_configure), \
+                self.assertRaisesRegex(ValueError, "changed across execution"):
+            tools.verify(self.installed, role="cmake", arguments=["--configure"])
+
 
 class ProtectionTests(unittest.TestCase):
     def test_unprivileged_or_writable_files_fail_before_hashing(self):
         with tempfile.TemporaryFile() as file:
             original = os.fstat(file.fileno())
             for mode, uid in ((stat.S_IFREG | 0o755, 1000), (stat.S_IFREG | 0o775, 0),
-                              (stat.S_IFREG | 0o644, 0), (stat.S_IFIFO | 0o755, 0)):
+                              (stat.S_IFREG | 0o644, 0), (stat.S_IFIFO | 0o755, 0),
+                              (stat.S_IFREG | 0o4755, 0), (stat.S_IFREG | 0o2755, 0)):
                 values = list(original)
                 values[0], values[4], values[6] = mode, uid, 1
                 with self.subTest(mode=mode, uid=uid), mock.patch.object(tools.os, "fstat", return_value=os.stat_result(values)), \
                         mock.patch.object(tools.os, "read") as read, self.assertRaises(ValueError):
                     tools._identity(file.fileno())
                 read.assert_not_called()
+
+    def test_protected_regular_executable_positive(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "regular"
+            path.write_bytes(b"test-owned executable bytes")
+            path.chmod(0o555)
+            original_lstat, original_fstat = Path.lstat, os.fstat
+
+            def protected_info(info):
+                values = list(info)
+                values[0], values[4] = info.st_mode & ~0o022, 0
+                return os.stat_result(values)
+
+            # Root ownership is modeled in a test-owned tree. Directory/file
+            # traversal, opening, regular mode, size and bytes remain real.
+            with mock.patch.object(tools.Path, "lstat", side_effect=lambda p: protected_info(original_lstat(p)), autospec=True), \
+                    mock.patch.object(tools.os, "fstat", side_effect=lambda fd: protected_info(original_fstat(fd))):
+                resolved = tools._protected_path(path)
+                self.assertEqual(resolved, path.resolve(strict=True))
+                fd = os.open(resolved, os.O_RDONLY | os.O_NOFOLLOW)
+                try:
+                    info, digest = tools._identity(fd)
+                    self.assertEqual(info.st_size, len(resolved.read_bytes()))
+                    self.assertEqual(digest, hashlib.sha256(resolved.read_bytes()).hexdigest())
+                finally:
+                    os.close(fd)
+
+    def test_intermediate_symlink_expansion_cannot_skip_writable_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            trusted, untrusted = root / "trusted", root / "untrusted"
+            trusted.mkdir()
+            untrusted.mkdir()
+            untrusted.chmod(0o777)
+            real = trusted / "real"
+            real.write_text("fixture")
+            real.chmod(0o755)
+            (trusted / "cmake").symlink_to(untrusted / "hop")
+            (untrusted / "hop").symlink_to(real)
+            original = Path.lstat
+            seen = []
+
+            def trusted_ancestor_info(path):
+                info = original(path)
+                seen.append(path)
+                # Model root-owned protected fixture ancestors only. Keep the
+                # actual writable intermediate directory's ownership/mode.
+                if path == untrusted:
+                    return info
+                values = list(info)
+                values[0], values[4] = info.st_mode & ~0o022, 0
+                return os.stat_result(values)
+
+            with mock.patch.object(tools.Path, "lstat", side_effect=trusted_ancestor_info, autospec=True):
+                self.assertEqual(tools._protected_path(real), real)
+                seen.clear()
+                with self.assertRaisesRegex(ValueError, "symlink in installed build tool path"):
+                    tools._protected_path(trusted / "cmake")
+                self.assertIn(trusted / "cmake", seen)
+                self.assertNotIn(real, seen)
+
+    def test_parent_symlink_cannot_redirect_a_regular_tool_or_metadata(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "real").mkdir()
+            (root / "real/tool").write_bytes(b"fixture")
+            (root / "parent").symlink_to(root / "real", target_is_directory=True)
+            original_lstat = Path.lstat
+
+            def protected_info(path):
+                info = original_lstat(path)
+                values = list(info)
+                values[0], values[4] = info.st_mode & ~0o022, 0
+                return os.stat_result(values)
+
+            with mock.patch.object(tools.Path, "lstat", side_effect=protected_info, autospec=True), \
+                    self.assertRaisesRegex(ValueError, "symlink in installed build tool path"):
+                tools._protected_path(root / "parent/tool")
 
     def test_consumer_owned_tree_is_not_protected(self):
         with tempfile.TemporaryDirectory() as temp:

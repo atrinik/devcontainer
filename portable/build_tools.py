@@ -20,6 +20,7 @@ import subprocess
 
 PATHS = {"cmake": "/usr/bin/cmake", "ninja": "/usr/bin/ninja"}
 FIELDS = {"path", "resolved_path", "sha256", "size", "executable", "version"}
+MAX_BINARY_SIZE = 512 * 1024 * 1024
 
 
 def validate(installed: dict) -> dict:
@@ -42,15 +43,15 @@ def validate(installed: dict) -> dict:
         resolved = item["resolved_path"]
         if (type(resolved) is not str or not resolved.startswith("/")
                 or resolved.startswith("//") or "\x00" in resolved
-                or posixpath.normpath(resolved) != resolved or resolved == "/"):
+                or posixpath.normpath(resolved) != resolved or resolved != path):
             raise ValueError("invalid canonical build tool path: " + role)
         if (type(item["sha256"]) is not str or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])
-                or type(item["size"]) is not int or item["size"] <= 0
+                or type(item["size"]) is not int or not 0 < item["size"] <= MAX_BINARY_SIZE
                 or item["executable"] is not True):
             raise ValueError("invalid producer build tool identity: " + role)
         version = item["version"]
         if (type(version) is not str or not version or len(version) > 65536
-                or "\x00" in version or "\r" in version):
+                or any((ord(char) < 32 and char != "\n") or ord(char) == 127 for char in version)):
             raise ValueError("invalid complete build tool version: " + role)
         first = version.splitlines()[0]
         pattern = r"cmake version [0-9]+\.[0-9]+\.[0-9]+" if role == "cmake" else r"[0-9]+\.[0-9]+(?:\.[0-9]+)?"
@@ -60,22 +61,39 @@ def validate(installed: dict) -> dict:
 
 
 def _protected_path(path: Path) -> Path:
-    """Check lexical links and their canonical tree before opening any code."""
-    resolved = path.resolve(strict=True)
-    for candidate in dict.fromkeys([*reversed(path.parents), path,
-                                    *reversed(resolved.parents), resolved]):
+    """Check every component; fixed Debian tool/metadata paths cannot use links."""
+    resolved = Path("/")
+    parts = list(path.parts[1:]) if path.is_absolute() else [*Path.cwd().parts[1:], *path.parts]
+
+    def check(candidate):
         info = candidate.lstat()
-        if info.st_uid != 0 or (not stat.S_ISLNK(info.st_mode) and info.st_mode & 0o022):
+        if stat.S_ISLNK(info.st_mode):
+            raise ValueError("symlink in installed build tool path: " + str(candidate))
+        if info.st_uid != 0 or info.st_mode & 0o022:
             raise ValueError("unprotected installed build tool path: " + str(candidate))
-        if candidate not in (path, resolved) and not (stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)):
+        return info
+
+    check(resolved)
+    while parts:
+        component = parts.pop(0)
+        if component in ("", "."):
+            continue
+        if component == "..":
+            resolved = resolved.parent
+            check(resolved)
+            continue
+        candidate = resolved / component
+        info = check(candidate)
+        if parts and not stat.S_ISDIR(info.st_mode):
             raise ValueError("invalid build tool directory: " + str(candidate))
+        resolved = candidate
     return resolved
 
 
 def _identity(fd: int) -> tuple[os.stat_result, str]:
     info = os.fstat(fd)
-    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022
-            or not info.st_mode & 0o111 or info.st_size <= 0):
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o6022
+            or not info.st_mode & 0o111 or not 0 < info.st_size <= MAX_BINARY_SIZE):
         raise ValueError("build tool must be a protected executable regular file")
     digest = hashlib.sha256()
     os.lseek(fd, 0, os.SEEK_SET)

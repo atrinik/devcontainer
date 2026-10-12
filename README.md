@@ -470,6 +470,8 @@ executable status and complete version stdout. Its first lines agree with the
 existing installed tool version strings. The consumer verifies both protected
 root-owned executables through open descriptors before any version probe and
 fences their resolution, bytes and file identity around configure and build.
+Every directory component must be protected, and these fixed Debian executable
+and metadata paths must not contain symlinks.
 SDKs without this producer receipt require a rebuild. This check trusts the
 producer OS, dynamic libraries and CMake modules; it does not attest the full
 transitive execution environment.

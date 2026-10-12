@@ -28,6 +28,7 @@
   receipt binds fixed `/usr/bin/cmake` and `/usr/bin/ninja` paths, canonical
   executables, hashes, sizes and full version stdout. Verify both protected
   identities before probing either tool and fence configure/build execution;
+  reject symlinks in these fixed Debian executable and metadata paths.
   missing receipts require a rebuilt producer. The producer OS, libraries and
   CMake modules and earlier library-production builds remain trusted; this
   receipt does not attest historical execution. Portable curl is an LLVM rebuild of
