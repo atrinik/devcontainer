@@ -85,6 +85,20 @@
   `candidate-sha-<commit>`. Windows publishes `candidate-sha-<commit>` and
   `classic-check-candidate-sha-<commit>` with cross-build and native Windows
   tests intact. Neither path may move rolling, platform, or version aliases.
+- The Linux publisher captures each loaded image's immutable Docker ID and raw
+  inspection before runtime tests. Curl/TLS, Classic client/server, portable
+  public-CA and offline consumer checks must execute those captured IDs. After
+  all runtime gates, publish only SHA candidates, then verify the actual pushed
+  OCI index, Linux/amd64 manifest and config against the captured RootFS and
+  complete execution config with `tools/verify_published_identity.py`. Only
+  exact source/revision publication labels, creation/history and BuildKit inline
+  cache metadata may differ; unknown raw config and execution fields fail closed.
+  Keep bounded metadata-only authenticated acquisition confined to the
+  same-repository hosted publisher. Retain raw inspection, OCI objects,
+  descriptor relationships and hashed reports as mandatory artifacts before
+  promoting any release aliases. Rerun the failed job in the same workflow run
+  to recover partial promotion; preserve historical released-SDK collector
+  targets and final-cohort gates.
 - `llvm-toolchain.json`, `llvm-bootstrap-packages.lock`, and the shared LLVM
   installer/validator own LLVM 23.1.3 Clang/LLD/compiler-rt/libunwind source,
   licensing, installed metadata, and target contracts. Every affected input
