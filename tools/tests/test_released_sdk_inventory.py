@@ -42,7 +42,7 @@ class Response(io.BytesIO):
 
 
 def directory(path):
-    return {'name': Path(path).name, 'mode': M.GO_DIRECTORY | 0o755,
+    return {'name': Path(path).name if path != '/' else '/', 'mode': M.GO_DIRECTORY | 0o755,
             'size': 4096, 'mtime': 'fixed', 'linkTarget': ''}
 
 
@@ -169,6 +169,40 @@ class InventoryTests(unittest.TestCase):
         image.stat.side_effect = lambda path: directory(path)
         return image
 
+    def installed_image(self, payloads=None, metadata=None, missing=()):
+        """Exercise real archive readers; HEAD intentionally has no UID/GID."""
+        payloads = payloads if payloads is not None else {
+            '/usr/local/lib/' + name + '.so.1.0.0': name.encode()
+            for name in ('libcurl', 'libcares')}
+        metadata = metadata or {}
+        image = self.fake_image()
+        connections = []
+        def stat(path):
+            if path in missing:
+                raise P.Stop('docker-http-status')
+            if path in payloads:
+                return {**regular(path, payloads[path]), 'mode': metadata.get(path, {}).get('mode', 0o755)}
+            return directory(path)
+        def request(method, route, headers):
+            self.assertEqual(method, 'GET')
+            path = urllib.parse.parse_qs(urllib.parse.urlsplit(route).query)['path'][0]
+            expected = stat(path)
+            conn = Mock()
+            connections.append(conn)
+            raw = payloads.get(path, b'')
+            kind = tarfile.REGTYPE if path in payloads else tarfile.DIRTYPE
+            extra = {'mode': expected['mode'] & 0o777, **metadata.get(path, {})}
+            name = Path(path).name if path != '/' else '/'
+            return conn, Response(tar([(name, raw, kind, extra)]), expected)
+        image.stat.side_effect = stat
+        image.docker.request.side_effect = request
+        image.connections = connections
+        return image
+
+    def crosscheck(self, records, runtime, contract, *, image=None):
+        reader = M.InstalledInventory(image if image is not None else self.installed_image(), P)
+        return M.crosscheck_archives(records, runtime, contract, reader=reader)
+
     def test_created_image_fences_and_connection_close(self):
         image = self.fake_image()
         conn = Mock()
@@ -220,15 +254,15 @@ class InventoryTests(unittest.TestCase):
     def test_archive_crosschecks(self):
         payloads, runtime, contract = self.manifest_fixture()
         records = self.producer_fixture(payloads)
-        M.crosscheck_archives(records, runtime, contract)
+        self.crosscheck(records, runtime, contract)
         for path in (path for path in records if path.startswith('sources/')):
             bad = copy.deepcopy(records)
             bad[path]['sha256'] = 'c' * 64
             with self.assertRaisesRegex(M.InventoryError, 'inventory-source-bytes-mismatch'):
-                M.crosscheck_archives(bad, runtime, contract)
+                self.crosscheck(bad, runtime, contract)
         runtime['archives'] = {'../secret': 'a' * 64}
         with self.assertRaises(M.InventoryError):
-            M.crosscheck_archives(records, runtime, contract)
+            self.crosscheck(records, runtime, contract)
 
     def manifest_fixture(self):
         # Use the producer's actual schemas and path declarations, with small
@@ -286,12 +320,12 @@ class InventoryTests(unittest.TestCase):
     def test_authenticated_manifests_close_audio_and_llvm_sources(self):
         payloads, runtime, contract = self.manifest_fixture()
         records = self.producer_fixture(payloads)
-        M.crosscheck_archives(records, runtime, contract)
+        self.crosscheck(records, runtime, contract)
         self.assertEqual(set(records.source_manifests), set(M.SOURCE_MANIFESTS))
         self.assertEqual(M.inventory_digest(records), M.inventory_digest(dict(records)))
         # A hash-only inventory cannot manufacture authenticated manifest data.
         with self.assertRaisesRegex(M.InventoryError, 'inventory-manifest-missing-or-size'):
-            M.crosscheck_archives(dict(records), runtime, contract)
+            self.crosscheck(dict(records), runtime, contract)
 
     def test_contract_schema_and_manifest_references_are_mandatory(self):
         payloads, runtime, contract = self.manifest_fixture()
@@ -302,11 +336,11 @@ class InventoryTests(unittest.TestCase):
             # the qualification requirements to the remaining subset.
             partial = {name: raw for name, raw in payloads.items() if not name.startswith('sources/')}
             with self.subTest(missing=key), self.assertRaises(M.InventoryError):
-                M.crosscheck_archives(self.producer_fixture(partial), runtime, bad)
+                self.crosscheck(self.producer_fixture(partial), runtime, bad)
         bad = copy.deepcopy(contract)
         del bad['compiler']['toolchain_manifest']
         with self.assertRaisesRegex(M.InventoryError, 'inventory-manifest-path'):
-            M.crosscheck_archives(self.producer_fixture(payloads), runtime, bad)
+            self.crosscheck(self.producer_fixture(payloads), runtime, bad)
         for key, values in (('schema_version', [None, True, 1, 2.0, '2']),
                             ('target', [None, 'classic-final']), ('platform', [None, 'linux/arm64']),
                             ('compiler', [None, [], 'llvm-toolchain.json'])):
@@ -314,7 +348,7 @@ class InventoryTests(unittest.TestCase):
                 bad = copy.deepcopy(contract)
                 bad[key] = value
                 with self.subTest(key=key, value=value), self.assertRaises(M.InventoryError):
-                    M.crosscheck_archives(self.producer_fixture(payloads), runtime, bad)
+                    self.crosscheck(self.producer_fixture(payloads), runtime, bad)
 
     def test_contract_source_cohort_cannot_be_shortened_or_duplicated(self):
         payloads, runtime, contract = self.manifest_fixture()
@@ -325,12 +359,12 @@ class InventoryTests(unittest.TestCase):
             del partial['sources/' + removed['sha256'] + '.tar.gz']
             with self.subTest(removed=removed['name']), self.assertRaisesRegex(
                     M.InventoryError, 'inventory-source-cohort'):
-                M.crosscheck_archives(self.producer_fixture(partial), runtime, bad)
+                self.crosscheck(self.producer_fixture(partial), runtime, bad)
         for rows in ([*contract['sources'], contract['sources'][0]],
                      [{**row, 'name': 'other'} for row in contract['sources']], [], None, {}):
             bad = {**contract, 'sources': rows}
             with self.subTest(rows=rows), self.assertRaises(M.InventoryError):
-                M.crosscheck_archives(self.producer_fixture(payloads), runtime, bad)
+                self.crosscheck(self.producer_fixture(payloads), runtime, bad)
 
     def test_audio_cohort_cannot_be_shortened_or_renamed(self):
         payloads, runtime, contract = self.manifest_fixture()
@@ -342,14 +376,14 @@ class InventoryTests(unittest.TestCase):
             del partial['sources/' + removed['source']['sha256'] + '.tar.gz']
             partial['audio-toolchain.json'] = json.dumps(audio).encode()
             with self.subTest(removed=removed['name']), self.assertRaises(M.InventoryError):
-                M.crosscheck_archives(self.producer_fixture(partial), runtime, contract)
+                self.crosscheck(self.producer_fixture(partial), runtime, contract)
         for role in ('sdl_mixer', 'dependency'):
             audio = copy.deepcopy(original)
             entry = audio['sdl_mixer'] if role == 'sdl_mixer' else audio['dependencies'][0]
             entry['name'] = 'other'
             partial = {**payloads, 'audio-toolchain.json': json.dumps(audio).encode()}
             with self.subTest(role=role), self.assertRaises(M.InventoryError):
-                M.crosscheck_archives(self.producer_fixture(partial), runtime, contract)
+                self.crosscheck(self.producer_fixture(partial), runtime, contract)
 
     def test_both_custom_providers_and_all_fields_are_mandatory(self):
         payloads, runtime, contract = self.manifest_fixture()
@@ -376,14 +410,14 @@ class InventoryTests(unittest.TestCase):
         variants.append(bad)
         for bad in variants:
             with self.subTest(runtime=bad), self.assertRaises(M.InventoryError):
-                M.crosscheck_archives(self.producer_fixture(payloads), bad, contract)
+                self.crosscheck(self.producer_fixture(payloads), bad, contract)
         for name, provider in runtime['custom_providers'].items():
             bad = copy.deepcopy(runtime)
             del bad['custom_providers'][name]
             partial = {path: raw for path, raw in payloads.items() if path not in provider['source_archives']}
             with self.subTest(missing_provider_and_archives=name), self.assertRaisesRegex(
                     M.InventoryError, 'inventory-custom-providers'):
-                M.crosscheck_archives(self.producer_fixture(partial), bad, contract)
+                self.crosscheck(self.producer_fixture(partial), bad, contract)
 
     def test_custom_provider_archives_cannot_be_omitted_replaced_or_substituted(self):
         payloads, runtime, contract = self.manifest_fixture()
@@ -398,12 +432,12 @@ class InventoryTests(unittest.TestCase):
                     if change == 'omitted-declaration':
                         del bad['custom_providers'][name]['source_archives'][path]
                     with self.subTest(path=path, change=change), self.assertRaises(M.InventoryError):
-                        M.crosscheck_archives(self.producer_fixture(partial), bad, contract)
+                        self.crosscheck(self.producer_fixture(partial), bad, contract)
             bad = copy.deepcopy(runtime)
             sha = contract['sources'][0]['sha256']
             bad['custom_providers'][name]['source_archives'] = {'sources/' + sha + '.tar.gz': sha}
             with self.subTest(substituted=name), self.assertRaisesRegex(M.InventoryError, 'inventory-custom-provider'):
-                M.crosscheck_archives(self.producer_fixture(payloads), bad, contract)
+                self.crosscheck(self.producer_fixture(payloads), bad, contract)
 
     def test_curl_manifests_require_complete_archive_set_and_reference_chain(self):
         payloads, runtime, contract = self.manifest_fixture()
@@ -415,7 +449,7 @@ class InventoryTests(unittest.TestCase):
             partial = {**payloads, 'curl-toolchain.json': json.dumps(curl).encode()}
             del partial['sources/curl/' + name]
             with self.subTest(archive=name), self.assertRaisesRegex(M.InventoryError, 'inventory-curl-archives'):
-                M.crosscheck_archives(self.producer_fixture(partial), bad, contract)
+                self.crosscheck(self.producer_fixture(partial), bad, contract)
         for key, value in (('cares_manifest', None), ('cares_manifest', '../classic-curl-toolchain.json'),
                            ('cares_manifest', '/etc/passwd'), ('source_package', 'other'),
                            ('source_version', None), ('source_version', '../7.88.1'),
@@ -423,14 +457,14 @@ class InventoryTests(unittest.TestCase):
             curl = {**original, key: value}
             partial = {**payloads, 'curl-toolchain.json': json.dumps(curl).encode()}
             with self.subTest(key=key, value=value), self.assertRaises(M.InventoryError):
-                M.crosscheck_archives(self.producer_fixture(partial), runtime, contract)
+                self.crosscheck(self.producer_fixture(partial), runtime, contract)
         shared = json.loads(payloads['classic-curl-toolchain.json'])
         for value in (None, [], {}, {'version': True, 'sha256': 'a' * 64},
                       {'version': '1.34.6', 'sha256': None}, {'version': '1.34.6', 'sha256': '../escape'}):
             bad = {**shared, 'cares': value}
             partial = {**payloads, 'classic-curl-toolchain.json': json.dumps(bad).encode()}
             with self.subTest(cares=value), self.assertRaises(M.InventoryError):
-                M.crosscheck_archives(self.producer_fixture(partial), runtime, contract)
+                self.crosscheck(self.producer_fixture(partial), runtime, contract)
 
     def test_source_document_types_fail_with_fixed_errors(self):
         payloads, runtime, contract = self.manifest_fixture()
@@ -441,7 +475,7 @@ class InventoryTests(unittest.TestCase):
                 args[index] = value
                 with self.subTest(index=index, value=value), self.assertRaisesRegex(
                         M.InventoryError, 'inventory-source-documents'):
-                    M.crosscheck_archives(*args)
+                    self.crosscheck(*args)
 
     def test_all_declared_archive_records_require_typed_nonempty_bounded_bytes(self):
         payloads, runtime, contract = self.manifest_fixture()
@@ -456,7 +490,7 @@ class InventoryTests(unittest.TestCase):
                 bad[path] = record
                 with self.subTest(path=path, record=record), self.assertRaisesRegex(
                         M.InventoryError, 'inventory-source-bytes-mismatch'):
-                    M.crosscheck_archives(bad, runtime, contract)
+                    self.crosscheck(bad, runtime, contract)
 
     def test_matching_empty_archive_digest_is_rejected_for_every_source_family(self):
         empty = hashlib.sha256(b'').hexdigest()
@@ -491,7 +525,7 @@ class InventoryTests(unittest.TestCase):
                 runtime['custom_providers'][family]['source_archives'] = {path: empty}
             payloads[path] = b''
             with self.subTest(family=family), self.assertRaisesRegex(M.InventoryError, 'inventory-source-bytes-mismatch'):
-                M.crosscheck_archives(self.producer_fixture(payloads), runtime, contract)
+                self.crosscheck(self.producer_fixture(payloads), runtime, contract)
 
     def test_each_declared_audio_and_llvm_source_missing_or_replaced_fails(self):
         payloads, runtime, contract = self.manifest_fixture()
@@ -511,7 +545,7 @@ class InventoryTests(unittest.TestCase):
                 self.assertEqual(M.inventory_digest(records), M.inventory_digest(self.producer_fixture(bad)))
                 with self.subTest(path=path, missing=missing), self.assertRaisesRegex(
                         M.InventoryError, 'inventory-source-bytes-mismatch'):
-                    M.crosscheck_archives(records, runtime, contract)
+                    self.crosscheck(records, runtime, contract)
 
     def test_manifest_missing_replaced_identity_and_limits_fail(self):
         payloads, runtime, contract = self.manifest_fixture()
@@ -520,15 +554,15 @@ class InventoryTests(unittest.TestCase):
             del bad[name]
             with self.subTest(name=name), self.assertRaisesRegex(
                     M.InventoryError, 'inventory-manifest-missing-or-size'):
-                M.crosscheck_archives(self.producer_fixture(bad), runtime, contract)
+                self.crosscheck(self.producer_fixture(bad), runtime, contract)
             records = self.producer_fixture(payloads)
             records.source_manifests[name] += b' '
             with self.assertRaisesRegex(M.InventoryError, 'inventory-manifest-bytes-mismatch'):
-                M.crosscheck_archives(records, runtime, contract)
+                self.crosscheck(records, runtime, contract)
             records = self.producer_fixture(payloads)
             records[name]['size'] = float(records[name]['size'])
             with self.assertRaisesRegex(M.InventoryError, 'inventory-manifest-bytes-mismatch'):
-                M.crosscheck_archives(records, runtime, contract)
+                self.crosscheck(records, runtime, contract)
             for raw in (b'', b' ' * (M.MAX_MANIFEST + 1)):
                 with self.subTest(name=name, size=len(raw)), self.assertRaisesRegex(
                         M.InventoryError, 'inventory-manifest-size'):
@@ -544,7 +578,7 @@ class InventoryTests(unittest.TestCase):
                 bad = dict(payloads)
                 bad[name] = raw
                 with self.subTest(name=name, raw=raw[:80]), self.assertRaises(M.InventoryError):
-                    M.crosscheck_archives(self.producer_fixture(bad), runtime, contract)
+                    self.crosscheck(self.producer_fixture(bad), runtime, contract)
 
     def test_manifest_references_cannot_escape_fixed_boundary(self):
         payloads, runtime, contract = self.manifest_fixture()
@@ -559,7 +593,7 @@ class InventoryTests(unittest.TestCase):
                     bad['compiler']['toolchain_manifest'] = reference
                 with self.subTest(role=role, reference=reference), self.assertRaisesRegex(
                         M.InventoryError, 'inventory-manifest-path'):
-                    M.crosscheck_archives(self.producer_fixture(payloads), runtime, bad)
+                    self.crosscheck(self.producer_fixture(payloads), runtime, bad)
 
     def test_audio_manifest_invalid_sources_and_duplicate_names_fail(self):
         payloads, runtime, contract = self.manifest_fixture()
@@ -583,7 +617,7 @@ class InventoryTests(unittest.TestCase):
             bad = dict(payloads)
             bad['audio-toolchain.json'] = json.dumps(value).encode()
             with self.subTest(value=value), self.assertRaises(M.InventoryError):
-                M.crosscheck_archives(self.producer_fixture(bad), runtime, contract)
+                self.crosscheck(self.producer_fixture(bad), runtime, contract)
 
     def test_llvm_manifest_invalid_sources_and_archive_paths_fail(self):
         payloads, runtime, contract = self.manifest_fixture()
@@ -602,7 +636,7 @@ class InventoryTests(unittest.TestCase):
                 bad = dict(payloads)
                 bad['llvm-toolchain.json'] = json.dumps(llvm).encode()
                 with self.subTest(key=key, value=value), self.assertRaises(M.InventoryError):
-                    M.crosscheck_archives(self.producer_fixture(bad), runtime, contract)
+                    self.crosscheck(self.producer_fixture(bad), runtime, contract)
 
 
     def notice_image(self, links=None, drift=False):
@@ -690,12 +724,12 @@ class InventoryTests(unittest.TestCase):
                 conn, Response(tar([(Path(path).name, b'', tarfile.REGTYPE,
                                      {'mode': expected['mode']})]), expected))
             reader = M.InstalledInventory(image, P)
-            with self.subTest(path=path), self.assertRaisesRegex(P.Stop, 'file-size-limit'):
+            with self.subTest(path=path), self.assertRaisesRegex(M.InventoryError, 'file-size-limit'):
                 if path.startswith(M.DOC + '/'):
                     reader.debian_notices(runtime, debian)
                 else:
                     reader._regular(path, executable=executable)
-            conn.close.assert_called_once()
+            image.docker.request.assert_not_called()
 
     def build_receipt(self):
         entries = {role: {'path': path, 'resolved_path': path, 'sha256': hashlib.sha256(b'tool').hexdigest(),
@@ -705,6 +739,160 @@ class InventoryTests(unittest.TestCase):
                    for role, path in M.BUILD_TOOLS.items()}
         return {'build_tools': {'schema_version': 1, 'tools': entries},
                 'tools': {role: entry['version'].splitlines()[0] for role, entry in entries.items()}}
+
+    def test_provider_identity_requires_authenticated_reader_and_actual_bytes(self):
+        payloads, runtime, contract = self.manifest_fixture()
+        records = self.producer_fixture(payloads)
+        with self.assertRaisesRegex(M.InventoryError, 'inventory-provider-reader-required'):
+            M.crosscheck_archives(records, runtime, contract)
+        image = self.installed_image()
+        self.crosscheck(records, runtime, contract, image=image)
+        requests = [urllib.parse.parse_qs(urllib.parse.urlsplit(call.args[1]).query)['path'][0]
+                    for call in image.docker.request.call_args_list]
+        self.assertEqual(set(requests), {'/', '/usr', '/usr/local', '/usr/local/lib',
+                                        *[item['path'] for item in runtime['custom_providers'].values()]})
+        for conn in image.connections:
+            conn.close.assert_called_once()
+        for name, item in runtime['custom_providers'].items():
+            with self.subTest(provider=name):
+                bad = copy.deepcopy(runtime)
+                bad['custom_providers'][name]['sha256'] = 'a' * 64
+                with self.assertRaisesRegex(M.InventoryError, 'inventory-provider-bytes-mismatch'):
+                    self.crosscheck(records, bad, contract)
+                absent = copy.deepcopy(runtime)
+                absent['custom_providers'][name]['path'] += '.123'
+                with self.assertRaisesRegex(P.Stop, 'docker-http-status'):
+                    self.crosscheck(records, absent, contract,
+                                    image=self.installed_image(missing=(item['path'] + '.123',)))
+                data = {entry['path']: key.encode() for key, entry in runtime['custom_providers'].items()}
+                data[item['path']] = b'replaced installed binary'
+                with self.assertRaisesRegex(M.InventoryError, 'inventory-provider-bytes-mismatch'):
+                    self.crosscheck(records, runtime, contract, image=self.installed_image(data))
+
+    def test_provider_reader_boundary_rejects_missing_reader_and_invalid_identities(self):
+        payloads, runtime, contract = self.manifest_fixture()
+        records = self.producer_fixture(payloads)
+        for reader in (None, {}, {'sha256': 'a' * 64}, object()):
+            with self.subTest(reader=reader), self.assertRaisesRegex(
+                    M.InventoryError, 'inventory-provider-reader-required'):
+                M.crosscheck_archives(records, runtime, contract, reader=reader)
+        class InvalidReader(M.ProviderReader):
+            def __init__(self, value):
+                self.value = value
+            def read_provider(self, path):
+                return self.value
+        valid = {'sha256': hashlib.sha256(b'libcurl').hexdigest(), 'size': 7, 'executable': True}
+        for value in (None, [], {}, {**valid, 'extra': True}, {**valid, 'size': True},
+                      {**valid, 'size': 0}, {**valid, 'size': M.MAX_FILE + 1},
+                      {**valid, 'sha256': 'A' * 64}, {**valid, 'executable': 1}):
+            with self.subTest(value=value), self.assertRaisesRegex(M.InventoryError, 'inventory-provider-identity'):
+                M.crosscheck_archives(records, runtime, contract, reader=InvalidReader(value))
+
+    def test_provider_reader_keeps_fixed_namespace_and_no_link_defenses(self):
+        for path in ('/etc/passwd', '/usr/local/lib/libcurl.so', '/usr/local/lib/libcurl.so.1/extra',
+                     '/usr/local/lib/libcares.so.1/../elsewhere', '/usr/local/lib/libcurl.so.' + '1' * M.MAX_PATH):
+            image = self.installed_image()
+            with self.subTest(path=path), self.assertRaisesRegex(M.InventoryError, 'inventory-file-not-allowed'):
+                M.InstalledInventory(image, P).read_provider(path)
+            image.docker.request.assert_not_called()
+        payloads, runtime, contract = self.manifest_fixture()
+        records = self.producer_fixture(payloads)
+        for provider in runtime['custom_providers'].values():
+            image = self.installed_image(metadata={provider['path']: {'type': tarfile.SYMTYPE,
+                                                                     'linkname': 'other.so'}})
+            with self.subTest(path=provider['path']), self.assertRaisesRegex(P.Stop, 'unexpected-archive-entry'):
+                self.crosscheck(records, runtime, contract, image=image)
+
+    def test_provider_files_and_ancestors_are_root_owned(self):
+        payloads, runtime, contract = self.manifest_fixture()
+        records = self.producer_fixture(payloads)
+        paths = ('/', '/usr', '/usr/local', '/usr/local/lib',
+                 *[entry['path'] for entry in runtime['custom_providers'].values()])
+        for path in paths:
+            image = self.installed_image(metadata={path: {'uid': 1000, 'gid': 1000}})
+            with self.subTest(path=path), self.assertRaisesRegex(
+                    (M.InventoryError, P.Stop), 'inventory-directory-owner|archive-owner-mismatch'):
+                self.crosscheck(records, runtime, contract, image=image)
+            for conn in image.connections:
+                conn.close.assert_called_once()
+
+    def test_build_tools_real_reader_protects_file_and_all_ancestors(self):
+        data = {path: b'tool' for path in M.BUILD_TOOLS.values()}
+        installed = self.build_receipt()
+        image = self.installed_image(data)
+        self.assertEqual(M.InstalledInventory(image, P).build_tools(installed), installed['build_tools']['tools'])
+        for conn in image.connections:
+            conn.close.assert_called_once()
+        for path in ('/', '/usr', '/usr/bin', *M.BUILD_TOOLS.values()):
+            image = self.installed_image(data, {path: {'uid': 1000, 'gid': 1000}})
+            with self.subTest(path=path), self.assertRaisesRegex(
+                    (M.InventoryError, P.Stop), 'inventory-directory-owner|archive-owner-mismatch'):
+                M.InstalledInventory(image, P).build_tools(installed)
+            for conn in image.connections:
+                conn.close.assert_called_once()
+        # The portable consumer requires UID 0; GID 0 is not part of that contract.
+        image = self.installed_image(data, {path: {'gid': 1000} for path in ('/', '/usr', '/usr/bin', *data)})
+        self.assertEqual(M.InstalledInventory(image, P).build_tools(installed), installed['build_tools']['tools'])
+        for role, path in M.BUILD_TOOLS.items():
+            changed = {**data, path: b'changed tool'}
+            with self.subTest(role=role), self.assertRaisesRegex(M.InventoryError, 'build-tool-bytes-mismatch'):
+                M.InstalledInventory(self.installed_image(changed), P).build_tools(installed)
+
+    def test_protected_directory_header_rejects_ownership_overrides_and_path_drift(self):
+        data = {path: b'tool' for path in M.BUILD_TOOLS.values()}
+        for path in ('/', '/usr', '/usr/bin'):
+            for extra in ({'mode': 0o777}, {'type': tarfile.SYMTYPE, 'linkname': 'elsewhere'},
+                          {'name': '../escape'}, {'pax_headers': {'uid': '0'}, 'uid': 1000},
+                          {'pax_headers': {'gid': '0'}}, {'uid': -1}):
+                image = self.installed_image(data, {path: extra})
+                with self.subTest(path=path, extra=extra), self.assertRaises((M.InventoryError, P.Stop)):
+                    M.InstalledInventory(image, P).build_tools(self.build_receipt())
+                for conn in image.connections:
+                    conn.close.assert_called_once()
+        image = self.installed_image(data)
+        request = image.docker.request.side_effect
+        def drift(method, route, headers):
+            conn, response = request(method, route, headers)
+            if urllib.parse.parse_qs(urllib.parse.urlsplit(route).query)['path'] == ['/usr']:
+                response.headers['X-Docker-Container-Path-Stat'] = base64.b64encode(
+                    json.dumps({**directory('/usr'), 'mtime': 'changed'}).encode()).decode()
+            return conn, response
+        image.docker.request.side_effect = drift
+        with self.assertRaisesRegex(M.InventoryError, 'inventory-path-drift'):
+            M.InstalledInventory(image, P).build_tools(self.build_receipt())
+
+    def test_root_directory_requires_exact_moby_archive_name(self):
+        data = {path: b'tool' for path in M.BUILD_TOOLS.values()}
+        for name in ('.', './', '//', '///', 'usr'):
+            image = self.installed_image(data, {'/': {'name': name}})
+            with self.subTest(name=name), self.assertRaises(M.InventoryError):
+                M.InstalledInventory(image, P).build_tools(self.build_receipt())
+        raw = bytearray(tar([('/', b'', tarfile.DIRTYPE, {})]))
+        raw[:100] = bytes(100)
+        raw[148:156] = b'        '
+        raw[148:156] = ('%06o\0 ' % sum(raw[:512])).encode()
+        image = self.fake_image()
+        image.docker.request.return_value = Mock(), Response(bytes(raw), directory('/'))
+        with self.assertRaisesRegex(M.InventoryError, 'inventory-directory-entry'):
+            M.InstalledInventory(image, P)._directory_owner('/', directory('/'))
+        image = self.installed_image(data, {'/': {'name': '/'}})
+        self.assertEqual(M.InstalledInventory(image, P).build_tools(self.build_receipt()),
+                         self.build_receipt()['build_tools']['tools'])
+
+    def test_directory_ownership_read_is_bounded_to_header(self):
+        image = self.fake_image()
+        # Simulate a huge recursive directory response. Do not request body bytes.
+        response = Response(tar([('usr', b'', tarfile.DIRTYPE, {})]), directory('/usr'))
+        original = response.read
+        def read(size):
+            self.assertEqual(response.tell(), 0)
+            self.assertEqual(size, 512)
+            return original(size)
+        response.read = read
+        conn = Mock()
+        image.docker.request.return_value = conn, response
+        M.InstalledInventory(image, P)._directory_owner('/usr', directory('/usr'))
+        conn.close.assert_called_once()
 
     def test_build_tools_accept_full_stdout_with_or_without_final_newline(self):
         for cmake, ninja in (('cmake version 3.25.1', '1.11'),

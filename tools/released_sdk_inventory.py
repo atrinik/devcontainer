@@ -6,6 +6,7 @@ The caller must supply the collector's authenticated, created-state StoppedImage
 and its archive protocol. This foundation is deliberately not wired to a release
 target: final producer/consumer/index/platform/config pins are still required.
 """
+from abc import ABC, abstractmethod
 import hashlib
 import json
 from pathlib import PurePosixPath
@@ -38,6 +39,19 @@ GO_SYMLINK = 1 << 27
 
 class InventoryError(Exception):
     """Only fixed failure codes; never hostile archive or daemon contents."""
+
+
+class ProviderReader(ABC):
+    """Authenticated byte reader supplied by the source-inventory caller.
+
+    Implementations own admission to their stopped image or protected filesystem,
+    and fence actual file/ancestor identities around every read. This interface
+    is not authentication: callers must use the same source for the producer
+    inventory, metadata and provider bytes, never an advisory metadata adapter.
+    """
+    @abstractmethod
+    def read_provider(self, path):
+        """Read a fixed-namespace library; return sha256, size and executable."""
 
 
 class ProducerInventory(dict):
@@ -123,6 +137,10 @@ def header(raw):
         # slashes before its normalization can hide a noncanonical spelling.
         require(not (info.isdir() and raw[:100].split(b'\0', 1)[0].endswith(b'//')),
                 'inventory-path-invalid')
+        # Moby archives GET / with a raw '/' directory entry. TarInfo strips
+        # its slash to empty; preserve only this exact canonical root spelling.
+        if info.isdir() and info.name == '' and raw[:100].split(b'\0', 1)[0] == b'/':
+            info.name = '/'
         return info
     except (tarfile.TarError, ValueError, UnicodeError):
         raise InventoryError('inventory-header-invalid') from None
@@ -269,7 +287,8 @@ def source_manifest(records, reference, expected):
     return value
 
 
-def crosscheck_archives(records, runtime, contract):
+def crosscheck_archives(records, runtime, contract, *, reader=None):
+    """Validate source closure and bind provider bytes using the same image reader."""
     require(isinstance(records, dict) and isinstance(runtime, dict)
             and isinstance(contract, dict), 'inventory-source-documents')
     require(type(contract.get('schema_version')) is int and contract['schema_version'] == 2
@@ -358,7 +377,7 @@ def crosscheck_archives(records, runtime, contract):
         provider = providers[name]
         require(isinstance(provider, dict) and set(provider) == {
             'path', 'sha256', 'version', 'source_archives', 'build_receipt'}, 'inventory-custom-provider')
-        require(isinstance(provider['path'], str) and re.fullmatch(
+        require(isinstance(provider['path'], str) and len(provider['path']) <= MAX_PATH and re.fullmatch(
             r'/usr/local/lib/' + name + r'\.so(?:\.[0-9]+)+', provider['path'])
             and isinstance(provider['sha256'], str) and re.fullmatch(r'[0-9a-f]{64}', provider['sha256'])
             and provider['version'] == (version if name == 'libcurl' else cares['version'])
@@ -372,6 +391,15 @@ def crosscheck_archives(records, runtime, contract):
         require(isinstance(record, dict) and type(record.get('size')) is int
                 and 0 < record['size'] <= MAX_FILE and record.get('sha256') == sha,
                 'inventory-source-bytes-mismatch')
+    require(isinstance(reader, ProviderReader), 'inventory-provider-reader-required')
+    for provider in providers.values():
+        observed = reader.read_provider(provider['path'])
+        require(isinstance(observed, dict) and set(observed) == {'sha256', 'size', 'executable'}
+                and isinstance(observed['sha256'], str)
+                and re.fullmatch(r'[0-9a-f]{64}', observed['sha256'])
+                and type(observed['size']) is int and 0 < observed['size'] <= MAX_FILE
+                and type(observed['executable']) is bool, 'inventory-provider-identity')
+        require(observed['sha256'] == provider['sha256'], 'inventory-provider-bytes-mismatch')
 
 
 class BudgetResponse:
@@ -386,7 +414,7 @@ class BudgetResponse:
         return self.budget.read(self.response, size)
 
 
-class InstalledInventory:
+class InstalledInventory(ProviderReader):
     """Use only with an authenticated StoppedImage; does not grant release trust."""
     def __init__(self, image, protocol):
         self.image, self.protocol = image, protocol
@@ -397,14 +425,39 @@ class InstalledInventory:
         self.image.fence()
         self.budget.check()
 
-    def _parents(self, path):
+    def _directory_owner(self, path, expected):
+        """Read only the directory header, never its recursive archive contents.
+
+        Docker HEAD omits UID/GID. The first member of its authenticated GET
+        supplies ownership; close immediately to bound even the root archive.
+        """
+        conn, response = self._get(path)
+        try:
+            require(self.protocol.path_stat(response) == expected, 'inventory-path-drift')
+            framing(response)
+            info = next_member(response, self.budget, self.protocol)
+            names = {'/'} if path == '/' else {PurePosixPath(path).name}
+            require(info is not None and info.name in names and info.isdir()
+                    and info.size == 0 and info.mode == expected['mode'] & 0o777,
+                    'inventory-directory-entry')
+            require(info.uid == 0, 'inventory-directory-owner')
+        finally:
+            conn.close()
+
+    def _parents(self, path, *, protected=False):
         result = {}
         for parent in reversed(PurePosixPath(path).parents):
-            if str(parent) == '/':
+            if str(parent) == '/' and not protected:
                 continue
             self.budget.check()
             value = self.image.stat(str(parent))
-            self.protocol.stat_matches(value, str(parent), directory=True)
+            if str(parent) == '/':
+                require(value.get('name') == '/', 'inventory-directory-entry')
+                self.protocol.stat_matches({**value, 'name': ''}, '/', directory=True)
+            else:
+                self.protocol.stat_matches(value, str(parent), directory=True)
+            if protected:
+                self._directory_owner(str(parent), value)
             result[str(parent)] = value
         return result
 
@@ -434,28 +487,37 @@ class InstalledInventory:
         self._recheck(observations)
         return result
 
+    def read_provider(self, path):
+        return self._regular(path, provider=True)
+
     def common_licenses(self):
         return {name: self._regular(COMMON + '/' + name) for name in COMMON_LICENSE_NAMES}
 
-    def _regular(self, path, *, executable=False):
-        # Internal only: callers are the fixed licenses and verified doc resolver.
-        require(path in {COMMON + '/' + name for name in COMMON_LICENSE_NAMES}
+    def _regular(self, path, *, executable=False, provider=False):
+        # Provider paths have already passed source-manifest validation; enforce
+        # the fixed library namespace again at the actual archive request.
+        provider_path = isinstance(path, str) and len(path) <= MAX_PATH and re.fullmatch(
+            r'/usr/local/lib/lib(?:curl|cares)\.so(?:\.[0-9]+)+', path) is not None
+        require(not provider or provider_path, 'inventory-file-not-allowed')
+        require((provider and provider_path) or path in {COMMON + '/' + name for name in COMMON_LICENSE_NAMES}
                 or path in BUILD_TOOLS.values() or path.startswith(DOC + '/'),
                 'inventory-file-not-allowed')
         if path.startswith(DOC + '/'):
             under_doc(path)
         self._fence()
-        observations = self._parents(path)
+        protected = path in BUILD_TOOLS.values() or provider
         expected = self.image.stat(path)
         self.protocol.stat_matches(expected, path)
         self.protocol.regular_mode(expected['mode'], executable=executable)
+        require(0 < expected['size'] <= self.protocol.BINARY_LIMIT, 'file-size-limit')
+        observations = self._parents(path, protected=protected)
         observations[path] = expected
         self.budget.member(expected['size'])
         conn, response = self._get(path)
         try:
             require(self.protocol.path_stat(response) == expected, 'inventory-path-drift')
             identity, _ = self.protocol.single_file_archive(
-                BudgetResponse(response, self.budget), path, expected, retain=False, executable=executable)
+                BudgetResponse(response, self.budget), path, expected, retain=False, executable=executable, root_owned=protected)
             self.budget.check()
         finally:
             conn.close()

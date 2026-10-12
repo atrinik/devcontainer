@@ -611,7 +611,7 @@ def pax_times(raw):
         raw = raw[length:]
 
 
-def single_file_archive(response, path, expected, *, retain, executable=False, allow_empty=False):
+def single_file_archive(response, path, expected, *, retain, executable=False, allow_empty=False, root_owned=False):
     """Read one regular file; reject all links/extensions/path changes, never extract."""
     require(response.chunked or response.length is not None, 'unframed-archive')
     require(response.getheader('Content-Encoding') in (None, 'identity') and
@@ -636,6 +636,7 @@ def single_file_archive(response, path, expected, *, retain, executable=False, a
     regular_mode(info.mode, executable)
     require(info.mode == expected['mode'] and info.uid >= 0 and info.gid >= 0,
             'archive-metadata-mismatch')
+    require(not root_owned or info.uid == 0, 'archive-owner-mismatch')
     sha = hashlib.sha256()
     saved = bytearray() if retain else None
     remaining = info.size
