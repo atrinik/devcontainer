@@ -418,13 +418,8 @@ class FilesystemTests(unittest.TestCase):
         reader.debian_notices = Mock()
         reader.common_licenses = Mock()
         reader.build_tools = Mock()
-        providers = docs['runtime-sources.json']['custom_providers']
-        def provider_bytes(path, *, provider):
-            self.assertTrue(provider)
-            role = next(name for name, item in providers.items() if item['path'] == path)
-            raw = role.encode()
-            return {'sha256': hashlib.sha256(raw).hexdigest(), 'size': len(raw), 'executable': False}
-        reader._regular = Mock(side_effect=provider_bytes)
+        fixtures = load('collector_provider_archives', 'tools/tests/test_released_sdk_inventory.py')
+        image = fixtures.InventoryTests().installed_image()
         reader.producer.return_value = actual['inventories']['producer']
         reader.debian_notices.return_value = actual['inventories']['debian_notices']
         reader.common_licenses.return_value = actual['inventories']['common_licenses']
@@ -440,15 +435,42 @@ class FilesystemTests(unittest.TestCase):
             return expected_reader
         with patch.object(reader_class, '__new__', new_reader), \
                 patch.object(C.INVENTORY, 'crosscheck_archives', side_effect=reader_check) as crosscheck:
-            self.assertEqual(C.collect_final_inventory(Mock(), raw, records, llvm, POLICY), actual)
+            self.assertEqual(C.collect_final_inventory(image, raw, records, llvm, POLICY), actual)
             self.assertIs(crosscheck.call_args.kwargs['reader'], reader)
+            # Real _regular/read_provider and the collector's actual protocol
+            # stream root/ancestor headers and both binary payloads. No helper
+            # provider-read method is mocked, so a missing adapter field fails here.
+            routes = [call.args[1] for call in image.docker.request.call_args_list]
+            self.assertTrue(any('path=%2F' == route.split('?')[1] for route in routes))
+            for role in ('libcurl', 'libcares'):
+                self.assertTrue(any(role + '.so.1.0.0' in route for route in routes))
+            for connection in image.connections:
+                connection.close.assert_called_once()
+            self.assertGreaterEqual(image.fence.call_count, 4)
+            for path in ('/', '/usr', '/usr/local', '/usr/local/lib',
+                         '/usr/local/lib/libcurl.so.1.0.0', '/usr/local/lib/libcares.so.1.0.0'):
+                wrong_owner = fixtures.InventoryTests().installed_image(metadata={path: {'uid': 1000}})
+                with self.subTest(owner=path), self.assertRaisesRegex(
+                        (C.INVENTORY.InventoryError, C.Stop),
+                        'inventory-directory-owner|archive-owner-mismatch'):
+                    C.collect_final_inventory(wrong_owner, raw, records, llvm, POLICY)
+                for connection in wrong_owner.connections:
+                    connection.close.assert_called_once()
+            payloads = {'/usr/local/lib/' + role + '.so.1.0.0': role.encode()
+                        for role in ('libcurl', 'libcares')}
+            for role in ('libcurl', 'libcares'):
+                bad_bytes = {**payloads, '/usr/local/lib/' + role + '.so.1.0.0': b'changed'}
+                wrong_bytes = fixtures.InventoryTests().installed_image(payloads=bad_bytes)
+                with self.subTest(bytes=role), self.assertRaisesRegex(
+                        C.INVENTORY.InventoryError, 'inventory-provider-bytes-mismatch'):
+                    C.collect_final_inventory(wrong_bytes, raw, records, llvm, POLICY)
             reader.debian_notices.reset_mock()
             reader.common_licenses.reset_mock()
             reader.build_tools.reset_mock()
             with patch.object(C.INVENTORY, 'crosscheck_archives', side_effect=C.INVENTORY.InventoryError(
                     'inventory-provider-bytes-mismatch')):
                 with self.assertRaisesRegex(C.INVENTORY.InventoryError, 'inventory-provider-bytes-mismatch'):
-                    C.collect_final_inventory(Mock(), raw, records, llvm, POLICY)
+                    C.collect_final_inventory(image, raw, records, llvm, POLICY)
             reader.debian_notices.assert_not_called()
             reader.common_licenses.assert_not_called()
             reader.build_tools.assert_not_called()
@@ -460,12 +482,12 @@ class FilesystemTests(unittest.TestCase):
                     changed[name]['source_commit'] = '1' * 40
                 bad = {**raw, I.ROOT + '/' + name: encoded(changed[name])}
                 with self.subTest(name=name), self.assertRaisesRegex(C.Stop, 'final-consumer-mismatch'):
-                    C.collect_final_inventory(Mock(), bad, records, llvm, POLICY)
+                    C.collect_final_inventory(image, bad, records, llvm, POLICY)
             changed = copy.deepcopy(actual['inventories']['producer'])
             changed['sources/classic-shaders/client/shaders/source']['sha256'] = '0' * 64
             reader.producer.return_value = changed
             with self.assertRaisesRegex(C.Stop, 'final-shader-input-bytes'):
-                C.collect_final_inventory(Mock(), raw, records, llvm, POLICY)
+                C.collect_final_inventory(image, raw, records, llvm, POLICY)
 
     def test_duplicate_metadata_json_rejected(self):
         self.fixture()

@@ -900,7 +900,7 @@ def target_policy(target):
 
 
 def collect_final_inventory(container, data, file_records, llvm_tools, policy):
-    protocol = SimpleNamespace(stat_matches=stat_matches, regular_mode=regular_mode,
+    protocol = SimpleNamespace(BINARY_LIMIT=BINARY_LIMIT, stat_matches=stat_matches, regular_mode=regular_mode,
         path_stat=path_stat, single_file_archive=single_file_archive, pax_times=pax_times)
     reader = INVENTORY.InstalledInventory(container, protocol)
     raw = {path.removeprefix(INVENTORY.ROOT + '/'): value for path, value in data.items()
