@@ -469,6 +469,33 @@ class OfflineTests(unittest.TestCase):
                 M.single_file_archive(Response(archive(path, raw, **option)), path,
                                       file_stat(path, raw), retain=True)
 
+    def test_archive_empty_producer_file_requires_explicit_opt_in(self):
+        path, raw = '/opt/atrinik-portable/sources/empty.txt', b''
+        for retain in (True, False):
+            with self.subTest(retain=retain):
+                with self.assertRaisesRegex(M.Stop, 'file-size-limit'):
+                    M.single_file_archive(Response(archive(path, raw)), path,
+                                          file_stat(path, raw), retain=retain)
+                identity, actual = M.single_file_archive(Response(archive(path, raw)), path,
+                    file_stat(path, raw), retain=retain, allow_empty=True)
+                self.assertEqual(identity['size'], 0)
+                self.assertEqual(identity['sha256'], M.hashlib.sha256(raw).hexdigest())
+                self.assertEqual(actual, raw if retain else None)
+
+    def test_empty_opt_in_preserves_archive_permissions_limits_and_link_rejection(self):
+        path, raw = '/opt/atrinik-portable/sources/empty.txt', b''
+        for option in ({'mode': 0o666}, {'kind': tarfile.SYMTYPE},
+                       {'kind': tarfile.LNKTYPE}, {'extra': True}):
+            with self.subTest(option=option), self.assertRaises(M.Stop):
+                M.single_file_archive(Response(archive(path, raw, **option)), path,
+                    file_stat(path, raw, option.get('mode', 0o644)),
+                    retain=False, allow_empty=True)
+        for retain, limit in ((True, M.METADATA_LIMIT), (False, M.BINARY_LIMIT)):
+            for size in (-1, limit + 1):
+                with self.subTest(retain=retain, size=size), self.assertRaises(M.Stop):
+                    M.single_file_archive(Response(archive(path, raw)), path,
+                        dict(file_stat(path, raw), size=size), retain=retain, allow_empty=True)
+
     def test_archive_pax_timestamps_only(self):
         path, raw = M.LLVM_MANIFEST, b'normal metadata'
         result, actual = M.single_file_archive(Response(archive(path, raw, pax={'mtime': '123.456'})),
@@ -754,6 +781,21 @@ class OfflineTests(unittest.TestCase):
         self.assertEqual(len(copied), len(data) + len(binary))
         self.assertFalse(result['image_code_executed'])
         self.assertFalse(result['final_portable_cohort'])
+
+    def test_collection_rejects_empty_metadata_notices_and_canonical_tools(self):
+        for target in M.TARGETS:
+            for path in (M.LLVM_MANIFEST, M.LLVM_NOTICES[0],
+                         M.PREFIX + '/bin/clang-23', M.PREFIX + '/lib/libunwind.a'):
+                data, binary = self.portable_fixture()
+                if target != 'portable-preliminary':
+                    data = {name: data.get(name, b'public metadata fixture')
+                            for name in M.COMMON_FILES + M.TARGET_FILES[target]}
+                    data['/usr/local/share/atrinik/llvm-toolchain.json'] = data[M.LLVM_MANIFEST]
+                (data if path in data else binary)[path] = b''
+                with self.subTest(target=target, path=path):
+                    result, _ = self.collect_portable_fixture(data, binary, target)
+                    self.assertEqual(result['status'], 'stopped')
+                    self.assertEqual(result['reason'], 'file-size-limit')
 
     def test_portable_contract_and_compiler_receipt_hashes_are_required(self):
         base = '/opt/atrinik-portable/'
