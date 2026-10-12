@@ -105,6 +105,9 @@
   for permissions, pinned actions, check names, and ruleset compatibility.
   Never expose private-package permissions or images to `pull_request` code;
   authenticated measurements belong to the same-repository push/dispatch path.
+- `Dependency review` is advisory. Before merge, the Codex implementer reads
+  its PR comment or job summary and fixes actionable introduced risk, or records
+  explicit maintainer acceptance of existing risk.
 - Commits and pull-request titles use Conventional Commits. Preserve unrelated
   work and finish with `git diff --check`.
 - Update this `AGENTS.md` in the same change when major rework alters image
