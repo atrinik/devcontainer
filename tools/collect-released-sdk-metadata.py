@@ -620,7 +620,7 @@ def single_file_archive(response, path, expected, *, retain, executable=False):
     stat_matches(expected, path)
     regular_mode(expected['mode'], executable)
     limit = METADATA_LIMIT if retain else BINARY_LIMIT
-    require(0 < expected['size'] <= limit, 'file-size-limit')
+    require(0 <= expected['size'] <= limit, 'file-size-limit')
     header = exact_read(response, 512)
     info = tarfile.TarInfo.frombuf(header, 'utf-8', 'strict')
     if info.type == tarfile.XHDTYPE:
