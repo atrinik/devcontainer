@@ -17,7 +17,8 @@ import urllib.parse
 ROOT = '/opt/atrinik-portable'
 DOC = '/usr/share/doc'
 COMMON = '/usr/share/common-licenses'
-BUILD_TOOLS = {'cmake': '/usr/bin/cmake', 'ninja': '/usr/bin/ninja'}
+BUILD_TOOLS = {'cmake': '/usr/bin/cmake', 'ninja': '/usr/bin/ninja',
+               'pkg_config': '/usr/bin/pkgconf'}
 COMMON_LICENSE_NAMES = ('Apache-2.0', 'Artistic', 'BSD', 'CC0-1.0', 'GFDL-1.2',
                         'GFDL-1.3', 'GPL-1', 'GPL-2', 'GPL-3', 'LGPL-2',
                         'LGPL-2.1', 'LGPL-3', 'MPL-1.1', 'MPL-2.0')

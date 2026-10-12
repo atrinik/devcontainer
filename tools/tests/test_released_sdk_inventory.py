@@ -308,7 +308,8 @@ class InventoryTests(unittest.TestCase):
     def build_receipt(self):
         entries = {role: {'path': path, 'resolved_path': path, 'sha256': hashlib.sha256(b'tool').hexdigest(),
                          'size': 4, 'executable': True,
-                         'version': ('cmake version 3.25.1' if role == 'cmake' else '1.11.1') + '\nsecond line\n'}
+                         'version': {'cmake': 'cmake version 3.25.1', 'ninja': '1.11.1',
+                                     'pkg_config': '1.8.1'}[role] + '\nsecond line\n'}
                    for role, path in M.BUILD_TOOLS.items()}
         return {'build_tools': {'schema_version': 1, 'tools': entries},
                 'tools': {role: entry['version'].splitlines()[0] for role, entry in entries.items()}}
@@ -319,7 +320,8 @@ class InventoryTests(unittest.TestCase):
                               '1.11.1\n'),
                              ('cmake version 3.25.1\nfull stdout\n', '1.11.1')):
             installed = self.build_receipt()
-            for role, version in (('cmake', cmake), ('ninja', ninja)):
+            for role, version in (('cmake', cmake), ('ninja', ninja),
+                                  ('pkg_config', ninja.replace('1.11', '1.8'))):
                 installed['build_tools']['tools'][role]['version'] = version
                 installed['tools'][role] = version.splitlines()[0]
             reader = M.InstalledInventory(self.fake_image(), P)
@@ -344,7 +346,8 @@ class InventoryTests(unittest.TestCase):
 
     def test_build_tools_reject_role_grammar_controls_and_del(self):
         cases = {'cmake': ('3.25.1', 'cmake version 3.25', 'cmake version 3.25.1-rc1'),
-                 'ninja': ('ninja 1.11.1', 'cmake version 3.25.1', '1.11.1-rc1')}
+                 'ninja': ('ninja 1.11.1', 'cmake version 3.25.1', '1.11.1-rc1'),
+                 'pkg_config': ('pkgconf 1.8.1', 'cmake version 3.25.1', '1.8.1-rc1')}
         for role in M.BUILD_TOOLS:
             valid = 'cmake version 3.25.1' if role == 'cmake' else '1.11.1'
             cases[role] += tuple(valid + '\nextra' + chr(code)
@@ -370,6 +373,31 @@ class InventoryTests(unittest.TestCase):
                 M.InstalledInventory(image, P).build_tools(self.build_receipt())
             image.docker.request.assert_not_called()
 
+    def test_pkg_config_is_mandatory_and_alias_cannot_replace_fixed_pkgconf(self):
+        self.assertEqual(M.BUILD_TOOLS, {'cmake': '/usr/bin/cmake', 'ninja': '/usr/bin/ninja',
+                                       'pkg_config': '/usr/bin/pkgconf'})
+        installed = self.build_receipt()
+        reader = M.InstalledInventory(self.fake_image(), P)
+        for role in M.BUILD_TOOLS:
+            bad = copy.deepcopy(installed)
+            del bad['build_tools']['tools'][role]
+            with self.subTest(missing=role), patch.object(reader, '_regular') as read:
+                with self.assertRaisesRegex(M.InventoryError, 'build-tool-schema'):
+                    reader.build_tools(bad)
+                read.assert_not_called()
+        identity = {'sha256': hashlib.sha256(b'tool').hexdigest(), 'size': 4, 'executable': True}
+        for key in ('path', 'resolved_path'):
+            bad = copy.deepcopy(installed)
+            bad['build_tools']['tools']['pkg_config'][key] = '/usr/bin/pkg-config'
+            with self.subTest(key=key), patch.object(reader, '_regular', return_value=identity) as read:
+                with self.assertRaisesRegex(M.InventoryError, 'build-tool-path'):
+                    reader.build_tools(bad)
+                self.assertNotIn('/usr/bin/pkgconf', [call.args[0] for call in read.call_args_list])
+        bad = copy.deepcopy(installed)
+        del bad['tools']['pkg_config']
+        with patch.object(reader, '_regular', return_value=identity), self.assertRaisesRegex(M.InventoryError, 'build-tool-identity'):
+            reader.build_tools(bad)
+
     def test_build_tools_exact_schema_paths_and_streamed_bytes(self):
         installed = self.build_receipt()
         reader = M.InstalledInventory(self.fake_image(), P)
@@ -377,12 +405,13 @@ class InventoryTests(unittest.TestCase):
         with patch.object(reader, '_regular', return_value=identity) as read:
             self.assertEqual(reader.build_tools(installed), installed['build_tools']['tools'])
             self.assertEqual([call.args[0] for call in read.call_args_list], list(M.BUILD_TOOLS.values()))
-        for key, value in (('path', '/secret'), ('resolved_path', '/secret'), ('sha256', 'a' * 64),
-                           ('size', True), ('executable', 1), ('version', 'wrong\n')):
-            bad = copy.deepcopy(installed)
-            bad['build_tools']['tools']['cmake'][key] = value
-            with self.subTest(key=key), patch.object(reader, '_regular', return_value=identity), self.assertRaises(M.InventoryError):
-                reader.build_tools(bad)
+        for role in M.BUILD_TOOLS:
+            for key, value in (('path', '/secret'), ('resolved_path', '/secret'), ('sha256', 'a' * 64),
+                               ('size', True), ('executable', 1), ('version', 'wrong\n')):
+                bad = copy.deepcopy(installed)
+                bad['build_tools']['tools'][role][key] = value
+                with self.subTest(role=role, key=key), patch.object(reader, '_regular', return_value=identity), self.assertRaises(M.InventoryError):
+                    reader.build_tools(bad)
         bad = copy.deepcopy(installed)
         bad['build_tools']['tools']['extra'] = {}
         with self.assertRaisesRegex(M.InventoryError, 'build-tool-schema'):

@@ -44,8 +44,10 @@ compare this producer map with the wrapper's `verified_tree_inventory` on that
 exact image (or an authenticated complete OCI-overlay reconstruction). Source
 archive hash checks alone do not establish that no unrelated file was omitted.
 
-The build-tool reader accepts exactly `cmake` and `ninja` at `/usr/bin/cmake` and
-`/usr/bin/ninja`, both canonical regular executables. It validates
+The build-tool reader requires exactly `cmake`, `ninja` and `pkg_config` at
+`/usr/bin/cmake`, `/usr/bin/ninja` and `/usr/bin/pkgconf`, all canonical regular
+executables. `pkg_config` uses the numeric version grammar shared with Ninja;
+the `pkg-config` alias cannot substitute for the fixed `pkgconf` path. It validates
 `installed.json.build_tools = {schema_version: 1, tools: {…}}`, the exact role and
 field sets, full producer version strings and legacy first-line compatibility,
 then compares streamed bytes, size and executable status. It never executes a
