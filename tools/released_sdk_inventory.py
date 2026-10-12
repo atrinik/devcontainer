@@ -29,12 +29,26 @@ MAX_BUILD_TOOL = 512 * 1024 * 1024
 MAX_TOTAL = 8 * 1024 ** 3
 MAX_SECONDS = 900
 MAX_HOPS = 16
+SOURCE_MANIFESTS = ('audio-toolchain.json', 'llvm-toolchain.json')
+MAX_MANIFEST = 1024 * 1024
+MAX_MANIFEST_SOURCES = 128
 GO_DIRECTORY = 1 << 31
 GO_SYMLINK = 1 << 27
 
 
 class InventoryError(Exception):
     """Only fixed failure codes; never hostile archive or daemon contents."""
+
+
+class ProducerInventory(dict):
+    """File identities plus bounded source manifests from the same archive.
+
+    Payloads are private validation inputs, excluded from the serialized inventory
+    and its digest. Copying only the identities cannot satisfy manifest closure.
+    """
+    def __init__(self):
+        super().__init__()
+        self.source_manifests = {}
 
 
 def require(ok, code):
@@ -143,11 +157,11 @@ def next_member(response, budget, protocol, *, symlink=False):
 
 
 def tree_archive(response, protocol, expected, budget=None):
-    """Hash a complete Docker archive of ROOT, retaining no file payloads."""
+    """Hash ROOT, retaining only the bounded, fixed source-manifest payloads."""
     budget = budget or Budget()
     framing(response)
     protocol.stat_matches(expected, ROOT, directory=True)
-    files, entries, directories = {}, set(), set()
+    files, entries, directories = ProducerInventory(), set(), set()
     root_name = PurePosixPath(ROOT).name
     while True:
         info = next_member(response, budget, protocol)
@@ -174,15 +188,23 @@ def tree_archive(response, protocol, expected, budget=None):
         require(info.type in (tarfile.REGTYPE, tarfile.AREGTYPE) and name != root_name,
                 'inventory-member-type')
         protocol.regular_mode(info.mode)
+        path = name[len(root_name) + 1:]
+        payload = bytearray() if path in SOURCE_MANIFESTS else None
+        if payload is not None:
+            require(0 < info.size <= MAX_MANIFEST, 'inventory-manifest-size')
         sha = hashlib.sha256()
         remaining = info.size
         while remaining:
             raw = budget.exact(response, min(65536, remaining))
             sha.update(raw)
+            if payload is not None:
+                payload.extend(raw)
             remaining -= len(raw)
         require(not any(budget.exact(response, (-info.size) % 512)), 'inventory-padding')
-        files[name[len(root_name) + 1:]] = {'sha256': sha.hexdigest(), 'size': info.size,
-                                         'executable': bool(info.mode & 0o111)}
+        files[path] = {'sha256': sha.hexdigest(), 'size': info.size,
+                       'executable': bool(info.mode & 0o111)}
+        if payload is not None:
+            files.source_manifests[path] = bytes(payload)
     require(root_name in directories and bool(files), 'inventory-empty')
     return files
 
@@ -213,6 +235,38 @@ def notice_requests(runtime, debian):
     return sorted(requests)
 
 
+def source_manifest(records, reference, expected):
+    """Parse only fixed manifests authenticated by the producer tree read."""
+    require(reference == expected, 'inventory-manifest-path')
+    payloads = getattr(records, 'source_manifests', {})
+    raw = payloads.get(expected)
+    require(isinstance(raw, bytes) and 0 < len(raw) <= MAX_MANIFEST,
+            'inventory-manifest-missing-or-size')
+    identity = records.get(expected)
+    require(isinstance(identity, dict) and identity.get('size') == len(raw)
+            and identity.get('sha256') == hashlib.sha256(raw).hexdigest(),
+            'inventory-manifest-bytes-mismatch')
+
+    def unique(pairs):
+        value = {}
+        for key, item in pairs:
+            require(key not in value, 'inventory-manifest-duplicate')
+            value[key] = item
+        return value
+
+    def invalid_constant(_):
+        raise InventoryError('inventory-manifest-json')
+
+    try:
+        value = json.loads(raw.decode('utf-8'), object_pairs_hook=unique,
+                           parse_constant=invalid_constant)
+    except (ValueError, UnicodeError, RecursionError):
+        raise InventoryError('inventory-manifest-json') from None
+    require(isinstance(value, dict) and type(value.get('schema_version')) is int
+            and value['schema_version'] == 1, 'inventory-manifest-schema')
+    return value
+
+
 def crosscheck_archives(records, runtime, contract):
     archives, sources = runtime.get('archives'), contract.get('sources')
     require(isinstance(archives, dict) and 0 < len(archives) <= MAX_MEMBERS
@@ -232,6 +286,34 @@ def crosscheck_archives(records, runtime, contract):
         sha = source.get('sha256')
         require(isinstance(sha, str), 'inventory-source-digest')
         add('sources/' + sha + '.tar.gz', sha)
+    if 'audio_manifest' in contract:
+        audio = source_manifest(records, contract['audio_manifest'], 'audio-toolchain.json')
+        dependencies = audio.get('dependencies')
+        require(isinstance(dependencies, list) and 0 < len(dependencies) < MAX_MANIFEST_SOURCES,
+                'inventory-audio-sources')
+        names = set()
+        for entry in [audio.get('sdl_mixer'), *dependencies]:
+            require(isinstance(entry, dict), 'inventory-audio-source')
+            name, source = entry.get('name'), entry.get('source')
+            require(isinstance(name, str) and re.fullmatch(r'[A-Za-z0-9_.+-]{1,128}', name)
+                    and name not in names and isinstance(source, dict), 'inventory-audio-source')
+            names.add(name)
+            sha = source.get('sha256')
+            require(isinstance(sha, str), 'inventory-source-digest')
+            add('sources/' + sha + '.tar.gz', sha)
+    compiler = contract.get('compiler', {})
+    require(isinstance(compiler, dict), 'inventory-compiler-schema')
+    if 'toolchain_manifest' in compiler:
+        llvm = source_manifest(records, compiler['toolchain_manifest'], 'llvm-toolchain.json')
+        version, source, metadata = llvm.get('version'), llvm.get('source'), llvm.get('metadata')
+        require(isinstance(version, str) and re.fullmatch(r'[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}', version)
+                and isinstance(source, dict) and isinstance(metadata, dict), 'inventory-llvm-source')
+        # The installer writes this exact filename, and portable/Dockerfile
+        # copies its source directory into sources/llvm without flattening it.
+        archive = 'llvm-project-' + version + '.src.tar.xz'
+        require(metadata.get('source_archive') == 'share/atrinik/sources/' + archive,
+                'inventory-llvm-archive-path')
+        add('sources/llvm/' + archive, source.get('sha256'))
     providers = runtime.get('custom_providers', {})
     require(isinstance(providers, dict) and len(providers) <= MAX_MEMBERS, 'inventory-custom-providers')
     for provider in providers.values():
