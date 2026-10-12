@@ -95,7 +95,8 @@ class ExecutionTests(unittest.TestCase):
             path.write_text("#!/usr/bin/python3\nimport sys\nfrom pathlib import Path\n"
                             f"with Path({str(self.log)!r}).open('a') as log: log.write({role!r} + ' ' + repr(sys.argv[1:]) + '\\n')\n"
                             f"if sys.argv[1:] == ['--version']: sys.stdout.write({version!r})\n"
-                            "elif sys.argv[1:2] == ['--modversion']: sys.stdout.write('1.2.3\\n')\n")
+                            "elif sys.argv[1:2] == ['--modversion']: sys.stdout.write('1.2.3\\n')\n"
+                            "elif sys.argv[1:2] == ['--variable=prefix']: sys.stdout.write('/usr/local\\n')\n")
             path.chmod(0o755)
             self.paths[role] = str(path)
         # A test-owned tree intentionally has a consumer UID and writable /tmp
@@ -181,6 +182,42 @@ class ExecutionTests(unittest.TestCase):
             curl_evidence.record(manifest)
         loader.assert_called_once_with(self.root / "installed.json")
         self.assertFalse(self.log.exists())
+
+    def test_cold_curl_producer_passes_generated_receipt_and_admits_package_queries(self):
+        import build_tools
+        import curl_evidence
+
+        builder_spec = importlib.util.spec_from_file_location("cold_build_curl", Path(__file__).with_name("build-curl.py"))
+        builder = importlib.util.module_from_spec(builder_spec)
+        builder_spec.loader.exec_module(builder)
+        manifest = self.root / "curl-toolchain.json"
+        manifest.write_text(json.dumps({"cares_manifest": "classic-curl-toolchain.json",
+                                        "prefix": "/usr/local", "version": "7.88.1"}))
+        (self.root / "classic-curl-toolchain.json").write_text(json.dumps({"cares": {"version": "1.34.6"}}))
+        retained = self.root / "sources/curl"
+        retained.mkdir(parents=True)
+        (retained / "curl_config.h").write_text("#define USE_ARES 1\n")
+        self.assertFalse((self.root / "installed.json").exists())
+        with mock.patch.object(build_tools, "record", side_effect=tools.record), \
+                mock.patch.object(curl_evidence, "load_installed", side_effect=AssertionError("cold producer must pass a generated receipt")) as loader, \
+                mock.patch.object(curl_evidence, "capture", side_effect=tools.capture), \
+                mock.patch.object(curl_evidence, "record", wraps=curl_evidence.record) as record, \
+                self.assertRaisesRegex(ValueError, "wrong active portable curl pkg-config"):
+            # The real query emits fixture module version 1.2.3, intentionally
+            # stopping at existing module validation before an application probe.
+            builder.record_curl_production(self.root)
+        loader.assert_not_called()
+        generated = record.call_args.kwargs["installed"]
+        self.assertEqual(set(generated["build_tools"]["tools"]), {"cmake", "ninja", "pkg_config"})
+        for role, path in self.paths.items():
+            self.assertEqual(generated["build_tools"]["tools"][role]["sha256"], hashlib.sha256(Path(path).read_bytes()).hexdigest())
+        logs = self.log.read_text().splitlines()
+        self.assertEqual(logs[:3], ["cmake ['--version']", "ninja ['--version']", "pkg_config ['--version']"])
+        self.assertIn("pkg_config ['--variable=prefix', 'libcurl']", logs)
+        self.assertIn("pkg_config ['--modversion', 'libcurl']", logs)
+        # Exercise the extracted cold evidence step, and retain the real main
+        # callsite so future refactors cannot bypass this generated argument.
+        self.assertIn('    record_curl_production(root)\n', Path(__file__).with_name("build-curl.py").read_text())
 
     def test_module_query_uses_admitted_pkgconf_with_complete_stdout(self):
         self.assertEqual(tools.capture(self.installed, "pkg_config", ["--modversion", "fixture"]), "1.2.3\n")
