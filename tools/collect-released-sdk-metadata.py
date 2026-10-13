@@ -480,19 +480,44 @@ def selected_manifest_matches(value, verified):
 
 
 def local_config_matches(local, expected):
-    if not isinstance(local, dict) or not isinstance(expected, dict):
+    if type(local) is not dict or type(expected) is not dict:
         return False
+
+    def same_json(left, right):
+        # Python equates False, 0 and 0.0, including inside lists and mappings.
+        # Compare complete JSON values without coercing keys or non-JSON types.
+        if type(left) is not type(right):
+            return False
+        if type(left) is dict:
+            return (all(type(key) is str for key in left) and
+                    all(type(key) is str for key in right) and left.keys() == right.keys() and
+                    all(same_json(value, right[key]) for key, value in left.items()))
+        if type(left) is list:
+            return len(left) == len(right) and all(same_json(a, b) for a, b in zip(left, right))
+        if type(left) in (type(None), bool, int, str):
+            return left == right
+        if type(left) is float:
+            return json.dumps(left, allow_nan=False) == json.dumps(right, allow_nan=False)
+        return False
+
     local = dict(local)
-    # API <=1.51 emits these empty defaults; API 1.52 omits unset fields:
+    # API 1.49 also emits nine zero-valued container fields; 1.50 removes them:
+    # https://docs.docker.com/reference/api/engine/version-history/#v150-api-changes
+    # APIs through 1.51 emit the other empty defaults; 1.52 omits unset fields:
     # https://docs.docker.com/reference/api/engine/version-history/#v152-api-changes
     # Normalize only API-side absence defaults; preserve every raw-declared key.
     defaults = {'Cmd': None, 'Entrypoint': None, 'Env': None, 'Labels': None,
-                'OnBuild': None, 'Volumes': None, 'User': '', 'WorkingDir': ''}
-    for key, default in defaults.items():
-        if (key not in expected and key in local and type(local[key]) is type(default)
-                and local[key] == default):
-            del local[key]
-    return local == expected
+                'OnBuild': None, 'Volumes': None, 'User': '', 'WorkingDir': '',
+                'Hostname': '', 'Domainname': '', 'Image': '',
+                'AttachStdin': False, 'AttachStdout': False, 'AttachStderr': False,
+                'Tty': False, 'OpenStdin': False, 'StdinOnce': False}
+    try:
+        for key, default in defaults.items():
+            if key not in expected and key in local and same_json(local[key], default):
+                del local[key]
+        return same_json(local, expected)
+    except (ValueError, RecursionError):
+        return False
 
 
 def verify_local(local, reference, sha, verified):
