@@ -420,7 +420,8 @@ class Docker:
         try:
             conn.request(method, self.api + path, body=body, headers=headers or {})
             response = conn.getresponse()
-            require(response.status == expected, 'docker-request-denied')
+            statuses = expected if isinstance(expected, tuple) else (expected,)
+            require(response.status in statuses, 'docker-request-denied')
             return conn, response
         except BaseException:
             conn.close()
@@ -1094,7 +1095,8 @@ class ScannerImage(StoppedImage):
             self.identifier = identifier
         value = self.fence(('created', 'running', 'exited'))
         if value['State']['Status'] == 'running':
-            conn, _ = self.docker.request('POST', '/containers/' + self.identifier + '/stop?t=10', expected=204)
+            conn, _ = self.docker.request('POST', '/containers/' + self.identifier + '/stop?t=10',
+                                          expected=(204, 304))
             conn.close()
             self.fence(('exited',))
         conn, _ = self.docker.request('DELETE', '/containers/' + self.identifier, expected=204)

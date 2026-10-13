@@ -732,5 +732,79 @@ class QualificationTests(unittest.TestCase):
         self.assertFalse(scanner.attempted)
 
 
+    def scanner_cleanup_http(self, status, drift=None):
+        scanner, value = self.scanner()
+        value['State'] = {'Status': 'running', 'Running': True, 'Pid': 123}
+        scanner.docker = C.Docker('/fixture-only', (1, 2, 3))
+        calls = []
+        connections = []
+        def connection(*args, **kwargs):
+            conn = Mock()
+            connections.append(conn)
+            current = {}
+            def request(method, path, **kwargs):
+                current.update(method=method, path=path)
+                calls.append((method, path))
+            def getresponse():
+                response_status = 200
+                raw = b''
+                if current['method'] == 'GET':
+                    raw = json.dumps(value).encode()
+                elif current['method'] == 'POST':
+                    value['State'] = {'Status': 'exited', 'Running': False, 'Pid': 0}
+                    if drift:
+                        drift(value)
+                    response_status = status
+                elif current['method'] == 'DELETE':
+                    response_status = 204
+                response = Response(raw)
+                response.status = response_status
+                return response
+            conn.request.side_effect = request
+            conn.getresponse.side_effect = getresponse
+            return conn
+        return scanner, calls, connections, connection
+
+    def test_scanner_cleanup_actual_http_already_stopped_deletes_after_refence(self):
+        for status in (204, 304):
+            scanner, calls, connections, connection = self.scanner_cleanup_http(status)
+            with self.subTest(status=status), patch.object(C, 'LocalConnection', side_effect=connection):
+                scanner.cleanup()
+            path = '/containers/' + scanner.identifier
+            self.assertEqual(calls, [('GET', path + '/json'), ('POST', path + '/stop?t=10'),
+                                     ('GET', path + '/json'), ('DELETE', path)])
+            self.assertFalse(scanner.attempted)
+            for conn in connections:
+                conn.close.assert_called_once()
+
+    def test_scanner_cleanup_actual_http_rejects_other_statuses_without_delete(self):
+        for status in (200, 201, 202, 400, 404, 409, 500):
+            scanner, calls, connections, connection = self.scanner_cleanup_http(status)
+            with self.subTest(status=status), patch.object(C, 'LocalConnection', side_effect=connection), \
+                    self.assertRaisesRegex(C.Stop, 'docker-request-denied'):
+                scanner.cleanup()
+            self.assertTrue(scanner.attempted)
+            self.assertEqual([method for method, _ in calls], ['GET', 'POST'])
+            for conn in connections:
+                conn.close.assert_called_once()
+
+    def test_scanner_cleanup_actual_http_already_stopped_rechecks_identity_before_delete(self):
+        edits = {
+            'owner': lambda value: value['Config']['Labels'].update({C.OWNER_LABEL: 'foreign'}),
+            'image': lambda value: value.update(Image='sha256:' + '0' * 64),
+            'isolation': lambda value: value['HostConfig'].update(NetworkMode='host'),
+            'state': lambda value: value['State'].update(Status='running', Running=True, Pid=123),
+        }
+        for name, edit in edits.items():
+            scanner, calls, connections, connection = self.scanner_cleanup_http(304, edit)
+            with self.subTest(drift=name), patch.object(C, 'LocalConnection', side_effect=connection), \
+                    self.assertRaises(C.Stop):
+                scanner.cleanup()
+            self.assertTrue(scanner.attempted)
+            self.assertEqual([method for method, _ in calls], ['GET', 'POST', 'GET'])
+            for conn in connections:
+                conn.close.assert_called_once()
+
+
 if __name__ == '__main__':
     unittest.main()
