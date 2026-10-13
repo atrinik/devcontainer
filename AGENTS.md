@@ -120,6 +120,18 @@
   candidates before promoting rolling/version aliases, and recover partial
   alias promotion by rerunning the failed job from the same workflow run. Do
   not create manual release tags as a substitute for semantic-release.
+- Released SDK identity collection admits only code-pinned immutable targets on
+  trusted hosted push/dispatch. Preserve the original three 1.18.0 identities.
+  Final portable inventory qualification uses two distinct receipts: an
+  unstarted acquisition container and a separate non-root, read-only,
+  network-disabled filesystem scanner. Complete descriptor-relative enumeration
+  must match all producer, Debian notice and common-license records before
+  wrapper pins are adopted; Docker directory tar framing alone cannot prove
+  completeness. No caller-supplied image, revision or filesystem-path overrides.
+  The fixed `portable-final` target pins the reviewed 1.22.0 producer, consumer
+  and index/platform/config tuple. Its hosted acquisition and filesystem
+  qualification must succeed before wrapper metadata/inventory pins are adopted;
+  release publication alone does not establish those inventories.
 - Validate Dockerfiles with `docker build --check`. Build and smoke-test each
   affected image, including `classic-validation` before `classic-final` and the
   Windows `classic-check` target plus native bundle; note that a cold

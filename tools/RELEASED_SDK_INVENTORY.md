@@ -1,10 +1,13 @@
-# Released portable SDK inventory foundation
+# Released portable SDK inventory qualification
 
 `released_sdk_inventory.py` is an internal acquisition helper for the existing
 collector's authenticated, task-owned `StoppedImage` and archive protocol. It
 has no CLI, credentials, registry operations, release pins or image execution.
-It is not yet imported or invoked by `collect-released-sdk-metadata.py`; the
-three fixed 1.18.0 targets and their producer mapping remain authoritative.
+The collector imports it through an explicit same-checkout path under isolated
+Python. Only its internal final-target path invokes inventory and execution;
+`portable-final` pins the reviewed 1.22.0 release. The three fixed 1.18.0
+targets and their producer mapping remain unchanged; final targets cannot use
+the historical producer-policy fallback.
 
 The helper streams `/opt/atrinik-portable` without extraction. It retains only
 the fixed `audio-toolchain.json`, `llvm-toolchain.json`, `curl-toolchain.json`
@@ -81,19 +84,83 @@ field sets, full producer version strings and legacy first-line compatibility,
 then compares streamed bytes, size and executable status. It never executes a
 tool to obtain a version. LLVM compiler evidence retains its separate roles.
 
-Final wiring requires actual merged Classic consumer/shader commit M, final
-producer P and released image D. A subsequent reviewed change must add fixed
-index, linux/amd64 manifest and config digests plus per-target producer revision;
-validate M/P and shader metadata against those fixed constants; bind each saved
-metadata file to the producer inventory; emit all three complete maps and their
-canonical digests; and invoke the helper inside the collector's existing
-cleanup-protected acquisition. Do not add caller-supplied pins, paths or trust
-extensions. Original broad/classic/preliminary identities must remain unchanged.
-Wrong final M/D fixtures and actual hosted unstarted-image collection remain
-required at that integration point. Cleanup failure must still invalidate the
-receipt. Even successful acquisition retains `installed-identity-only`,
-`image_code_executed: false` and `final_portable_cohort: false`; it does not prove
-runtime, export, gameplay or audible behavior.
+The collector's internal final path now binds every retained portable metadata
+file to the producer map, checks corresponding source and shader-input hashes,
+passes that same authenticated `InstalledInventory` reader to source/provider
+closure validation, checks the consumer in both contract and shader record, retains all twelve LLVM
+roles, and acquires the three build-tool identities. It writes complete
+`inventories/{producer,debian_notices,common_licenses}.json` artifacts, canonical
+map digests and seven metadata hashes. Saved acquisition receipts retain
+`installed-identity-only`, `image_code_executed: false` and
+`final_portable_cohort: false`; those fields describe its created-only acquisition
+container.
+
+`scan-released-sdk-filesystem.py` independently enumerates the installed tree
+through descriptor-relative `scandir`, `stat`, `open` and reads. Before complete
+producer enumeration it retains only the four fixed audio, LLVM, portable curl
+and shared curl manifests, each nonempty and at most 1 MiB, through the same
+descriptor identity fences.
+The resulting `ProducerInventory` binds those private payloads to the enumerated
+hash and size before archive checks; payloads are excluded from serialized maps.
+Producer-tree zero-byte files remain valid. Notices, licenses and single-file
+metadata reads remain nonempty. Unlike directory
+tar generation, any unreadable entry fails the scan. It inventories the same
+fixed roots and seven files, resolves and fences notice links, and implements
+the shared `ProviderReader` interface for actual libcurl/libcares bytes. Provider
+reads admit only versioned canonical regular paths under `/usr/local/lib`, require
+UID 0 for the file and every ancestor including `/`, and fence UID/GID with the
+other descriptor identities before and after reading. The scanner hashes the three
+build tools and twelve LLVM roles, and checks final filesystem identities.
+`ScannerImage` uses a separate task-owned container: UID/GID 65534, read-only
+root and reviewed scanner/helper mounts, no network, dropped capabilities, no
+privileges or credentials, fixed `/usr/bin/python3 -I -B` entrypoint and bounded
+wait/log output. Host-side image, command, source, mount and ownership fences
+surround execution and cleanup. Only this owned executed scanner may be stopped
+on failure; the acquisition container remains unstarted.
+
+Its separate `filesystem-qualification.json` receipt explicitly records
+`image_code_executed: true`, the exact index/platform/config/producer/consumer,
+scanner/helper hashes, run identity, its own container and cleanup outcome.
+Success requires exact equality of all three maps, every metadata/tool field and
+canonical digests. An omitted unrelated producer file, missing notice, changed
+resolved path, malformed report, source drift or cleanup failure stops the final
+collection. This is trusted-producer filesystem qualification; image Python and
+OS remain trusted. It does not establish runtime, export, gameplay or audible
+acceptance, and does not claim independence from a malicious image OS.
+
+The fixed `portable-final` row admits only `atrinik/classic-portable-build:1.22.0`
+with this authenticated release identity:
+
+| Field | Immutable value |
+| --- | --- |
+| Producer revision | `eb1f6af78216adb4375826cdb70ef78a61ab403a` |
+| Classic consumer | `bd5317a03cdc82f029105c5dc26428b09fcd54b3` |
+| OCI index | `sha256:74761e930f5d57face2d81efb0dc50dd4ce32ce1204810e56580bf68a5972ebc` |
+| Linux/amd64 manifest | `sha256:5e30957e54277bdaadeeffa42246258dc9df2086f3fb41f2125d041735ac72aa` |
+| OCI config | `sha256:c35dbeac2679d79dab524a13c9a3b74a8187878ecd3b3dff52bd2892418d7a79` |
+
+Release publication and tested-image identity have been reviewed separately.
+This row enables collection; it does not certify the final installed inventories
+or filesystem equality. After source review, CI and merge, dispatch
+`qualify-released-linux-sdk.yml` on reviewed `main` and inspect the actual
+`released-linux-sdk-portable-final-<run>-<attempt>` artifact. Both its acquisition
+and filesystem qualification receipts must pass on this exact tuple before
+wrapper metadata/inventory pins are adopted. Later semantic releases do not
+retarget this row. No CLI, environment or workflow input can supply image pins,
+producer identities or paths. A missing final policy still fails closed, and no
+historical target is relabeled. Export, runtime and user hardware qualification
+remain separate.
+
+The filesystem scanner adapts descriptor-relative enumeration and byte-recording
+from the MIT-licensed wrapper at
+[`a9661a2bd978107fe4e01e45b2e22fcd1e2d095c`](https://github.com/atrinik/atrinik/tree/a9661a2bd978107fe4e01e45b2e22fcd1e2d095c):
+`atrinik_workspace/linux_export.py` (`_identity`, `_inventory`, `_open_root`,
+`_open_beneath`) and `atrinik_workspace/linux_portable.py` (`byte_record`,
+`verified_tree_inventory`). Copyright (c) 2026 Atrinik contributors; the MIT
+permission and warranty notice are retained through this repository's `LICENSE`.
+This reuses contemporaneously MIT-licensed infrastructure, not historical Classic
+material or a historical relicensing grant. Adaptations add fixed roots, shared
+budgets, independent notice resolution and a bounded machine-readable report.
 
 Offline validation:
 

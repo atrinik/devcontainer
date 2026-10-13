@@ -3,6 +3,7 @@
 """Offline trust-boundary tests; never read real credentials or access Docker."""
 import base64
 import copy
+from decimal import Decimal
 import importlib.util
 import io
 import json
@@ -22,6 +23,11 @@ SPEC.loader.exec_module(M)
 PACKAGE, TAG, INDEX_DIGEST = M.TARGETS['broad']
 SECRET = 'FAKE_ORIGINAL_TOKEN_NEVER_RETAIN'
 BEARER = 'FAKE_SCOPED_PULL_BEARER'
+DOCKER_149_DEFAULTS = {
+    'Hostname': '', 'Domainname': '', 'Image': '',
+    'AttachStdin': False, 'AttachStdout': False, 'AttachStderr': False,
+    'Tty': False, 'OpenStdin': False, 'StdinOnce': False,
+}
 
 
 def encoded(value):
@@ -116,20 +122,54 @@ class OfflineTests(unittest.TestCase):
 
     def test_fixed_released_coordinates_and_target_file_sets(self):
         self.assertEqual(M.REVISION, '4af130578df18a1944880cd279c7f23afe9cc668')
-        self.assertEqual(M.TARGETS, {
+        self.assertEqual({name: M.TARGETS[name] for name in M.HISTORICAL_TARGETS}, {
             'broad': ('atrinik/linux-build', '1.18.0',
                       'sha256:613cf43ab07634db005a28462a009c4c28c90dccb1b5175e13e8072b6dfe8d72'),
             'classic': ('atrinik/classic-build', '1.18.0',
                       'sha256:86d3c4182dc786db8ace56d9d8dc57ff4f14c1c4f517b728547626f576280449'),
             'portable-preliminary': ('atrinik/classic-portable-build', '1.18.0',
                       'sha256:ece5d3892db0ae7c8a13141720fdc62775b02cf67cf2b6df15bff9ccdb039527')})
-        self.assertEqual(set(M.TARGET_FILES), set(M.TARGETS))
-        for target in M.TARGETS:
+        self.assertEqual(M.HISTORICAL_TARGETS, {'broad', 'classic', 'portable-preliminary'})
+        self.assertEqual(set(M.TARGETS), set(M.HISTORICAL_TARGETS) | {'portable-final'})
+        self.assertEqual(set(M.TARGET_FILES), set(M.HISTORICAL_TARGETS))
+        for target in M.HISTORICAL_TARGETS:
             files = M.COMMON_FILES + M.TARGET_FILES[target]
             self.assertEqual(len(files), len(set(files)))
             self.assertTrue(set(M.LLVM_NOTICES) <= set(files))
         self.assertNotIn('/usr/local/share/atrinik/toolchains.json', M.CLASSIC_FILES)
         self.assertNotIn('/opt/atrinik-portable/installed.json', M.CLASSIC_FILES)
+
+    def test_actual_final_release_coordinates_and_missing_policy_fail_closed(self):
+        self.assertEqual(M.TARGETS['portable-final'], (
+            'atrinik/classic-portable-build', '1.22.0',
+            'sha256:74761e930f5d57face2d81efb0dc50dd4ce32ce1204810e56580bf68a5972ebc'))
+        self.assertEqual(set(M.FINAL_TARGETS), {'portable-final'})
+        self.assertEqual(M.target_policy('portable-final'), {
+            'producer_revision': 'eb1f6af78216adb4375826cdb70ef78a61ab403a',
+            'consumer_commit': 'bd5317a03cdc82f029105c5dc26428b09fcd54b3',
+            'manifest_digest': 'sha256:5e30957e54277bdaadeeffa42246258dc9df2086f3fb41f2125d041735ac72aa',
+            'config_digest': 'sha256:c35dbeac2679d79dab524a13c9a3b74a8187878ecd3b3dff52bd2892418d7a79'})
+        with patch.dict(M.FINAL_TARGETS, {}, clear=True), self.assertRaisesRegex(
+                M.Stop, 'final-target-policy-missing'):
+            M.target_policy('portable-final')
+
+    def test_actual_final_release_rejects_incomplete_or_malformed_policy(self):
+        original = M.target_policy('portable-final')
+        for field in original:
+            missing = dict(original)
+            del missing[field]
+            with self.subTest(missing=field), patch.dict(
+                    M.FINAL_TARGETS, {'portable-final': missing}), self.assertRaisesRegex(
+                    M.Stop, 'final-target-policy-incomplete'):
+                M.target_policy('portable-final')
+            malformed = dict(original, **{field: 'invalid'})
+            with self.subTest(malformed=field), patch.dict(
+                    M.FINAL_TARGETS, {'portable-final': malformed}), self.assertRaisesRegex(
+                    M.Stop, 'final-target-policy-incomplete'):
+                M.target_policy('portable-final')
+        with patch.dict(M.TARGETS, {'portable-final': M.TARGETS['broad']}), self.assertRaisesRegex(
+                M.Stop, 'final-target-policy-incomplete'):
+            M.target_policy('portable-final')
 
     def test_native_targets_collect_raw_oci_notices_and_all_twelve_roles(self):
         for target in ('broad', 'classic'):
@@ -783,7 +823,7 @@ class OfflineTests(unittest.TestCase):
         self.assertFalse(result['final_portable_cohort'])
 
     def test_collection_rejects_empty_metadata_notices_and_canonical_tools(self):
-        for target in M.TARGETS:
+        for target in M.HISTORICAL_TARGETS:
             for path in (M.LLVM_MANIFEST, M.LLVM_NOTICES[0],
                          M.PREFIX + '/bin/clang-23', M.PREFIX + '/lib/libunwind.a'):
                 data, binary = self.portable_fixture()
@@ -984,6 +1024,96 @@ class OfflineTests(unittest.TestCase):
                            reference, INDEX_DIGEST, verified)
         self.assertEqual(set(actual), set(defaults) | set(local['Config']))
 
+    def test_captured_public_ubuntu_config_matches_supported_docker_apis(self):
+        # Captured Docker 29.1.3 APIs 1.49/1.50/1.51, public Ubuntu index
+        # sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03;
+        # verified OCI config 86a1a31fdd84f2dc79bd6d92272100d4369b085790753bc521069eab663074e9.
+        # Preserve captured non-label Config fields; fixture labels/rootfs and
+        # resulting descriptors are synthetic, not a released SDK identity.
+        config, manifest, index = registry_fixture()
+        config['config'].update({
+            'Env': ['PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'],
+            'Cmd': ['/bin/bash'],
+        })
+        verified = self.verified(config, manifest, index)
+        reference = 'ghcr.io/' + PACKAGE + '@' + INDEX_DIGEST
+        selected = dict(descriptor(verified['manifest'], M.MANIFEST),
+                        platform={'os': 'linux', 'architecture': 'amd64'})
+        for api in ('1.49', '1.50', '1.51'):
+            actual = dict(copy.deepcopy(config['config']), Entrypoint=None,
+                          OnBuild=None, Volumes=None, User='', WorkingDir='')
+            if api == '1.49':
+                actual.update(DOCKER_149_DEFAULTS)
+            local = {'Os': 'linux', 'Architecture': 'amd64', 'RepoDigests': [reference],
+                     'RootFS': {'Type': 'layers', 'Layers': config['rootfs']['diff_ids']},
+                     'Config': actual, 'Descriptor': selected}
+            for identity, kind in ((verified['config_digest'], 'config-digest'),
+                                   (verified['manifest_digest'], 'platform-manifest-digest')):
+                local['Id'] = identity
+                before = copy.deepcopy((local, verified))
+                with self.subTest(api=api, identity=kind):
+                    self.assertEqual(M.verify_local(local, reference, INDEX_DIGEST, verified), kind)
+                    self.assertEqual((local, verified), before)
+
+    def test_docker149_defaults_preserve_raw_declared_values(self):
+        for key, zero in DOCKER_149_DEFAULTS.items():
+            nondefault = True if type(zero) is bool else 'declared'
+            with self.subTest(key=key):
+                self.assertTrue(M.local_config_matches({key: zero}, {}))
+                self.assertFalse(M.local_config_matches({}, {key: zero}))
+                for value in (zero, nondefault):
+                    expected = {key: value}
+                    actual = copy.deepcopy(expected)
+                    self.assertTrue(M.local_config_matches(actual, expected))
+                    self.assertEqual(actual, expected)
+
+    def test_docker149_nondefault_and_wrong_types_reject_absent_or_zero_peer(self):
+        for key, zero in DOCKER_149_DEFAULTS.items():
+            invalid = ((True, 0, 0.0, 1, 'false', None, [], {}) if type(zero) is bool
+                       else ('changed', 0, False, None, [], {}))
+            for value in invalid:
+                for peer in ({}, {key: zero}):
+                    for actual, expected in (({key: value}, peer), (peer, {key: value})):
+                        with self.subTest(key=key, actual=actual, expected=expected):
+                            self.assertFalse(M.local_config_matches(actual, expected))
+
+    def test_local_config_unknown_zero_differences_are_not_normalized(self):
+        for value in (None, '', False, 0, [], {}):
+            for actual, expected in (({'UnknownDockerDefault': value}, {}),
+                                     ({}, {'UnknownDockerDefault': value})):
+                with self.subTest(actual=actual, expected=expected):
+                    self.assertFalse(M.local_config_matches(actual, expected))
+
+    def test_local_config_complete_comparison_retains_nested_json_types(self):
+        shapes = (lambda value: {'ArgsEscaped': value},
+                  lambda value: {'Healthcheck': {'Retries': value}},
+                  lambda value: {'Labels': {'fixture': [value]}},
+                  lambda value: {'Unknown': {'nested': [value]}})
+        for shape in shapes:
+            for value in (False, 0, 0.0, True, 1, 1.0):
+                expected = shape(value)
+                self.assertTrue(M.local_config_matches(copy.deepcopy(expected), expected))
+                for changed in (False, 0, 0.0, True, 1, 1.0):
+                    if type(value) is type(changed) and value == changed:
+                        continue
+                    with self.subTest(expected=expected, actual=shape(changed)):
+                        self.assertFalse(M.local_config_matches(shape(changed), expected))
+        expected = {'Healthcheck': {'Retries': 0, 'Test': ['CMD', '/bin/true']}, 'ArgsEscaped': False}
+        reordered = {'ArgsEscaped': False, 'Healthcheck': {'Test': ['CMD', '/bin/true'], 'Retries': 0}}
+        self.assertTrue(M.local_config_matches(reordered, expected))
+
+    def test_local_config_non_json_values_fail_closed(self):
+        cyclic = []
+        cyclic.append(cyclic)
+        for value in (float('nan'), float('inf'), float('-inf'), Decimal('0'),
+                      (0,), {0: 'coerced key'}, {0}, b'bytes', cyclic):
+            for key in ('Healthcheck', 'Labels', 'Unknown'):
+                actual = {key: {'nested': value}}
+                with self.subTest(key=key, value_type=type(value).__name__):
+                    self.assertFalse(M.local_config_matches(actual, actual))
+                    self.assertFalse(M.local_config_matches(actual, {}))
+                    self.assertFalse(M.local_config_matches({}, actual))
+
     def test_local_config_broad_shape_preserves_declared_fields(self):
         # Retained broad OCI config has exactly Cmd, Env and Labels. Use that
         # shape here; the private replay separately checks the actual raw bytes.
@@ -1060,13 +1190,13 @@ class OfflineTests(unittest.TestCase):
         self.assertNotIn('build/llvm-released-sdk-verification-final', text)
         self.assertIn("github.event_name == 'push' && github.ref == '" + M.BRANCH + "'", text)
         self.assertIn("github.ref == 'refs/heads/main' || github.ref == '" + M.BRANCH + "'", text)
-        self.assertIn('target: [broad, classic, portable-preliminary]', text)
+        self.assertIn('target: [broad, classic, portable-preliminary, portable-final]', text)
         self.assertIn('  workflow_dispatch:', text)
         self.assertIn("github.repository == 'atrinik/devcontainer'", text)
         self.assertIn('      packages: read', text)
         self.assertNotIn(': write', text)
         self.assertIn('persist-credentials: false', text)
-        self.assertIn('python3 -I tools/collect-released-sdk-metadata.py', text)
+        self.assertIn('python3 -I -B tools/collect-released-sdk-metadata.py', text)
         self.assertIn('env -u SSLKEYLOGFILE -u OPENSSL_CONF -u OPENSSL_MODULES', text)
         for line in text.splitlines():
             if 'uses:' in line:
