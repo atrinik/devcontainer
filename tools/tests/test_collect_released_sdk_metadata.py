@@ -122,20 +122,54 @@ class OfflineTests(unittest.TestCase):
 
     def test_fixed_released_coordinates_and_target_file_sets(self):
         self.assertEqual(M.REVISION, '4af130578df18a1944880cd279c7f23afe9cc668')
-        self.assertEqual(M.TARGETS, {
+        self.assertEqual({name: M.TARGETS[name] for name in M.HISTORICAL_TARGETS}, {
             'broad': ('atrinik/linux-build', '1.18.0',
                       'sha256:613cf43ab07634db005a28462a009c4c28c90dccb1b5175e13e8072b6dfe8d72'),
             'classic': ('atrinik/classic-build', '1.18.0',
                       'sha256:86d3c4182dc786db8ace56d9d8dc57ff4f14c1c4f517b728547626f576280449'),
             'portable-preliminary': ('atrinik/classic-portable-build', '1.18.0',
                       'sha256:ece5d3892db0ae7c8a13141720fdc62775b02cf67cf2b6df15bff9ccdb039527')})
-        self.assertEqual(set(M.TARGET_FILES), set(M.TARGETS))
-        for target in M.TARGETS:
+        self.assertEqual(M.HISTORICAL_TARGETS, {'broad', 'classic', 'portable-preliminary'})
+        self.assertEqual(set(M.TARGETS), set(M.HISTORICAL_TARGETS) | {'portable-final'})
+        self.assertEqual(set(M.TARGET_FILES), set(M.HISTORICAL_TARGETS))
+        for target in M.HISTORICAL_TARGETS:
             files = M.COMMON_FILES + M.TARGET_FILES[target]
             self.assertEqual(len(files), len(set(files)))
             self.assertTrue(set(M.LLVM_NOTICES) <= set(files))
         self.assertNotIn('/usr/local/share/atrinik/toolchains.json', M.CLASSIC_FILES)
         self.assertNotIn('/opt/atrinik-portable/installed.json', M.CLASSIC_FILES)
+
+    def test_actual_final_release_coordinates_and_missing_policy_fail_closed(self):
+        self.assertEqual(M.TARGETS['portable-final'], (
+            'atrinik/classic-portable-build', '1.22.0',
+            'sha256:74761e930f5d57face2d81efb0dc50dd4ce32ce1204810e56580bf68a5972ebc'))
+        self.assertEqual(set(M.FINAL_TARGETS), {'portable-final'})
+        self.assertEqual(M.target_policy('portable-final'), {
+            'producer_revision': 'eb1f6af78216adb4375826cdb70ef78a61ab403a',
+            'consumer_commit': 'bd5317a03cdc82f029105c5dc26428b09fcd54b3',
+            'manifest_digest': 'sha256:5e30957e54277bdaadeeffa42246258dc9df2086f3fb41f2125d041735ac72aa',
+            'config_digest': 'sha256:c35dbeac2679d79dab524a13c9a3b74a8187878ecd3b3dff52bd2892418d7a79'})
+        with patch.dict(M.FINAL_TARGETS, {}, clear=True), self.assertRaisesRegex(
+                M.Stop, 'final-target-policy-missing'):
+            M.target_policy('portable-final')
+
+    def test_actual_final_release_rejects_incomplete_or_malformed_policy(self):
+        original = M.target_policy('portable-final')
+        for field in original:
+            missing = dict(original)
+            del missing[field]
+            with self.subTest(missing=field), patch.dict(
+                    M.FINAL_TARGETS, {'portable-final': missing}), self.assertRaisesRegex(
+                    M.Stop, 'final-target-policy-incomplete'):
+                M.target_policy('portable-final')
+            malformed = dict(original, **{field: 'invalid'})
+            with self.subTest(malformed=field), patch.dict(
+                    M.FINAL_TARGETS, {'portable-final': malformed}), self.assertRaisesRegex(
+                    M.Stop, 'final-target-policy-incomplete'):
+                M.target_policy('portable-final')
+        with patch.dict(M.TARGETS, {'portable-final': M.TARGETS['broad']}), self.assertRaisesRegex(
+                M.Stop, 'final-target-policy-incomplete'):
+            M.target_policy('portable-final')
 
     def test_native_targets_collect_raw_oci_notices_and_all_twelve_roles(self):
         for target in ('broad', 'classic'):
@@ -789,7 +823,7 @@ class OfflineTests(unittest.TestCase):
         self.assertFalse(result['final_portable_cohort'])
 
     def test_collection_rejects_empty_metadata_notices_and_canonical_tools(self):
-        for target in M.TARGETS:
+        for target in M.HISTORICAL_TARGETS:
             for path in (M.LLVM_MANIFEST, M.LLVM_NOTICES[0],
                          M.PREFIX + '/bin/clang-23', M.PREFIX + '/lib/libunwind.a'):
                 data, binary = self.portable_fixture()
@@ -1156,7 +1190,7 @@ class OfflineTests(unittest.TestCase):
         self.assertNotIn('build/llvm-released-sdk-verification-final', text)
         self.assertIn("github.event_name == 'push' && github.ref == '" + M.BRANCH + "'", text)
         self.assertIn("github.ref == 'refs/heads/main' || github.ref == '" + M.BRANCH + "'", text)
-        self.assertIn('target: [broad, classic, portable-preliminary]', text)
+        self.assertIn('target: [broad, classic, portable-preliminary, portable-final]', text)
         self.assertIn('  workflow_dispatch:', text)
         self.assertIn("github.repository == 'atrinik/devcontainer'", text)
         self.assertIn('      packages: read', text)

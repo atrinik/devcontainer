@@ -1,12 +1,13 @@
-# Released portable SDK inventory foundation
+# Released portable SDK inventory qualification
 
 `released_sdk_inventory.py` is an internal acquisition helper for the existing
 collector's authenticated, task-owned `StoppedImage` and archive protocol. It
 has no CLI, credentials, registry operations, release pins or image execution.
 The collector imports it through an explicit same-checkout path under isolated
 Python. Only its internal final-target path invokes inventory and execution;
-`FINAL_TARGETS` is empty until actual release coordinates are reviewed. The three
-fixed 1.18.0 targets and their producer mapping remain authoritative.
+`portable-final` pins the reviewed 1.22.0 release. The three fixed 1.18.0
+targets and their producer mapping remain unchanged; final targets cannot use
+the historical producer-policy fallback.
 
 The helper streams `/opt/atrinik-portable` without extraction. It retains only
 the fixed `audio-toolchain.json`, `llvm-toolchain.json`, `curl-toolchain.json`
@@ -127,16 +128,28 @@ collection. This is trusted-producer filesystem qualification; image Python and
 OS remain trusted. It does not establish runtime, export, gameplay or audible
 acceptance, and does not claim independence from a malicious image OS.
 
-The remaining admission step requires actual merged producer P and released D:
-add the real fixed package/tag/index tuple to `TARGETS`, and the corresponding
-`producer_revision`, `consumer_commit`, `manifest_digest` and `config_digest`
-record to `FINAL_TARGETS`; then add that exact name to the trusted workflow
-matrix. A target added without its policy fails closed. No CLI, environment or
-workflow input can supply image pins, producer identities or paths. Do not
-invent those coordinates or relabel any historical target. The final code and
-mapping need independent review and actual hosted qualification before adopting
-wrapper metadata/inventory pins. Workflow tests cover the generic dormant path;
-there is no final released-image evidence yet.
+The fixed `portable-final` row admits only `atrinik/classic-portable-build:1.22.0`
+with this authenticated release identity:
+
+| Field | Immutable value |
+| --- | --- |
+| Producer revision | `eb1f6af78216adb4375826cdb70ef78a61ab403a` |
+| Classic consumer | `bd5317a03cdc82f029105c5dc26428b09fcd54b3` |
+| OCI index | `sha256:74761e930f5d57face2d81efb0dc50dd4ce32ce1204810e56580bf68a5972ebc` |
+| Linux/amd64 manifest | `sha256:5e30957e54277bdaadeeffa42246258dc9df2086f3fb41f2125d041735ac72aa` |
+| OCI config | `sha256:c35dbeac2679d79dab524a13c9a3b74a8187878ecd3b3dff52bd2892418d7a79` |
+
+Release publication and tested-image identity have been reviewed separately.
+This row enables collection; it does not certify the final installed inventories
+or filesystem equality. After source review, CI and merge, dispatch
+`qualify-released-linux-sdk.yml` on reviewed `main` and inspect the actual
+`released-linux-sdk-portable-final-<run>-<attempt>` artifact. Both its acquisition
+and filesystem qualification receipts must pass on this exact tuple before
+wrapper metadata/inventory pins are adopted. Later semantic releases do not
+retarget this row. No CLI, environment or workflow input can supply image pins,
+producer identities or paths. A missing final policy still fails closed, and no
+historical target is relabeled. Export, runtime and user hardware qualification
+remain separate.
 
 The filesystem scanner adapts descriptor-relative enumeration and byte-recording
 from the MIT-licensed wrapper at

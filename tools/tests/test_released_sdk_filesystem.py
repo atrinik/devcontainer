@@ -541,15 +541,35 @@ class QualificationTests(unittest.TestCase):
         docker.get.return_value = value
         return scanner, value
 
-    def test_no_actual_final_target_is_admitted_and_old_rows_unchanged(self):
+    def test_actual_final_target_is_separate_and_old_rows_unchanged(self):
         originals = {'broad', 'classic', 'portable-preliminary'}
-        self.assertEqual(set(C.TARGETS) - {TARGET}, originals)
-        self.assertEqual(set(C.FINAL_TARGETS), {TARGET})
+        self.assertEqual(set(C.TARGETS) - {TARGET}, originals | {'portable-final'})
+        self.assertEqual(set(C.FINAL_TARGETS), {TARGET, 'portable-final'})
+        self.assertNotIn('portable-final', C.HISTORICAL_TARGETS)
         for target in originals:
             self.assertEqual(C.target_policy(target), {'producer_revision': C.REVISION})
             with self.assertRaisesRegex(C.Stop, 'final-target-required'):
                 C.ScannerImage(Mock(), target, self.context, self.verified, C.scanner_sources())
         self.assertEqual(C.TOOL_FILES, C.INVENTORY.LLVM_TOOL_FILES)
+
+    def test_actual_release_scanner_binds_fixed_index_platform_and_config(self):
+        policy = C.target_policy('portable-final')
+        verified = {'manifest_digest': policy['manifest_digest'],
+                    'config_digest': policy['config_digest'], 'config_object': {'config': {}}}
+        docker = Mock()
+        scanner = C.ScannerImage(docker, 'portable-final', self.context, verified, C.scanner_sources())
+        self.assertEqual(scanner.reference,
+                         'ghcr.io/atrinik/classic-portable-build@sha256:'
+                         '74761e930f5d57face2d81efb0dc50dd4ce32ce1204810e56580bf68a5972ebc')
+        self.assertEqual(scanner.entrypoint, ['/usr/bin/python3', '-I', '-B',
+                                             '/scan/scan-released-sdk-filesystem.py'])
+        for field in ('manifest_digest', 'config_digest'):
+            changed = dict(verified, **{field: 'sha256:' + '0' * 64})
+            with self.subTest(field=field), self.assertRaisesRegex(
+                    C.Stop, 'final-image-coordinate-mismatch'):
+                C.ScannerImage(docker, 'portable-final', self.context, changed, C.scanner_sources())
+        docker.request.assert_not_called()
+        docker.get.assert_not_called()
 
     def test_wrong_final_platform_config_and_policy_rejected_before_create(self):
         for field in ('manifest_digest', 'config_digest'):

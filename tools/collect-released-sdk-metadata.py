@@ -50,12 +50,19 @@ TARGETS = {
               'sha256:86d3c4182dc786db8ace56d9d8dc57ff4f14c1c4f517b728547626f576280449'),
     'portable-preliminary': ('atrinik/classic-portable-build', '1.18.0',
               'sha256:ece5d3892db0ae7c8a13141720fdc62775b02cf67cf2b6df15bff9ccdb039527'),
+    'portable-final': ('atrinik/classic-portable-build', '1.22.0',
+              'sha256:74761e930f5d57face2d81efb0dc50dd4ce32ce1204810e56580bf68a5972ebc'),
 }
-HISTORICAL_TARGETS = frozenset(TARGETS)
-# No final image is admitted until the actual released coordinates are reviewed.
-# Each future entry requires exactly producer_revision, consumer_commit,
-# manifest_digest and config_digest; TARGETS must separately pin its index.
-FINAL_TARGETS = {}
+# Final entries must never inherit the historical producer-policy fallback.
+HISTORICAL_TARGETS = frozenset({'broad', 'classic', 'portable-preliminary'})
+FINAL_TARGETS = {
+    'portable-final': {
+        'producer_revision': 'eb1f6af78216adb4375826cdb70ef78a61ab403a',
+        'consumer_commit': 'bd5317a03cdc82f029105c5dc26428b09fcd54b3',
+        'manifest_digest': 'sha256:5e30957e54277bdaadeeffa42246258dc9df2086f3fb41f2125d041735ac72aa',
+        'config_digest': 'sha256:c35dbeac2679d79dab524a13c9a3b74a8187878ecd3b3dff52bd2892418d7a79',
+    },
+}
 SCANNER_FILES = ('scan-released-sdk-filesystem.py', 'released_sdk_inventory.py')
 SCANNER_LIMIT = 64 * 1024 * 1024
 

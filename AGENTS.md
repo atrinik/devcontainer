@@ -128,7 +128,10 @@
   must match all producer, Debian notice and common-license records before
   wrapper pins are adopted; Docker directory tar framing alone cannot prove
   completeness. No caller-supplied image, revision or filesystem-path overrides.
-  Missing actual final release coordinates leave final admission disabled.
+  The fixed `portable-final` target pins the reviewed 1.22.0 producer, consumer
+  and index/platform/config tuple. Its hosted acquisition and filesystem
+  qualification must succeed before wrapper metadata/inventory pins are adopted;
+  release publication alone does not establish those inventories.
 - Validate Dockerfiles with `docker build --check`. Build and smoke-test each
   affected image, including `classic-validation` before `classic-final` and the
   Windows `classic-check` target plus native bundle; note that a cold
