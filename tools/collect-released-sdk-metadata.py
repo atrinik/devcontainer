@@ -995,7 +995,29 @@ def scanner_sources():
     return result
 
 
-def scanner_logs(response):
+SCANNER_HOST_FAILURE_CODES = frozenset({
+    'final-image-coordinate-mismatch', 'unsafe-scanner-source', 'scanner-source-changed',
+    'scanner-source-set', 'image-volumes-not-allowed', 'invalid-created-container',
+    'container-not-created', 'scanner-ownership-mismatch', 'scanner-command-mismatch',
+    'scanner-state-mismatch', 'scanner-isolation-mismatch', 'scanner-mount-mismatch',
+    'scanner-log-config-mismatch',
+    'scanner-execution-not-started',
+    'container-image-mismatch', 'container-manifest-mismatch', 'scanner-process-failed',
+    'scanner-logs-unframed', 'scanner-logs-invalid', 'scanner-logs-limit',
+    'scanner-logs-incomplete', 'invalid-json', 'docker-http-status',
+})
+
+
+def scanner_host_failure(error):
+    if (type(error) is Stop and len(error.args) == 1 and type(error.args[0]) is str
+            and error.args[0] in SCANNER_HOST_FAILURE_CODES):
+        return error.args[0]
+    if type(error) is INVENTORY.InventoryError:
+        return INVENTORY.failure_code(error)
+    return 'filesystem-qualification-failed'
+
+
+def scanner_logs(response, *, limit=SCANNER_LIMIT):
     require(response.chunked or response.length is not None, 'scanner-logs-unframed')
     result = bytearray()
     while True:
@@ -1004,7 +1026,7 @@ def scanner_logs(response):
             break
         require(len(header) == 8 and header[:4] == b'\x01\0\0\0', 'scanner-logs-invalid')
         size = struct.unpack('>I', header[4:])[0]
-        require(0 < size <= 1024 * 1024 and len(result) + size <= SCANNER_LIMIT, 'scanner-logs-limit')
+        require(0 < size <= 1024 * 1024 and len(result) + size <= min(limit, SCANNER_LIMIT), 'scanner-logs-limit')
         result.extend(exact_read(response, size))
     require(response.length in (None, 0) and result, 'scanner-logs-incomplete')
     return decode(bytes(result))
@@ -1022,6 +1044,10 @@ class ScannerImage(StoppedImage):
         self.name = 'atrinik-sdk-filesystem-' + self.owner
         self.sources = sources
         self.entrypoint = ['/usr/bin/python3', '-I', '-B', '/scan/scan-released-sdk-filesystem.py']
+        # Moby's local driver defaults to compression, which is incompatible
+        # with max-file=1. Disable it explicitly while retaining the bound.
+        self.log_config = {'Type': 'local', 'Config': {
+            'max-size': '128m', 'max-file': '1', 'compress': 'false'}}
         self.mounts = [{'Type': 'bind', 'Source': item['path'], 'Target': '/scan/' + name,
                         'ReadOnly': True} for name, item in sources.items()]
 
@@ -1032,7 +1058,7 @@ class ScannerImage(StoppedImage):
                 'NetworkDisabled': True, 'Healthcheck': {'Test': ['NONE']},
                 'HostConfig': {'NetworkMode': 'none', 'ReadonlyRootfs': True, 'CapDrop': ['ALL'],
                     'SecurityOpt': ['no-new-privileges'], 'RestartPolicy': {'Name': 'no'},
-                    'Mounts': self.mounts, 'LogConfig': {'Type': 'local', 'Config': {'max-size': '128m', 'max-file': '1'}}}}
+                    'Mounts': self.mounts, 'LogConfig': self.log_config}}
         self.attempted = True
         conn, response = self.docker.request('POST', '/containers/create?' + urllib.parse.urlencode({
             'name': self.name, 'platform': 'linux/amd64'}), {'Content-Type': 'application/json'},
@@ -1063,6 +1089,7 @@ class ScannerImage(StoppedImage):
                 and not host.get('Privileged') and not host.get('Binds')
                 and host.get('CapDrop') == ['ALL'] and host.get('SecurityOpt') == ['no-new-privileges']
                 and host.get('RestartPolicy', {}).get('Name') == 'no', 'scanner-isolation-mismatch')
+        require(host.get('LogConfig') == self.log_config, 'scanner-log-config-mismatch')
         mounts = value.get('Mounts')
         require(isinstance(mounts, list) and len(mounts) == len(self.mounts), 'scanner-mount-mismatch')
         actual = {(item.get('Source'), item.get('Destination')) for item in mounts
@@ -1076,24 +1103,46 @@ class ScannerImage(StoppedImage):
             require(selected_manifest_matches(selected, self.verified), 'container-manifest-mismatch')
         return value
 
-    def execute(self):
+    def execute(self, *, progress=None):
+        progress = progress if progress is not None else {}
+        progress['phase'] = 'container-start'
         self.fence()
         conn, _ = self.docker.request('POST', '/containers/' + self.identifier + '/start', expected=204)
+        progress['start_accepted'] = True
         conn.close()
+        progress['phase'] = 'container-wait'
         conn, response = self.docker.request('POST', '/containers/' + self.identifier + '/wait?condition=not-running',
                                              timeout=INVENTORY.MAX_SECONDS + 30)
         try:
             result = decode(bounded_read(response))
-            require(type(result.get('StatusCode')) is int and result['StatusCode'] == 0 and
-                    not result.get('Error'), 'scanner-process-failed')
+            status = result.get('StatusCode')
+            require(type(status) is int and 0 <= status <= 255, 'scanner-process-failed')
+            progress['exit_code'] = status
+            require(not result.get('Error'), 'scanner-process-failed')
         finally:
             conn.close()
+        progress['phase'] = 'container-exit-fence'
         self.fence(('exited',))
+        progress['phase'] = 'container-logs'
         conn, response = self.docker.request('GET', '/containers/' + self.identifier + '/logs?stdout=1&stderr=1')
         try:
-            return scanner_logs(response)
+            try:
+                observed = scanner_logs(response, limit=4096 if status else SCANNER_LIMIT)
+            except Stop as error:
+                if status:
+                    progress['log_reason'] = scanner_host_failure(error)
+                    raise Stop('scanner-process-failed') from None
+                raise
         finally:
             conn.close()
+        if status:
+            failure = INVENTORY.scanner_failure(observed)
+            if failure is None:
+                progress['log_reason'] = 'scanner-failure-report-invalid'
+            else:
+                progress['scan_failure'] = failure
+            raise Stop('scanner-process-failed')
+        return observed
 
     def cleanup(self):
         if not self.attempted:
@@ -1119,27 +1168,36 @@ def qualify_filesystem(docker, target, context, verified, expected):
     policy = target_policy(target)
     require(target in FINAL_TARGETS, 'final-target-required')
     receipt = {**context, 'schema_version': 1, 'claim': 'trusted-producer-filesystem-equality',
-        'image_code_executed': True, 'final_portable_cohort': False, 'target': target,
+        'image_code_executed': False, 'final_portable_cohort': False, 'target': target,
         'index_digest': TARGETS[target][2], 'manifest_digest': verified['manifest_digest'],
         'config_digest': verified['config_digest'], **policy, 'status': 'started'}
     scanner = None
+    progress = {'phase': 'identity'}
     try:
         require(verified['manifest_digest'] == policy['manifest_digest'] and
                 verified['config_digest'] == policy['config_digest'], 'final-image-coordinate-mismatch')
+        progress['phase'] = 'scanner-sources'
         sources = scanner_sources()
         receipt['scanner_sources'] = {name: {key: item[key] for key in ('sha256', 'size')}
                                       for name, item in sources.items()}
         scanner = ScannerImage(docker, target, context, verified, sources)
+        progress['phase'] = 'container-create'
         scanner.create()
         receipt['container_id'] = scanner.identifier
-        observed = scanner.execute()
+        observed = scanner.execute(progress=progress)
+        require(progress.get('start_accepted') is True, 'scanner-execution-not-started')
+        progress['phase'] = 'source-recheck'
         require(scanner_sources() == sources, 'scanner-source-changed')
+        progress['phase'] = 'inventory-comparison'
         INVENTORY.compare_scan(observed, expected)
         receipt['scan'] = observed
         receipt['status'] = 'verified-filesystem-equality'
-    except BaseException:
-        receipt.update(status='stopped', reason='filesystem-qualification-failed')
+    except BaseException as error:
+        receipt.update(status='stopped', reason=scanner_host_failure(error), failure=dict(progress))
     finally:
+        # A successful Docker start is the execution boundary, not instruction
+        # tracing. Failed create/start calls never assert scanner execution.
+        receipt['image_code_executed'] = progress.get('start_accepted') is True
         if scanner is not None:
             try:
                 signal.alarm(120)

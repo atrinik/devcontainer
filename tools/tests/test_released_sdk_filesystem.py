@@ -534,6 +534,7 @@ class QualificationTests(unittest.TestCase):
                  'Config': {'Labels': {C.OWNER_LABEL: scanner.owner}, 'Image': scanner.reference,
                             'Entrypoint': scanner.entrypoint, 'Cmd': [], 'User': '65534:65534', 'WorkingDir': '/'},
                  'HostConfig': {'ReadonlyRootfs': True, 'NetworkMode': 'none', 'Privileged': False,
+                                'LogConfig': copy.deepcopy(scanner.log_config),
                                 'CapDrop': ['ALL'], 'SecurityOpt': ['no-new-privileges'], 'RestartPolicy': {'Name': 'no'}},
                  'Mounts': [{'Source': row['Source'], 'Destination': row['Target'], 'Type': 'bind', 'RW': False}
                             for row in scanner.mounts],
@@ -591,6 +592,8 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(body['Entrypoint'], ['/usr/bin/python3', '-I', '-B', '/scan/scan-released-sdk-filesystem.py'])
         self.assertEqual(body['Env'], [])
         self.assertEqual(body['User'], '65534:65534')
+        self.assertEqual(body['HostConfig']['LogConfig'], {'Type': 'local', 'Config': {
+            'max-size': '128m', 'max-file': '1', 'compress': 'false'}})
         self.assertTrue(body['HostConfig']['ReadonlyRootfs'])
         self.assertEqual({row['Target'] for row in body['HostConfig']['Mounts']},
                          {'/scan/' + name for name in C.SCANNER_FILES})
@@ -657,7 +660,10 @@ class QualificationTests(unittest.TestCase):
         for failure in ('none', 'compare', 'cleanup', 'source'):
             scanner = Mock()
             scanner.identifier = 'f' * 64
-            scanner.execute.return_value = expected if failure != 'compare' else {'fixture': False}
+            def execute(*, progress):
+                progress['start_accepted'] = True
+                return expected if failure != 'compare' else {'fixture': False}
+            scanner.execute.side_effect = execute
             if failure == 'cleanup':
                 scanner.cleanup.side_effect = RuntimeError('hostile secret')
             sources = C.scanner_sources()

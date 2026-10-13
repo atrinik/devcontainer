@@ -162,16 +162,38 @@ privileges or credentials, fixed `/usr/bin/python3 -I -B` entrypoint and bounded
 wait/log output. Host-side image, command, source, mount and ownership fences
 surround execution and cleanup. Only this owned executed scanner may be stopped
 on failure; the acquisition container remains unstarted.
+The local log driver uses exactly one 128 MiB file with `compress=false`, and
+that configuration is checked with the other container fences. Moby's
+[local driver configuration](https://github.com/moby/moby/blob/docker-v29.4.2/daemon/logger/local/config.go)
+rejects its default compression setting when `max-file=1`; explicit disabling
+allows startup while preserving the log bound.
 
 Its separate `filesystem-qualification.json` receipt explicitly records
-`image_code_executed: true`, the exact index/platform/config/producer/consumer,
+`image_code_executed: true` only after Docker accepts the scanner start, along
+with the exact index/platform/config/producer/consumer,
 scanner/helper hashes, run identity, its own container and cleanup outcome.
+Failed create/start operations retain `image_code_executed: false`; a later
+wait, scan or comparison failure retains `true`. This records the accepted
+execution boundary, not proof of particular CPU instructions.
 Success requires exact equality of all three maps, every metadata/tool field and
 canonical digests. An omitted unrelated producer file, missing notice, changed
 resolved path, malformed report, source drift or cleanup failure stops the final
 collection. This is trusted-producer filesystem qualification; image Python and
 OS remain trusted. It does not establish runtime, export, gameplay or audible
 acceptance, and does not claim independence from a malicious image OS.
+
+Failed filesystem qualification retains a fixed host phase and, after a valid
+Docker wait response, an integer exit status in `0..255`. The collector fences
+the exited container before reading logs even when the process failed. Nonzero
+exit output is limited to 4 KiB and must use the same strict stdout-only Docker
+framing as successful reports. The only retained scanner output is an exact
+stopped-report schema containing a fixed stage and allowlisted failure code,
+plus an allowlisted errno name for OS errors. Unknown codes, extra fields,
+stderr, raw tracebacks, paths, exception strings and malformed output never
+enter the receipt. A nonzero exit always fails qualification, including when
+its output resembles a successful inventory. Diagnostics preserve owned
+cleanup and every source, image, mount, isolation and inventory comparison gate;
+they provide failure evidence rather than SDK acceptance.
 
 The fixed `portable-final` row admits only `atrinik/classic-portable-build:1.22.0`
 with this authenticated release identity:
