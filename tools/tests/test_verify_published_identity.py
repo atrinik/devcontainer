@@ -20,6 +20,11 @@ SPEC.loader.exec_module(M)
 REVISION = "1" * 40
 INDEX_DIGEST = "sha256:" + "9" * 64
 BEARER = "FAKE_SCOPED_PULL_BEARER"
+DOCKER_149_DEFAULTS = {
+    "Hostname": "", "Domainname": "", "Image": "",
+    "AttachStdin": False, "AttachStdout": False, "AttachStderr": False,
+    "Tty": False, "OpenStdin": False, "StdinOnce": False,
+}
 
 
 def encoded(value):
@@ -87,6 +92,37 @@ def fixture():
             "org.opencontainers.image.revision": REVISION,
         }),
     }
+    return local, published
+
+
+def public_ubuntu_transport_fixture(api):
+    """Project actual public Ubuntu inspect/OCI shapes, with synthetic labels.
+
+    Docker 29.1.3 was queried at API 1.49, 1.50 and 1.51 for the cached
+    ubuntu@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03.
+    The public index/amd64 manifest/config chain was separately hash-verified;
+    its OCI config SHA256 is 86a1a31fdd84f2dc79bd6d92272100d4369b085790753bc521069eab663074e9.
+    Config below retains the captured non-label fields and values. Only labels
+    use synthetic test data; no fixture claims an Atrinik-published Ubuntu image.
+    """
+    local, published = fixture()
+    config = {
+        "Env": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"],
+        "Cmd": ["/bin/bash"],
+        "Labels": {"fixture": "same"},
+    }
+    local["Config"] = copy.deepcopy(config)
+    local["Config"].update({"Entrypoint": None, "OnBuild": None, "Volumes": None,
+                            "User": "", "WorkingDir": ""})
+    if api == "1.49":
+        local["Config"].update(DOCKER_149_DEFAULTS)
+    elif api not in {"1.50", "1.51"}:
+        raise ValueError("fixture API not captured")
+    published["config"] = config
+    published["config"]["Labels"].update({
+        "org.opencontainers.image.source": M.R.SOURCE,
+        "org.opencontainers.image.revision": REVISION,
+    })
     return local, published
 
 
@@ -167,6 +203,64 @@ class OfflineTests(unittest.TestCase):
         self.assertTrue(result["rootfs_equal"])
         self.assertTrue(result["execution_config_equal"])
         self.assertEqual(result["docker_absent_defaults"], M.DEFAULTS)
+
+    def test_public_ubuntu_inspect_and_oci_config_shapes_match_all_supported_apis(self):
+        for api in ("1.49", "1.50", "1.51"):
+            with self.subTest(api=api):
+                local, published = public_ubuntu_transport_fixture(api)
+                before = copy.deepcopy((local, published))
+                result = M.compare(local, published, REVISION)
+                self.assertEqual((local, published), before)
+                self.assertTrue(result["rootfs_equal"])
+                self.assertTrue(result["execution_config_equal"])
+                for key, value in DOCKER_149_DEFAULTS.items():
+                    self.assertIs(type(result["docker_absent_defaults"][key]), type(value))
+                    self.assertEqual(result["docker_absent_defaults"][key], value)
+
+    def test_each_docker149_nondefault_differs_from_omitted_or_zero(self):
+        for key, zero in DOCKER_149_DEFAULTS.items():
+            for side in ("loaded", "published"):
+                for peer in ("omitted", "zero"):
+                    with self.subTest(key=key, side=side, peer=peer):
+                        local, published = public_ubuntu_transport_fixture("1.49")
+                        changed, unchanged = ((local["Config"], published["config"])
+                            if side == "loaded" else (published["config"], local["Config"]))
+                        changed[key] = True if type(zero) is bool else "changed"
+                        if peer == "omitted":
+                            unchanged.pop(key, None)
+                        else:
+                            unchanged[key] = zero
+                        self.assert_stop("published-runtime-config-mismatch", M.compare,
+                                         local, published, REVISION)
+
+    def test_each_docker149_default_rejects_wrong_types_before_normalizing(self):
+        for key, zero in DOCKER_149_DEFAULTS.items():
+            code = "invalid-runtime-boolean" if type(zero) is bool else "invalid-runtime-string"
+            wrong_values = (0, 1, "false", None, [], {}) if type(zero) is bool else (0, False, None, [], {})
+            for side in ("loaded", "published"):
+                for peer in ("omitted", "zero"):
+                    for wrong in wrong_values:
+                        with self.subTest(key=key, side=side, peer=peer, wrong=wrong):
+                            local, published = public_ubuntu_transport_fixture("1.49")
+                            changed, unchanged = ((local["Config"], published["config"])
+                                if side == "loaded" else (published["config"], local["Config"]))
+                            changed[key] = wrong
+                            if peer == "omitted":
+                                unchanged.pop(key, None)
+                            else:
+                                unchanged[key] = zero
+                            self.assert_stop(code, M.compare, local, published, REVISION)
+
+    def test_captured_config_shape_still_rejects_unknown_zero_fields(self):
+        for side in ("loaded", "published", "both"):
+            local, published = public_ubuntu_transport_fixture("1.49")
+            if side in ("loaded", "both"):
+                local["Config"]["UnknownDockerDefault"] = False
+            if side in ("published", "both"):
+                published["config"]["UnknownDockerDefault"] = False
+            with self.subTest(side=side):
+                self.assert_stop("unknown-runtime-config-field", M.compare,
+                                 local, published, REVISION)
 
     def test_docker_absent_defaults_are_exact_but_null_is_not_empty_array(self):
         local, published = fixture()

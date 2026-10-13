@@ -31,10 +31,15 @@ TARGETS = {
     'portable': ('atrinik/classic-portable-build', 'atrinik-classic-portable:release-validation'),
 }
 WORKFLOW = '.github/workflows/publish-linux.yml'
-# Docker API 1.49–1.51 may materialize these absent fields. Never equate empty
-# arrays/objects with null, nor normalize non-default values or unknown keys.
+# Docker API 1.49 also materializes nine zero-valued container-only fields;
+# API 1.50 removes them. All supported APIs through 1.51 materialize the other
+# absence defaults below. Never equate empty arrays/objects with null, nor
+# normalize non-default values or unknown keys.
 DEFAULTS = {'Cmd': None, 'Entrypoint': None, 'Env': None, 'Labels': None,
-            'OnBuild': None, 'Volumes': None, 'User': '', 'WorkingDir': ''}
+            'OnBuild': None, 'Volumes': None, 'User': '', 'WorkingDir': '',
+            'Hostname': '', 'Domainname': '', 'Image': '',
+            'AttachStdin': False, 'AttachStdout': False, 'AttachStderr': False,
+            'Tty': False, 'OpenStdin': False, 'StdinOnce': False}
 CONFIG_KEYS = {'architecture', 'os', 'variant', 'os.version', 'os.features',
                'config', 'rootfs', 'author', 'created', 'history', 'moby.buildkit.cache.v0'}
 STRING_FIELDS = {'Hostname', 'Domainname', 'User', 'Image', 'WorkingDir', 'MacAddress', 'StopSignal'}
