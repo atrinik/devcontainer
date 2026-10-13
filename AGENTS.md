@@ -107,7 +107,11 @@
   compiler limits separate from model-worker concurrency. Build the shared
   `llvm-toolchain` stage once before parallel PR target validation; selected
   image jobs and the required aggregate retain that dependency. Cold source builds
-  may use the supported six-hour hosted-job timeout.
+  may use the supported six-hour hosted-job timeout. Input-filtered trusted
+  `main` pushes seed the same shared LLVM Actions cache for later PRs and
+  measurements; PR merge-ref and release-tag caches cannot seed another PR.
+  Keep that cache-only job separate from required PR image/native checks and
+  private-package access. Cache eviction or changed inputs can require rebuilding.
 - Every semantic release publishes the broad Linux, slim and portable Linux Classic,
   general Windows, and task-focused Windows Classic images with their
   supported tags. The Linux publisher owns `linux-build`, `classic-build`, and
@@ -137,6 +141,11 @@
   root fields and bounded UID/mode ownership headers before and after protected
   reads. Keep full stat equality for every nonroot path; see
   `tools/RELEASED_SDK_INVENTORY.md` for the root fence contract.
+  Fence the scanner's one-file bounded local log with compression disabled;
+  Moby rejects compression with a single retained file. Set its execution claim
+  after Docker accepts the start. Retain only validated fixed failure stages,
+  codes, exit status and errno names; keep arbitrary logs, paths and exception
+  text out of published diagnostics.
 - Validate Dockerfiles with `docker build --check`. Build and smoke-test each
   affected image, including `classic-validation` before `classic-final` and the
   Windows `classic-check` target plus native bundle; note that a cold

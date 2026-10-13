@@ -79,6 +79,11 @@ Producer CI gives cold source builds up to the supported six-hour hosted-job
 limit. It keeps LLVM and Windows build concurrency at two jobs each on hosted
 runners. A shared stage cache compiles the source once before parallel PR image
 validation; each target also retains its own LLVM-versioned cache scope.
+Trusted `main` pushes affecting the LLVM stage seed its shared Actions cache,
+which later PRs and measurements can restore. GitHub isolates caches created
+on PR merge refs and release tags, so those caches alone cannot seed a new PR.
+The first build, changed inputs, or cache eviction may still require a cold
+build; required image and native checks run independently of the cache seed.
 Increase build parallelism only for runners with corresponding CPU and memory
 capacity; model-worker concurrency does not set compiler concurrency.
 
