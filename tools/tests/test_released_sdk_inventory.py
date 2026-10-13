@@ -861,6 +861,93 @@ class InventoryTests(unittest.TestCase):
         with self.assertRaisesRegex(M.InventoryError, 'inventory-path-drift'):
             M.InstalledInventory(image, P).build_tools(self.build_receipt())
 
+    def test_root_mtime_drift_retains_fixed_diagnostic_and_rejects(self):
+        # Source-derived Moby model, not captured hosted evidence: every new
+        # filesystem view may create/remove a root .pivot_root directory.
+        image = self.installed_image()
+        request = image.docker.request.side_effect
+        def drift(method, route, headers):
+            conn, response = request(method, route, headers)
+            path = urllib.parse.parse_qs(urllib.parse.urlsplit(route).query)['path'][0]
+            self.assertEqual(path, '/')
+            response.headers['X-Docker-Container-Path-Stat'] = base64.b64encode(
+                json.dumps({**directory('/'), 'mtime': 'later-view'}).encode()).decode()
+            return conn, response
+        image.docker.request.side_effect = drift
+        progress = {'stage': 'source-archives-and-providers'}
+        reader = M.InstalledInventory(image, P)
+        reader.progress = progress
+        with self.assertRaisesRegex(M.InventoryError, 'inventory-path-drift'):
+            reader.read_provider('/usr/local/lib/libcurl.so.1.0.0')
+        self.assertEqual(progress, {
+            'stage': 'source-archives-and-providers',
+            'path_stat_drift': {'site': 'directory-header', 'subject': 'root-directory',
+                                'changed_fields': ['mtime'], 'field_set_changed': False,
+                                'unknown_fields_changed': False}})
+        image.docker.request.assert_called_once()
+        image.connections[0].close.assert_called_once()
+
+    def test_stat_diagnostics_preserve_all_field_and_unknown_field_rejections(self):
+        expected = directory('/')
+        secret = 'PRIVATE_TOKEN https://private.invalid/?signature=PRIVATE_SIGNATURE'
+        for key in (*expected, secret):
+            for actual in ({**expected, key: secret},
+                           {name: value for name, value in expected.items() if name != key}):
+                if actual == expected:
+                    continue
+                progress = {}
+                reader = M.InstalledInventory(self.fake_image(), P, progress=progress)
+                with self.subTest(key=key, removed=key not in actual), self.assertRaisesRegex(
+                        M.InventoryError, 'inventory-path-drift'):
+                    reader._same_stat(actual, expected, site='directory-header', path='/')
+                self.assertEqual(progress['path_stat_drift'], {
+                    'site': 'directory-header', 'subject': 'root-directory',
+                    'changed_fields': [key] if key in expected else [],
+                    'field_set_changed': actual.keys() != expected.keys(),
+                    'unknown_fields_changed': key not in expected})
+                self.assertNotIn(secret, json.dumps(progress))
+                # Diagnostics are optional, rejection is not.
+                with self.assertRaisesRegex(M.InventoryError, 'inventory-path-drift'):
+                    M.InstalledInventory(self.fake_image(), P)._same_stat(
+                        actual, expected, site='directory-header', path='/')
+        progress = {}
+        reader = M.InstalledInventory(self.fake_image(), P, progress=progress)
+        reader._same_stat(expected, expected, site='directory-header', path='/')
+        self.assertEqual(progress, {})
+
+    def test_stat_diagnostic_sites_cover_producer_regular_and_rechecks(self):
+        for site, path in (('producer-header', M.ROOT),
+                           ('regular-header', '/usr/local/lib/libcurl.so.1.0.0'),
+                           ('recheck', '/'), ('recheck', '/usr/local'),
+                           ('recheck', '/usr/local/lib/libcurl.so.1.0.0')):
+            image = self.installed_image()
+            progress = {}
+            reader = M.InstalledInventory(image, P, progress=progress)
+            if site == 'recheck':
+                expected = image.stat(path)
+                image.stat.side_effect = lambda _: {**expected, 'mtime': 'changed'}
+                operation = lambda: reader._recheck({path: expected})
+            else:
+                request = image.docker.request.side_effect
+                def drift(method, route, headers):
+                    conn, response = request(method, route, headers)
+                    requested = urllib.parse.parse_qs(urllib.parse.urlsplit(route).query)['path'][0]
+                    if requested == path:
+                        response.headers['X-Docker-Container-Path-Stat'] = base64.b64encode(
+                            json.dumps({**image.stat(path), 'mtime': 'changed'}).encode()).decode()
+                    return conn, response
+                image.docker.request.side_effect = drift
+                operation = reader.producer if site == 'producer-header' else lambda: reader.read_provider(path)
+            with self.subTest(site=site, path=path), self.assertRaisesRegex(
+                    M.InventoryError, 'inventory-path-drift'):
+                operation()
+            subject = 'root-directory' if path == '/' else 'file' if path.endswith('.so.1.0.0') else 'directory'
+            self.assertEqual(progress['path_stat_drift'], {
+                'site': site, 'subject': subject, 'changed_fields': ['mtime'],
+                'field_set_changed': False, 'unknown_fields_changed': False})
+            for conn in image.connections:
+                conn.close.assert_called_once()
+
     def test_root_directory_requires_exact_moby_archive_name(self):
         data = {path: b'tool' for path in M.BUILD_TOOLS.values()}
         for name in ('.', './', '//', '///', 'usr'):

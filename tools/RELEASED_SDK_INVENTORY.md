@@ -26,6 +26,25 @@ file, 8 GiB aggregate payload and a shared 900-second deadline; single-file
 reads use the same deadline and aggregate accounting. The existing collector's
 operation alarm and socket timeout remain required outer bounds.
 
+On a failed whole-path-stat comparison, `inventory_failure.path_stat_drift`
+records the fixed comparison site (`directory-header`, `producer-header`,
+`regular-header` or `recheck`), a fixed subject class (`root-directory`,
+`directory` or `file`), changed known field names (`name`, `size`, `mode`,
+`mtime`, `linkTarget`), and booleans for field-set and unknown-field changes.
+It never retains stat values, arbitrary field names, paths or exception text.
+The full comparison, including root metadata and unknown fields, still rejects
+every difference before inventories or scanner qualification can succeed.
+
+Moby Docker 29.4.2 opens a new filesystem view for each
+[`HEAD` or `GET` archive operation](https://github.com/moby/moby/blob/docker-v29.4.2/daemon/archive_unix.go).
+Its [`filesystem view`](https://github.com/moby/moby/blob/docker-v29.4.2/daemon/containerfs_linux.go)
+calls [`SwitchRoot`](https://github.com/moby/moby/blob/docker-v29.4.2/daemon/internal/mounttree/switchroot_linux.go),
+which can create and remove a temporary directory directly beneath the root.
+This supplies a source-derived explanation for root `mtime` drift between
+requests, but does not establish the site or changed field in a hosted failure
+whose stats were not retained. The diagnostic supports that next observation;
+it grants no metadata exception or SDK acceptance.
+
 Each producer record is `relative_path -> {sha256, size, executable}`, including
 zero-byte files. Canonical sorted compact JSON uses the wrapper's
 `linux_portable.inventory_digest` format. Common licenses use exactly the

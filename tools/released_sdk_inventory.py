@@ -528,9 +528,30 @@ class BudgetResponse:
 
 class InstalledInventory(ProviderReader):
     """Use only with an authenticated StoppedImage; does not grant release trust."""
-    def __init__(self, image, protocol):
+    def __init__(self, image, protocol, *, progress=None):
         self.image, self.protocol = image, protocol
         self.budget = Budget()
+        self.progress = progress
+
+    def _same_stat(self, actual, expected, *, site, path):
+        """Keep exact equality; describe drift without retaining daemon values."""
+        if actual != expected and self.progress is not None:
+            fields = ('name', 'size', 'mode', 'mtime', 'linkTarget')
+            mode = expected.get('mode')
+            subject = ('root-directory' if path == '/' else
+                       'directory' if type(mode) is int and mode & GO_DIRECTORY else 'file')
+            self.progress['path_stat_drift'] = {
+                'site': site,
+                'subject': subject,
+                'changed_fields': [key for key in fields
+                                   if (key in actual) != (key in expected)
+                                   or actual.get(key) != expected.get(key)],
+                'field_set_changed': actual.keys() != expected.keys(),
+                'unknown_fields_changed':
+                    {key: value for key, value in actual.items() if key not in fields} !=
+                    {key: value for key, value in expected.items() if key not in fields},
+            }
+        require(actual == expected, 'inventory-path-drift')
 
     def _fence(self):
         self.budget.check()
@@ -545,7 +566,8 @@ class InstalledInventory(ProviderReader):
         """
         conn, response = self._get(path)
         try:
-            require(self.protocol.path_stat(response) == expected, 'inventory-path-drift')
+            self._same_stat(self.protocol.path_stat(response), expected,
+                            site='directory-header', path=path)
             framing(response)
             info = next_member(response, self.budget, self.protocol)
             names = {'/'} if path == '/' else {PurePosixPath(path).name}
@@ -576,7 +598,7 @@ class InstalledInventory(ProviderReader):
     def _recheck(self, observations):
         for path, before in observations.items():
             self.budget.check()
-            require(self.image.stat(path) == before, 'inventory-path-drift')
+            self._same_stat(self.image.stat(path), before, site='recheck', path=path)
         self._fence()
 
     def _get(self, path):
@@ -592,7 +614,8 @@ class InstalledInventory(ProviderReader):
         observations[ROOT] = expected
         conn, response = self._get(ROOT)
         try:
-            require(self.protocol.path_stat(response) == expected, 'inventory-path-drift')
+            self._same_stat(self.protocol.path_stat(response), expected,
+                            site='producer-header', path=ROOT)
             result = tree_archive(response, self.protocol, expected, self.budget)
         finally:
             conn.close()
@@ -627,7 +650,8 @@ class InstalledInventory(ProviderReader):
         self.budget.member(expected['size'])
         conn, response = self._get(path)
         try:
-            require(self.protocol.path_stat(response) == expected, 'inventory-path-drift')
+            self._same_stat(self.protocol.path_stat(response), expected,
+                            site='regular-header', path=path)
             identity, _ = self.protocol.single_file_archive(
                 BudgetResponse(response, self.budget), path, expected, retain=False, executable=executable, root_owned=protected)
             self.budget.check()

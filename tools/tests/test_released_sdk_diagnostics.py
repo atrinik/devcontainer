@@ -59,7 +59,7 @@ class DiagnosticTests(unittest.TestCase):
             with self.subTest(kind=type(error).__name__):
                 self.assertEqual(I.failure_code(error), 'inventory-operation-failed')
 
-    def collect_failure(self, stage, error):
+    def collect_failure(self, stage, error, details=None):
         fixture = FIXTURES.OfflineTests()
         data, binary = fixture.portable_fixture()
         shader_path = I.ROOT + '/shader-generation.json'
@@ -90,7 +90,7 @@ class DiagnosticTests(unittest.TestCase):
             for operation in mocked[index + 1:]:
                 operation.assert_not_called()
         self.assertEqual(result['status'], 'stopped')
-        self.assertEqual(result['inventory_failure'], {'stage': stage})
+        self.assertEqual(result['inventory_failure'], {'stage': stage, **(details or {})})
         self.assertTrue(result['owned_container_removed'])
         self.assertFalse(result['image_code_executed'])
         self.assertFalse(result['final_portable_cohort'])
@@ -100,6 +100,19 @@ class DiagnosticTests(unittest.TestCase):
         for secret in ('PRIVATE_TOKEN', 'private.invalid', 'PRIVATE_SIGNATURE'):
             self.assertNotIn(secret, json.dumps(result))
         return result
+
+    def test_actual_stat_comparison_reaches_receipt_without_values_or_execution(self):
+        def drift(_records, _runtime, _contract, *, reader):
+            expected = {'name': '/', 'size': 4096, 'mode': I.GO_DIRECTORY | 0o755,
+                        'mtime': 'before', 'linkTarget': ''}
+            actual = {**expected, 'mtime': SECRET, SECRET: SECRET}
+            with patch.object(reader.image, 'stat', return_value=actual):
+                reader._recheck({'/': expected})
+        receipt = self.collect_failure('source-archives-and-providers', drift, {
+            'path_stat_drift': {'site': 'recheck', 'subject': 'root-directory',
+                                'changed_fields': ['mtime'], 'field_set_changed': True,
+                                'unknown_fields_changed': True}})
+        self.assertEqual(receipt['reason'], 'inventory-path-drift')
 
     def test_each_inventory_stage_retains_fixed_code_and_stops_before_scanner(self):
         for stage, code in (
