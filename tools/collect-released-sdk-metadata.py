@@ -932,7 +932,10 @@ def target_policy(target):
     return value
 
 
-def collect_final_inventory(container, data, file_records, llvm_tools, policy):
+def collect_final_inventory(container, data, file_records, llvm_tools, policy, *, progress=None):
+    # Only fixed local stages enter diagnostics; never paths or remote contents.
+    progress = progress if progress is not None else {}
+    progress['stage'] = 'metadata'
     protocol = SimpleNamespace(BINARY_LIMIT=BINARY_LIMIT, stat_matches=stat_matches, regular_mode=regular_mode,
         path_stat=path_stat, single_file_archive=single_file_archive, pax_times=pax_times)
     reader = INVENTORY.InstalledInventory(container, protocol)
@@ -944,18 +947,26 @@ def collect_final_inventory(container, data, file_records, llvm_tools, policy):
     require(contract.get('consumer', {}).get('commit') == policy['consumer_commit'] and
             contract['consumer'].get('repository') == 'atrinik/classic' and
             shader.get('source_commit') == policy['consumer_commit'], 'final-consumer-mismatch')
+    progress['stage'] = 'producer-tree'
     maps = {'producer': reader.producer()}
+    progress['stage'] = 'metadata-binding'
     INVENTORY.bind_metadata(maps['producer'], raw, records)
+    progress['stage'] = 'source-archives-and-providers'
     INVENTORY.crosscheck_archives(maps['producer'], documents['runtime-sources.json'], contract, reader=reader)
+    progress['stage'] = 'shader-inputs'
     inputs = shader.get('source_inputs')
     require(isinstance(inputs, dict) and 0 < len(inputs) <= INVENTORY.MAX_MEMBERS, 'final-shader-inputs')
     for path, sha in inputs.items():
         INVENTORY.relative_path(path)
         item = maps['producer'].get('sources/classic-shaders/' + path)
         require(isinstance(item, dict) and item.get('sha256') == sha, 'final-shader-input-bytes')
+    progress['stage'] = 'debian-notices'
     maps['debian_notices'] = reader.debian_notices(documents['runtime-sources.json'], documents['debian-sources.json'])
+    progress['stage'] = 'common-licenses'
     maps['common_licenses'] = reader.common_licenses()
+    progress['stage'] = 'build-tools'
     tools = reader.build_tools(documents['installed.json'])
+    progress['stage'] = 'inventory-report'
     require(set(llvm_tools) == set(TOOL_FILES) == set(INVENTORY.LLVM_TOOL_FILES), 'final-llvm-roles')
     llvm = {role: {key: item[key] for key in ('path', 'canonical_path', 'sha256', 'size')}
             | {'executable': bool(int(item['mode'], 8) & 0o111)} for role, item in llvm_tools.items()}
@@ -1147,6 +1158,7 @@ def collect(target, context, original, folder):
                'claim': 'installed-identity-only', 'image_code_executed': False,
                'final_portable_cohort': False, 'artifacts': [], 'tool_bytes': {}}
     container = None
+    inventory_progress = {}
     try:
         docker = runner_docker()
         receipt.update(docker.negotiate())
@@ -1191,7 +1203,9 @@ def collect(target, context, original, folder):
             receipt['tool_bytes'][role] = identity
         container.fence()
         if target in FINAL_TARGETS:
-            final_inventory = collect_final_inventory(container, data, file_records, receipt['tool_bytes'], policy)
+            final_inventory = collect_final_inventory(container, data, file_records, receipt['tool_bytes'], policy,
+                                                      progress=inventory_progress)
+            inventory_progress.clear()
             for name, records in final_inventory['inventories'].items():
                 receipt['artifacts'].append(save(folder, 'inventories/' + name + '.json', canonical_json(records)))
             receipt['inventory_sha256'] = final_inventory['inventory_sha256']
@@ -1206,9 +1220,13 @@ def collect(target, context, original, folder):
         receipt.update({'status': 'stopped', 'reason': str(error)})
         if isinstance(error, BlobRedirectDenied):
             receipt['redirect_rejection'] = error.diagnostics
+    except INVENTORY.InventoryError as error:
+        receipt.update({'status': 'stopped', 'reason': INVENTORY.failure_code(error)})
     except BaseException:
         receipt.update({'status': 'stopped', 'reason': 'operation-failed-no-details-retained'})
     finally:
+        if inventory_progress:
+            receipt['inventory_failure'] = dict(inventory_progress)
         if container is not None:
             try:
                 # Reserve cleanup time after an operation deadline. No forced stop,

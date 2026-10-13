@@ -14,6 +14,7 @@ on:
       - tools/scan-released-sdk-filesystem.py
       - tools/tests/test_released_sdk_inventory.py
       - tools/tests/test_released_sdk_filesystem.py
+      - tools/tests/test_released_sdk_diagnostics.py
       - tools/RELEASED_SDK_INVENTORY.md
   workflow_dispatch:
 

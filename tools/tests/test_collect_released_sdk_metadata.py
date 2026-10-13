@@ -9,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import tarfile
 import tempfile
@@ -1184,6 +1185,15 @@ class OfflineTests(unittest.TestCase):
 
     def test_workflow_is_same_repo_push_dispatch_read_only_and_pinned(self):
         text = (ROOT / M.WORKFLOW).read_text()
+        sdk_test_pattern = 'test*released*sdk*.py'
+        self.assertIn(f"-p '{sdk_test_pattern}'", text)
+        sdk_tests = {path.relative_to(ROOT).as_posix()
+                     for path in (ROOT / 'tools/tests').glob(sdk_test_pattern)}
+        self.assertTrue(sdk_tests)
+        push_paths = text.split('    paths:\n', 1)[1].split('  workflow_dispatch:', 1)[0]
+        selected_paths = set(re.findall(r'^      - (\S+)$', push_paths, re.MULTILINE))
+        self.assertFalse(sdk_tests - selected_paths,
+                         f'SDK tests missing from push paths: {sorted(sdk_tests - selected_paths)}')
         self.assertNotIn('  pull_request:', text)
         self.assertNotIn('pull_request_target:', text)
         self.assertIn('      - build/llvm-sdk118-collector-refresh', text)
