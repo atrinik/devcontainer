@@ -273,6 +273,45 @@ class WorkflowContracts(unittest.TestCase):
                 self.assertEqual(set(output.read_text().splitlines()),
                                  {'portable=true', 'classic=true', 'linux=true', 'windows=true'})
 
+    def test_publication_identity_inputs_select_linux_images(self):
+        script = step_script('validate.yml', 'Detect image changes')
+        cases = (
+            ('tools/verify_published_identity.py', True, False),
+            ('tools/tests/test_verify_published_identity.py', True, True),
+            ('tools/collect-released-sdk-metadata.py', True, False),
+            ('tools/tests/test_collect_released_sdk_metadata.py', True, True),
+            ('windows/Dockerfile', False, True),
+            ('README.md', False, False),
+            ('tools/unrelated-helper.py', False, False),
+        )
+        for changed, linux_selected, windows_selected in cases:
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                # Real isolated Git history exercises the workflow's exact diff command.
+                def git(*args):
+                    return subprocess.run(['git', *args], cwd=root, check=True,
+                                          capture_output=True, text=True).stdout.strip()
+                git('init', '-q')
+                git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                    '-c', 'commit.gpgsign=false', 'commit', '-qm', 'base', '--allow-empty')
+                base = git('rev-parse', 'HEAD')
+                source = root / changed
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text('isolated selector input\n')
+                git('add', '--', changed)
+                git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                    '-c', 'commit.gpgsign=false', 'commit', '-qm', 'change')
+                output = root / 'output'
+                env = dict(os.environ, GITHUB_OUTPUT=str(output),
+                           BASE_SHA=base, HEAD_SHA=git('rev-parse', 'HEAD'))
+                subprocess.run(['bash', '-euo', 'pipefail', '-c', script], cwd=root,
+                               env=env, check=True, capture_output=True, text=True)
+                selected = 'true' if linux_selected else 'false'
+                windows = 'true' if windows_selected else 'false'
+                self.assertEqual(set(output.read_text().splitlines()),
+                                 {f'portable={selected}', f'classic={selected}',
+                                  f'linux={selected}', f'windows={windows}'})
+
     def test_pr_workflow_remains_private_package_free_and_strict(self):
         text = workflow('validate.yml')
         self.assertNotIn('packages:', text)
