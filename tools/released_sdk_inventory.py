@@ -60,6 +60,99 @@ class InventoryError(Exception):
     """Only fixed failure codes; never hostile archive or daemon contents."""
 
 
+# Receipt diagnostics admit these exact source-defined codes only. Unknown
+# exceptions, subclasses and payloads remain opaque even if they look like codes.
+FAILURE_CODES = frozenset({
+    'build-tool-bytes-mismatch',
+    'build-tool-fields',
+    'build-tool-identity',
+    'build-tool-path',
+    'build-tool-schema',
+    'file-size-limit',
+    'inventory-audio-source',
+    'inventory-audio-sources',
+    'inventory-cares-source',
+    'inventory-compiler-schema',
+    'inventory-contract-schema',
+    'inventory-curl-archives',
+    'inventory-curl-source',
+    'inventory-custom-provider',
+    'inventory-custom-providers',
+    'inventory-deadline',
+    'inventory-directory-entry',
+    'inventory-directory-mode',
+    'inventory-directory-owner',
+    'inventory-duplicate',
+    'inventory-empty',
+    'inventory-encoding',
+    'inventory-end-markers',
+    'inventory-extension-or-link',
+    'inventory-file-not-allowed',
+    'inventory-header-invalid',
+    'inventory-llvm-archive-path',
+    'inventory-llvm-source',
+    'inventory-manifest-bytes-mismatch',
+    'inventory-manifest-duplicate',
+    'inventory-manifest-json',
+    'inventory-manifest-missing-or-size',
+    'inventory-manifest-path',
+    'inventory-manifest-payloads',
+    'inventory-manifest-schema',
+    'inventory-manifest-size',
+    'inventory-member-type',
+    'inventory-metadata-binding',
+    'inventory-metadata-files',
+    'inventory-metadata-size',
+    'inventory-owner-invalid',
+    'inventory-padding',
+    'inventory-parent-missing',
+    'inventory-path-drift',
+    'inventory-path-invalid',
+    'inventory-pax-invalid',
+    'inventory-provider-bytes-mismatch',
+    'inventory-provider-identity',
+    'inventory-provider-reader-required',
+    'inventory-report-roles',
+    'inventory-root-mismatch',
+    'inventory-size-limit',
+    'inventory-source-bytes-mismatch',
+    'inventory-source-cohort',
+    'inventory-source-conflict',
+    'inventory-source-digest',
+    'inventory-source-documents',
+    'inventory-source-name',
+    'inventory-source-row',
+    'inventory-stream-limit',
+    'inventory-tail',
+    'inventory-tail-alignment',
+    'inventory-truncated',
+    'inventory-unframed',
+    'notice-alias-cycle-or-limit',
+    'notice-alias-drift',
+    'notice-alias-entry',
+    'notice-alias-extra-member',
+    'notice-alias-stat',
+    'notice-alias-target',
+    'notice-boundary',
+    'notice-directory-invalid',
+    'notice-documents-invalid',
+    'notice-mode-invalid',
+    'notice-package-invalid',
+    'notice-row-invalid',
+    'notice-source-invalid',
+    'notice-source-missing',
+    'scanner-inventory-mismatch',
+    'scanner-report-shape',
+})
+
+
+def failure_code(error):
+    if (type(error) is InventoryError and len(error.args) == 1
+            and type(error.args[0]) is str and error.args[0] in FAILURE_CODES):
+        return error.args[0]
+    return 'inventory-operation-failed'
+
+
 class ProviderReader(ABC):
     """Authenticated byte reader supplied by the source-inventory caller.
 
