@@ -7,6 +7,7 @@ import subprocess
 
 from compiler_evidence import record
 from curl_evidence import record as record_curl
+from build_tools import capture, record as record_build_tools
 
 root = Path(__file__).resolve().parent
 contract = json.loads((root / "contract.json").read_text())
@@ -25,17 +26,22 @@ for line in output("dpkg-query", "-W", "-f=${binary:Package}\t${Version}\t${sour
 evidence = record()
 evidence_path = root / "compiler-evidence.json"
 evidence_path.write_text(json.dumps(evidence, indent=2) + "\n")
+build_tools = record_build_tools()
+producer_installed = {"build_tools": build_tools,
+                      "tools": {role: item["version"].splitlines()[0] for role, item in build_tools["tools"].items()}}
 actual = {"schema_version": 2, "contract_sha256": hashlib.sha256((root / "contract.json").read_bytes()).hexdigest(),
           "architecture": output("dpkg", "--print-architecture"), "glibc": output("getconf", "GNU_LIBC_VERSION"),
           "tools": {name: output(*args).splitlines()[0] for name, args in {
               "cc": ["clang", "--version"], "linker": ["ld.lld", "--version"],
-              "readelf": ["llvm-readelf", "--version"], "cmake": ["cmake", "--version"],
-              "ninja": ["ninja", "--version"], "python": ["python3", "--version"],
-              "git-lfs": ["git", "lfs", "version"], "openssl": ["openssl", "version"]}.items()},
+              "readelf": ["llvm-readelf", "--version"], "python": ["python3", "--version"],
+              "git-lfs": ["git", "lfs", "version"], "openssl": ["openssl", "version"]}.items()
+                    } | producer_installed["tools"],
+          "build_tools": build_tools,
           "compiler_target": evidence["target"],
           "compiler_evidence_sha256": hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
-          "pkg_config": {name: output("pkg-config", "--modversion", name) for name in contract["pkg_config"]},
-          "curl": record_curl(root / contract["curl_manifest"])}
+          "pkg_config": {name: capture(producer_installed, "pkg_config", ["--modversion", name]).strip()
+                         for name in contract["pkg_config"]},
+          "curl": record_curl(root / contract["curl_manifest"], installed=producer_installed)}
 assert actual["architecture"] == "amd64"
 assert actual["glibc"] == "glibc 2.36"
 for name, version in contract["pkg_config"].items():

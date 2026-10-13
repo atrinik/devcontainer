@@ -2,6 +2,7 @@
 set -euo pipefail
 root=/opt/atrinik-portable
 test "$(id -u)" != 0
+python3 "${root}/build_tools.py" --verify "${root}/installed.json"
 python3 - <<'READABLE'
 import os
 from pathlib import Path
@@ -33,7 +34,9 @@ cd "${work}"
 python3 "${root}/abi.py" --output abi.json
 "${root}/audio/sdl3-mixer-probe" "${root}/audio/opus-probe.opus"
 # pkg-config emits flags for the pinned build inputs; no user-provided shell code.
-read -r -a media_flags <<< "$(pkg-config --cflags --libs sdl3-image sdl3-ttf)"
+media_output=$(python3 "${root}/build_tools.py" --verify "${root}/installed.json" --run pkg_config -- \
+  --cflags --libs sdl3-image sdl3-ttf)
+read -r -a media_flags <<< "${media_output}"
 clang -O2 -march=x86-64 -mtune=generic "${root}/media-smoke.c" \
   -o media-smoke "${media_flags[@]}"
 ./media-smoke /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
@@ -42,3 +45,4 @@ grep -q 'OpenSSL Default Provider' providers.txt
 grep -q 'OpenSSL Legacy Provider' providers.txt
 python3 "${root}/abi.py" --output media-abi.json ./media-smoke
 (cd "${root}/shaders" && sha256sum -c SHA256SUMS)
+python3 "${root}/build_tools.py" --verify "${root}/installed.json"

@@ -13,6 +13,8 @@ import shlex
 import subprocess
 import tempfile
 
+from build_tools import capture, load_installed
+
 
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -56,8 +58,10 @@ def tls_results(positive: dict, negative: dict) -> None:
         raise ValueError("portable public-CA qualification failed")
 
 
-def record(manifest_path: Path, public_ca: Path | None = None) -> dict:
+def record(manifest_path: Path, public_ca: Path | None = None, *, installed: dict | None = None) -> dict:
     root = manifest_path.parent
+    if installed is None:
+        installed = load_installed(root / "installed.json")
     manifest = json.loads(manifest_path.read_text())
     shared_path = root / manifest["cares_manifest"]
     shared = json.loads(shared_path.read_text())
@@ -66,8 +70,8 @@ def record(manifest_path: Path, public_ca: Path | None = None) -> dict:
     retained = root / "sources/curl"
     configuration((retained / "curl_config.h").read_text())
     for package, expected in (("libcurl", manifest["version"]), ("libcares", shared["cares"]["version"])):
-        prefix = subprocess.check_output(["pkg-config", "--variable=prefix", package], text=True).strip()
-        version = subprocess.check_output(["pkg-config", "--modversion", package], text=True).strip()
+        prefix = capture(installed, "pkg_config", ["--variable=prefix", package]).strip()
+        version = capture(installed, "pkg_config", ["--modversion", package]).strip()
         if prefix != manifest["prefix"] or version != expected:
             raise ValueError("wrong active portable curl pkg-config: " + package)
     if public_ca is not None:
@@ -75,7 +79,7 @@ def record(manifest_path: Path, public_ca: Path | None = None) -> dict:
     tls = None
     with tempfile.TemporaryDirectory(prefix="portable-curl-probe-") as temporary:
         binary = Path(temporary) / "probe"
-        package_flags = shlex.split(subprocess.check_output(["pkg-config", "--cflags", "--libs", "libcurl", "libcares"], text=True))
+        package_flags = shlex.split(capture(installed, "pkg_config", ["--cflags", "--libs", "libcurl", "libcares"]))
         command = ["/opt/llvm-23.1.3/bin/clang", "-O2", "-march=x86-64", "-mtune=generic", "-Wall", "-Wextra", "-Werror",
                    str(root / "curl-runtime-probe.c"), "-o", str(binary), *package_flags, "-ldl"]
         subprocess.run(command, check=True)

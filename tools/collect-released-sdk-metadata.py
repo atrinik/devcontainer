@@ -611,7 +611,7 @@ def pax_times(raw):
         raw = raw[length:]
 
 
-def single_file_archive(response, path, expected, *, retain, executable=False):
+def single_file_archive(response, path, expected, *, retain, executable=False, allow_empty=False, root_owned=False):
     """Read one regular file; reject all links/extensions/path changes, never extract."""
     require(response.chunked or response.length is not None, 'unframed-archive')
     require(response.getheader('Content-Encoding') in (None, 'identity') and
@@ -620,7 +620,9 @@ def single_file_archive(response, path, expected, *, retain, executable=False):
     stat_matches(expected, path)
     regular_mode(expected['mode'], executable)
     limit = METADATA_LIMIT if retain else BINARY_LIMIT
-    require(0 < expected['size'] <= limit, 'file-size-limit')
+    # Only producer-tree inventory reads opt in to legitimate empty source files.
+    # Curated metadata, notices and canonical tools must always contain bytes.
+    require((0 if allow_empty else 1) <= expected['size'] <= limit, 'file-size-limit')
     header = exact_read(response, 512)
     info = tarfile.TarInfo.frombuf(header, 'utf-8', 'strict')
     if info.type == tarfile.XHDTYPE:
@@ -634,6 +636,7 @@ def single_file_archive(response, path, expected, *, retain, executable=False):
     regular_mode(info.mode, executable)
     require(info.mode == expected['mode'] and info.uid >= 0 and info.gid >= 0,
             'archive-metadata-mismatch')
+    require(not root_owned or info.uid == 0, 'archive-owner-mismatch')
     sha = hashlib.sha256()
     saved = bytearray() if retain else None
     remaining = info.size

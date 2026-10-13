@@ -21,6 +21,17 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def record_curl_production(root: Path) -> dict:
+    """The cold producer has no installed.json yet; generate real tool identities."""
+    from build_tools import record as record_build_tools
+    from curl_evidence import record
+
+    build_tools = record_build_tools()
+    installed = {"build_tools": build_tools,
+                 "tools": {role: item["version"].splitlines()[0] for role, item in build_tools["tools"].items()}}
+    return record(root / "curl-toolchain.json", installed=installed)
+
+
 def checksum_table(text: str, field: str) -> dict[str, str]:
     lines = text.splitlines()
     start = lines.index(field + ":") + 1
@@ -171,8 +182,7 @@ def main(root: Path, jobs: int) -> None:
                    "cares_manifest_sha256": digest(root / manifest["cares_manifest"])}
         (root / "curl-source-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
     subprocess.run(["ldconfig"], check=True)
-    from curl_evidence import record
-    record(root / "curl-toolchain.json")
+    record_curl_production(root)
 
 
 if __name__ == "__main__":

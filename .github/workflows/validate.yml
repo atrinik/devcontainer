@@ -39,6 +39,8 @@ jobs:
             case "${path}" in
             .dockerignore | llvm-toolchain.json | llvm-bootstrap-packages.lock | \
                 tools/install_llvm_toolchain.py | tools/validate_llvm_toolchain.py | \
+                tools/verify_published_identity.py | tools/tests/test_verify_published_identity.py | \
+                tools/collect-released-sdk-metadata.py | tools/tests/test_collect_released_sdk_metadata.py | \
                 tools/tests/test_install_llvm_toolchain.py | tools/tests/test_workflow_contracts.py | .github/actionlint.yaml | .github/workflows/* | \
                 portable/* | classic-packages.lock | classic-curl-toolchain.json | \
                 classic-shader-toolchain.json | classic-shader-toolchain.spdx.json | \
@@ -51,6 +53,8 @@ jobs:
             case "${path}" in
             .dockerignore | llvm-toolchain.json | llvm-bootstrap-packages.lock | \
                 tools/install_llvm_toolchain.py | tools/validate_llvm_toolchain.py | \
+                tools/verify_published_identity.py | tools/tests/test_verify_published_identity.py | \
+                tools/collect-released-sdk-metadata.py | tools/tests/test_collect_released_sdk_metadata.py | \
                 tools/tests/test_install_llvm_toolchain.py | tools/tests/test_workflow_contracts.py | .github/actionlint.yaml | \
                 .github/workflows/* | linux/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
@@ -72,6 +76,8 @@ jobs:
             case "${path}" in
             .dockerignore | llvm-toolchain.json | llvm-bootstrap-packages.lock | \
                 tools/install_llvm_toolchain.py | tools/validate_llvm_toolchain.py | \
+                tools/verify_published_identity.py | tools/tests/test_verify_published_identity.py | \
+                tools/collect-released-sdk-metadata.py | tools/tests/test_collect_released_sdk_metadata.py | \
                 tools/tests/test_install_llvm_toolchain.py | tools/tests/test_workflow_contracts.py | .github/workflows/publish-linux.yml | \
                 .github/workflows/validate.yml | linux/* | \
                 audio-toolchain.json | audio-toolchain.spdx.json | \
