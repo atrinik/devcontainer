@@ -431,7 +431,7 @@ class FilesystemTests(unittest.TestCase):
             return source_check(producer, runtime, contract, reader=reader)
         expected_reader = reader
         reader_class = C.INVENTORY.InstalledInventory
-        def new_reader(cls, *args):
+        def new_reader(cls, *args, **kwargs):
             return expected_reader
         with patch.object(reader_class, '__new__', new_reader), \
                 patch.object(C.INVENTORY, 'crosscheck_archives', side_effect=reader_check) as crosscheck:

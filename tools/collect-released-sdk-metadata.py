@@ -938,7 +938,7 @@ def collect_final_inventory(container, data, file_records, llvm_tools, policy, *
     progress['stage'] = 'metadata'
     protocol = SimpleNamespace(BINARY_LIMIT=BINARY_LIMIT, stat_matches=stat_matches, regular_mode=regular_mode,
         path_stat=path_stat, single_file_archive=single_file_archive, pax_times=pax_times)
-    reader = INVENTORY.InstalledInventory(container, protocol)
+    reader = INVENTORY.InstalledInventory(container, protocol, progress=progress)
     raw = {path.removeprefix(INVENTORY.ROOT + '/'): value for path, value in data.items()
            if path.startswith(INVENTORY.ROOT + '/')}
     records = {name: file_records[INVENTORY.ROOT + '/' + name] for name in raw}
