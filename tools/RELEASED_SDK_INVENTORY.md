@@ -32,18 +32,44 @@ records the fixed comparison site (`directory-header`, `producer-header`,
 `directory` or `file`), changed known field names (`name`, `size`, `mode`,
 `mtime`, `linkTarget`), and booleans for field-set and unknown-field changes.
 It never retains stat values, arbitrary field names, paths or exception text.
-The full comparison, including root metadata and unknown fields, still rejects
-every difference before inventories or scanner qualification can succeed.
+Every nonroot path retains full stat equality, including timestamps, sizes and
+unknown fields, before inventories or scanner qualification can succeed.
 
 Moby Docker 29.4.2 opens a new filesystem view for each
 [`HEAD` or `GET` archive operation](https://github.com/moby/moby/blob/docker-v29.4.2/daemon/archive_unix.go).
 Its [`filesystem view`](https://github.com/moby/moby/blob/docker-v29.4.2/daemon/containerfs_linux.go)
 calls [`SwitchRoot`](https://github.com/moby/moby/blob/docker-v29.4.2/daemon/internal/mounttree/switchroot_linux.go),
 which can create and remove a temporary directory directly beneath the root.
-This supplies a source-derived explanation for root `mtime` drift between
-requests, but does not establish the site or changed field in a hosted failure
-whose stats were not retained. The diagnostic supports that next observation;
-it grants no metadata exception or SDK acceptance.
+The resulting root `mtime` is specific to that filesystem view. Root `size` is
+the raw `lstat.Size()` of the directory: Go documents nonregular-file size as
+[system-dependent](https://go.dev/src/io/fs/fs.go), and Linux directories store
+[directory entries in filesystem data blocks](https://docs.kernel.org/filesystems/ext4/directory.html).
+Creating/removing a directory entry does not guarantee restoring that storage
+size. This differs from the root tar header's required zero payload size.
+
+Only the exact `/` path uses a separate metadata fence. Both root stats must
+have exactly `name`, `size`, `mode`, `mtime` and `linkTarget`; unknown or absent
+fields fail even when both snapshots agree. Name must be `/`, link target must
+be empty, and mode must be a true integer containing only the Go directory bit
+and safe permissions. These fields remain exactly equal across views. Size must
+be a true integer in `0..2^63-1`; mtime must be a valid calendar timestamp in
+RFC3339Nano form (years 1–9999, at most nine fractional digits, explicit UTC or
+numeric offset). These two view-local fields are validated but not compared for
+equality at `/`. This exception never applies to any other path.
+
+Protected reads retain the exact created-container identity, selected image,
+mount, read-only and network isolation fences before and after reading bytes.
+Root ownership is checked through a bounded GET header both before and after
+the protected read: exact `/` name, directory type, matching mode, UID 0 and
+zero tar payload size. Each stream closes after the header. The existing GID
+policy is unchanged. All provider/tool bytes and nonroot ancestor stats remain
+fenced, and the separate scanner must still prove complete inventory equality.
+
+The Moby source proves that root timestamp equality is an invalid cross-view
+invariant. It does not establish the actual comparison site or changed field
+in a hosted failure whose stats were not retained. Source-derived fixtures and
+diagnostics do not qualify the released SDK; actual hosted collection and
+filesystem equality remain required.
 
 Each producer record is `relative_path -> {sha256, size, executable}`, including
 zero-byte files. Canonical sorted compact JSON uses the wrapper's

@@ -2,11 +2,12 @@
 # SPDX-License-Identifier: MIT
 """Internal fixed-boundary inventory reader; no CLI or acquisition authority.
 
-The caller must supply the collector's authenticated, created-state StoppedImage
-and its archive protocol. This foundation is deliberately not wired to a release
-target: final producer/consumer/index/platform/config pins are still required.
+The fixed final-target collector supplies its authenticated, created-state
+StoppedImage and archive protocol. This helper grants no acquisition or release
+trust; target pins and hosted filesystem qualification belong to the caller.
 """
 from abc import ABC, abstractmethod
+import datetime
 import hashlib
 import json
 from pathlib import PurePosixPath
@@ -534,8 +535,17 @@ class InstalledInventory(ProviderReader):
         self.progress = progress
 
     def _same_stat(self, actual, expected, *, site, path):
-        """Keep exact equality; describe drift without retaining daemon values."""
-        if actual != expected and self.progress is not None:
+        """Fence stable root fields and full nonroot stats; retain no values."""
+        require(type(actual) is dict and type(expected) is dict, 'inventory-path-drift')
+        matches = actual == expected
+        if path == '/':
+            # Moby's separate filesystem views create/remove a pivot directory
+            # beneath /. Its mtime and directory storage size are view-local.
+            # Only these two validated fields are excluded from root equality.
+            matches = (self._valid_root_stat(actual) and self._valid_root_stat(expected)
+                       and {key: value for key, value in actual.items() if key not in ('size', 'mtime')} ==
+                           {key: value for key, value in expected.items() if key not in ('size', 'mtime')})
+        if not matches and self.progress is not None:
             fields = ('name', 'size', 'mode', 'mtime', 'linkTarget')
             mode = expected.get('mode')
             subject = ('root-directory' if path == '/' else
@@ -551,7 +561,26 @@ class InstalledInventory(ProviderReader):
                     {key: value for key, value in actual.items() if key not in fields} !=
                     {key: value for key, value in expected.items() if key not in fields},
             }
-        require(actual == expected, 'inventory-path-drift')
+        require(matches, 'inventory-path-drift')
+
+    @staticmethod
+    def _valid_root_stat(value):
+        if type(value) is not dict or set(value) != {'name', 'size', 'mode', 'mtime', 'linkTarget'}:
+            return False
+        mode, size, mtime = value['mode'], value['size'], value['mtime']
+        if not (value['name'] == '/' and value['linkTarget'] == ''
+                and type(mode) is int and mode & ~0o777 == GO_DIRECTORY
+                and mode & 0o022 == 0 and mode & 0o555 == 0o555
+                and type(size) is int and 0 <= size <= 2**63 - 1
+                and type(mtime) is str and len(mtime) <= 35
+                and re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]'
+                                 r'(?:\.[0-9]{1,9})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])', mtime)):
+            return False
+        try:
+            datetime.datetime.fromisoformat(mtime)
+        except ValueError:
+            return False
+        return True
 
     def _fence(self):
         self.budget.check()
@@ -586,7 +615,7 @@ class InstalledInventory(ProviderReader):
             self.budget.check()
             value = self.image.stat(str(parent))
             if str(parent) == '/':
-                require(value.get('name') == '/', 'inventory-directory-entry')
+                require(self._valid_root_stat(value), 'inventory-directory-entry')
                 self.protocol.stat_matches({**value, 'name': ''}, '/', directory=True)
             else:
                 self.protocol.stat_matches(value, str(parent), directory=True)
@@ -598,7 +627,12 @@ class InstalledInventory(ProviderReader):
     def _recheck(self, observations):
         for path, before in observations.items():
             self.budget.check()
-            self._same_stat(self.image.stat(path), before, site='recheck', path=path)
+            after = self.image.stat(path)
+            self._same_stat(after, before, site='recheck', path=path)
+            if path == '/':
+                # HEAD cannot prove ownership. Recheck the bounded UID/mode
+                # header after protected bytes as well as before them.
+                self._directory_owner(path, after)
         self._fence()
 
     def _get(self, path):

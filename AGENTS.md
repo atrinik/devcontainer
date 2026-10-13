@@ -132,6 +132,11 @@
   and index/platform/config tuple. Its hosted acquisition and filesystem
   qualification must succeed before wrapper metadata/inventory pins are adopted;
   release publication alone does not establish those inventories.
+  Docker archive views may mutate root directory size/mtime while switching
+  roots: validate those fields under the exact `/` schema, retain exact stable
+  root fields and bounded UID/mode ownership headers before and after protected
+  reads. Keep full stat equality for every nonroot path; see
+  `tools/RELEASED_SDK_INVENTORY.md` for the root fence contract.
 - Validate Dockerfiles with `docker build --check`. Build and smoke-test each
   affected image, including `classic-validation` before `classic-final` and the
   Windows `classic-check` target plus native bundle; note that a cold

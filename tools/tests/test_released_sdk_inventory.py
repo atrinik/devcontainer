@@ -43,7 +43,7 @@ class Response(io.BytesIO):
 
 def directory(path):
     return {'name': Path(path).name if path != '/' else '/', 'mode': M.GO_DIRECTORY | 0o755,
-            'size': 4096, 'mtime': 'fixed', 'linkTarget': ''}
+            'size': 4096, 'mtime': '2026-10-13T01:02:03.123456789Z', 'linkTarget': ''}
 
 
 def regular(path, raw):
@@ -861,9 +861,7 @@ class InventoryTests(unittest.TestCase):
         with self.assertRaisesRegex(M.InventoryError, 'inventory-path-drift'):
             M.InstalledInventory(image, P).build_tools(self.build_receipt())
 
-    def test_root_mtime_drift_retains_fixed_diagnostic_and_rejects(self):
-        # Source-derived Moby model, not captured hosted evidence: every new
-        # filesystem view may create/remove a root .pivot_root directory.
+    def test_malformed_root_mtime_retains_fixed_diagnostic_and_rejects(self):
         image = self.installed_image()
         request = image.docker.request.side_effect
         def drift(method, route, headers):
@@ -886,6 +884,175 @@ class InventoryTests(unittest.TestCase):
                                 'unknown_fields_changed': False}})
         image.docker.request.assert_called_once()
         image.connections[0].close.assert_called_once()
+
+    def changing_root_image(self, payloads=None, *, fields=('size', 'mtime')):
+        """Source-derived Moby view model; not captured hosted observations."""
+        image = self.installed_image(payloads)
+        stat, request = image.stat.side_effect, image.docker.request.side_effect
+        image.root_views = []
+        def root_view(method, value):
+            image.root_views.append(method)
+            number = len(image.root_views)
+            changed = {'size': 4096 + number * 512,
+                       'mtime': f'2026-10-13T01:02:03.{number:09d}Z'}
+            return {**value, **{key: changed[key] for key in fields}}
+        def head(path):
+            value = stat(path)
+            return root_view('HEAD', value) if path == '/' else value
+        def get(method, route, headers):
+            conn, response = request(method, route, headers)
+            path = urllib.parse.parse_qs(urllib.parse.urlsplit(route).query)['path'][0]
+            if path == '/':
+                response.headers['X-Docker-Container-Path-Stat'] = base64.b64encode(
+                    json.dumps(root_view('GET', directory('/'))).encode()).decode()
+                # Both the pre-read and post-read root GET must consume only
+                # the single ownership header and close the recursive stream.
+                read = response.read
+                def bounded(size):
+                    self.assertEqual((response.tell(), size), (0, 512))
+                    return read(size)
+                response.read = bounded
+            return conn, response
+        image.stat.side_effect, image.docker.request.side_effect = head, get
+        return image
+
+    def test_root_view_size_and_mtime_churn_preserves_protected_provider_and_tool_reads(self):
+        for fields in (('size',), ('mtime',), ('size', 'mtime')):
+            for tools in (False, True):
+                payloads = {path: b'tool' for path in M.BUILD_TOOLS.values()} if tools else None
+                image = self.changing_root_image(payloads, fields=fields)
+                progress = {}
+                reader = M.InstalledInventory(image, P, progress=progress)
+                with self.subTest(fields=fields, tools=tools):
+                    if tools:
+                        result = reader.build_tools(self.build_receipt())
+                        self.assertEqual(result, self.build_receipt()['build_tools']['tools'])
+                    else:
+                        result = reader.read_provider('/usr/local/lib/libcurl.so.1.0.0')
+                        self.assertEqual(result, {'sha256': hashlib.sha256(b'libcurl').hexdigest(),
+                                                  'size': 7, 'executable': True})
+                    count = 3 if tools else 1
+                    self.assertEqual(image.root_views, ['HEAD', 'GET', 'HEAD', 'GET'] * count)
+                    self.assertEqual(image.fence.call_count, 2 * count)
+                    self.assertEqual(progress, {})
+                    for conn in image.connections:
+                        conn.close.assert_called_once()
+
+    def test_root_view_churn_never_masks_stable_field_or_schema_drift(self):
+        changes = ({'name': 'elsewhere'}, {'mode': M.GO_DIRECTORY | 0o555},
+                   {'mode': M.GO_DIRECTORY | 0o777}, {'mode': M.GO_SYMLINK | 0o755},
+                   {'mode': 0o755}, {'mode': True}, {'linkTarget': '/elsewhere'},
+                   {'extra': 'PRIVATE_VALUE'}, {'size': True}, {'size': -1},
+                   {'size': 2**63}, {'size': 4096.0}, {'mtime': None}, {'mtime': 1},
+                   {'mtime': '2026-02-30T01:02:03Z'}, {'mtime': '2026-10-13T24:00:00Z'},
+                   {'mtime': '2026-10-13T01:02:03'}, {'mtime': '2026-10-13T01:02:03+24:00'},
+                   {'mtime': '2026-10-13T01:02:03.1234567890Z'})
+        for change in changes:
+            for phase in (1, 2):
+                image = self.changing_root_image()
+                request = image.docker.request.side_effect
+                calls = 0
+                def get(method, route, headers):
+                    nonlocal calls
+                    conn, response = request(method, route, headers)
+                    if urllib.parse.parse_qs(urllib.parse.urlsplit(route).query)['path'] == ['/']:
+                        calls += 1
+                        if calls == phase:
+                            value = {**P.path_stat(response), **change}
+                            response.headers['X-Docker-Container-Path-Stat'] = base64.b64encode(
+                                json.dumps(value).encode()).decode()
+                    return conn, response
+                image.docker.request.side_effect = get
+                with self.subTest(change=change, phase=phase), self.assertRaisesRegex(
+                        M.InventoryError, 'inventory-path-drift'):
+                    M.InstalledInventory(image, P).read_provider('/usr/local/lib/libcurl.so.1.0.0')
+                for conn in image.connections:
+                    conn.close.assert_called_once()
+        # Unknown or absent root fields also fail if both snapshots agree.
+        for value in ({**directory('/'), 'extra': 'same'},
+                      *[{key: item for key, item in directory('/').items() if key != missing}
+                        for missing in directory('/')]):
+            with self.subTest(value=value), self.assertRaisesRegex(M.InventoryError, 'inventory-path-drift'):
+                M.InstalledInventory(self.fake_image(), P)._same_stat(
+                    value, value, site='directory-header', path='/')
+        for value in (None, [], '/', 0):
+            for actual, expected in ((value, directory('/')), (directory('/'), value)):
+                with self.subTest(value=value), self.assertRaisesRegex(M.InventoryError, 'inventory-path-drift'):
+                    M.InstalledInventory(self.fake_image(), P)._same_stat(
+                        actual, expected, site='directory-header', path='/')
+        for mtime in ('2026-10-13T01:02:03Z', '2026-10-13T01:02:03.1+05:30',
+                      '2026-10-13T01:02:03.123456789-06:00'):
+            self.assertTrue(M.InstalledInventory._valid_root_stat({**directory('/'), 'mtime': mtime}))
+
+    def test_root_view_churn_keeps_postread_ownership_and_container_fences(self):
+        for extra in ({'uid': 1000}, {'mode': 0o555}, {'type': tarfile.SYMTYPE, 'linkname': 'other'},
+                      {'name': 'other'}, {'size': 1}):
+            image = self.changing_root_image()
+            request = image.docker.request.side_effect
+            calls = 0
+            def get(method, route, headers):
+                nonlocal calls
+                conn, response = request(method, route, headers)
+                if urllib.parse.parse_qs(urllib.parse.urlsplit(route).query)['path'] == ['/']:
+                    calls += 1
+                    if calls == 2:
+                        response = Response(tar([('/', b'x' if extra.get('size') else b'',
+                                                  tarfile.DIRTYPE, extra)]), P.path_stat(response))
+                return conn, response
+            image.docker.request.side_effect = get
+            with self.subTest(extra=extra), self.assertRaises(M.InventoryError):
+                M.InstalledInventory(image, P).read_provider('/usr/local/lib/libcurl.so.1.0.0')
+            self.assertEqual(calls, 2)
+            for conn in image.connections:
+                conn.close.assert_called_once()
+        fixtures = load('root_fence_collector_fixture', ROOT / 'tools/tests/test_collect_released_sdk_metadata.py')
+        for changed in ({'Id': 'd' * 64}, {'State': {'Status': 'running', 'Running': True, 'Pid': 1}},
+                        {'Mounts': [{'Source': '/foreign'}]},
+                        {'HostConfig': {'ReadonlyRootfs': False, 'NetworkMode': 'none'}},
+                        {'HostConfig': {'ReadonlyRootfs': True, 'NetworkMode': 'host'}},
+                        {'Image': 'sha256:' + 'd' * 64}, {'ImageManifestDescriptor': {}}):
+            image = self.changing_root_image()
+            owned, pristine = fixtures.OfflineTests().stopped()
+            owned.docker.get.side_effect = [pristine, {**pristine, **changed}]
+            image.fence.side_effect = owned.fence
+            with self.subTest(changed=changed), self.assertRaises(fixtures.M.Stop):
+                M.InstalledInventory(image, P).read_provider('/usr/local/lib/libcurl.so.1.0.0')
+            self.assertEqual(image.root_views, ['HEAD', 'GET', 'HEAD', 'GET'])
+            self.assertEqual(owned.docker.get.call_count, 2)
+            for conn in image.connections:
+                conn.close.assert_called_once()
+
+    def test_root_view_churn_preserves_full_nonroot_stats(self):
+        for path in ('/usr', '/usr/local', '/usr/local/lib', '/usr/local/lib/libcurl.so.1.0.0'):
+            for field in ('size', 'mtime'):
+                for site in ('header', 'recheck'):
+                    image = self.changing_root_image()
+                    stat, request = image.stat.side_effect, image.docker.request.side_effect
+                    calls = 0
+                    def changed(value):
+                        return {**value, field: value[field] + 1 if field == 'size'
+                                else '2026-10-13T01:02:04.123456789Z'}
+                    def head(requested):
+                        nonlocal calls
+                        value = stat(requested)
+                        if requested == path:
+                            calls += 1
+                            if site == 'recheck' and calls == 2:
+                                value = changed(value)
+                        return value
+                    def get(method, route, headers):
+                        conn, response = request(method, route, headers)
+                        if site == 'header' and urllib.parse.parse_qs(
+                                urllib.parse.urlsplit(route).query)['path'] == [path]:
+                            response.headers['X-Docker-Container-Path-Stat'] = base64.b64encode(
+                                json.dumps(changed(P.path_stat(response))).encode()).decode()
+                        return conn, response
+                    image.stat.side_effect, image.docker.request.side_effect = head, get
+                    with self.subTest(path=path, field=field, site=site), self.assertRaisesRegex(
+                            M.InventoryError, 'inventory-path-drift'):
+                        M.InstalledInventory(image, P).read_provider('/usr/local/lib/libcurl.so.1.0.0')
+                    for conn in image.connections:
+                        conn.close.assert_called_once()
 
     def test_stat_diagnostics_preserve_all_field_and_unknown_field_rejections(self):
         expected = directory('/')
