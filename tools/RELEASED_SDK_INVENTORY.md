@@ -201,8 +201,10 @@ OS remain trusted. It does not establish runtime, export, gameplay or audible
 acceptance, and does not claim independence from a malicious image OS.
 
 Failed filesystem qualification retains a fixed host phase and, after a valid
-Docker wait response, an integer exit status in `0..255`. The collector fences
-the exited container before reading logs even when the process failed. Nonzero
+Docker wait response, an integer exit status in `0..255`. Unexpected Docker HTTP
+statuses retain the fixed `docker-request-denied` code without response bodies
+or request paths. The collector fences the exited container before reading logs
+even when the process failed. Nonzero
 exit output is limited to 4 KiB and must use the same strict stdout-only Docker
 framing as successful reports. The only retained scanner output is an exact
 stopped-report schema containing a fixed stage and allowlisted failure code,

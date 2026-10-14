@@ -1006,7 +1006,7 @@ SCANNER_HOST_FAILURE_CODES = frozenset({
     'scanner-execution-not-started',
     'container-image-mismatch', 'container-manifest-mismatch', 'scanner-process-failed',
     'scanner-logs-unframed', 'scanner-logs-invalid', 'scanner-logs-limit',
-    'scanner-logs-incomplete', 'invalid-json', 'docker-http-status',
+    'scanner-logs-incomplete', 'invalid-json', 'docker-request-denied',
 })
 
 

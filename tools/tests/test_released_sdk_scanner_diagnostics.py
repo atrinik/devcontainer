@@ -205,25 +205,83 @@ class ScannerDiagnosticTests(unittest.TestCase):
             with self.subTest(config=config), self.assertRaisesRegex(C.Stop, 'scanner-log-config-mismatch'):
                 scanner.fence()
 
-    def test_start_http_failure_retains_only_fixed_phase_and_code(self):
-        fixture = F.QualificationTests()
-        fixture.setUp()
-        self.addCleanup(fixture.doCleanups)
-        scanner, _ = fixture.scanner()
-        scanner.create, scanner.cleanup = Mock(), Mock()
-        scanner.docker.request.side_effect = C.Stop('docker-http-status')
-        with patch.object(C, 'ScannerImage', return_value=scanner):
-            receipt = C.qualify_filesystem(scanner.docker, F.TARGET, fixture.context,
-                                           fixture.verified, {'expected': 'inventory'})
-        self.assertEqual(receipt['status'], 'stopped')
-        self.assertEqual(receipt['reason'], 'docker-http-status')
-        self.assertEqual(receipt['failure'], {'phase': 'container-start', 'start_attempted': True})
-        self.assertIsNone(receipt['image_code_executed'])
-        self.assertNotIn('scan', receipt)
-        self.assertNotIn('exit_code', receipt['failure'])
-        scanner.cleanup.assert_called_once()
-        scanner.docker.request.assert_called_once()
+    def test_actual_http_rejections_retain_fixed_code_without_response_details(self):
+        for rejected, phase, executed in (
+            ('create', 'container-create', False),
+            ('start', 'container-start', None),
+            ('wait', 'container-wait', True),
+            ('logs', 'container-logs', True),
+        ):
+            for http_status in (403, 500):
+                with self.subTest(rejected=rejected, http_status=http_status):
+                    fixture = F.QualificationTests()
+                    fixture.setUp()
+                    self.addCleanup(fixture.doCleanups)
+                    scanner, value = fixture.scanner()
+                    scanner.identifier, scanner.attempted = None, False
+                    scanner.docker = C.Docker('/fixture-only', (1, 2, 3))
+                    connections, denied, calls = [], [], []
 
+                    def connection(*args, **kwargs):
+                        conn = Mock()
+                        connections.append(conn)
+                        current = {}
+                        def request(method, path, **kwargs):
+                            current.update(method=method, path=path)
+                            calls.append((method, path))
+                        def getresponse():
+                            path = current['path']
+                            operation = path.rsplit('/', 1)[-1].split('?')[0]
+                            response_status, raw = 200, b''
+                            if operation == rejected:
+                                response_status, raw = http_status, SECRET.encode()
+                            elif operation == 'create':
+                                response_status, raw = 201, F.encoded({'Id': value['Id']})
+                            elif operation == 'start':
+                                value['State'].update(Status='running', Running=True, Pid=123)
+                                response_status = 204
+                            elif operation == 'wait':
+                                value['State'].update(Status='exited', Running=False, Pid=0)
+                                raw = F.encoded({'StatusCode': 0})
+                            elif operation == 'json':
+                                raw = F.encoded(value)
+                            elif operation == 'stop':
+                                value['State'].update(Status='exited', Running=False, Pid=0)
+                                response_status = 204
+                            elif current['method'] == 'DELETE':
+                                response_status = 204
+                            else:
+                                self.fail('unexpected request')
+                            response = F.Response(raw)
+                            response.status = response_status
+                            if operation == rejected:
+                                response.read = Mock(wraps=response.read)
+                                denied.append(response)
+                            return response
+                        conn.request.side_effect = request
+                        conn.getresponse.side_effect = getresponse
+                        return conn
+
+                    with patch.object(C, 'ScannerImage', return_value=scanner), \
+                            patch.object(C, 'LocalConnection', side_effect=connection):
+                        receipt = C.qualify_filesystem(scanner.docker, F.TARGET, fixture.context,
+                                                       fixture.verified, {'expected': 'inventory'})
+                    self.assertEqual(receipt['status'], 'stopped')
+                    self.assertEqual(receipt['reason'], 'docker-request-denied')
+                    self.assertEqual(receipt['failure']['phase'], phase)
+                    self.assertIs(receipt['image_code_executed'], executed)
+                    self.assertTrue(receipt['owned_container_removed'])
+                    self.assertEqual(calls[-1], ('DELETE', '/containers/' + value['Id']))
+                    self.assertNotIn('scan', receipt)
+                    self.assertNotIn(SECRET, json.dumps(receipt))
+                    self.assertNotIn('/containers/', json.dumps(receipt))
+                    self.assertEqual(len(denied), 1)
+                    denied[0].read.assert_not_called()
+                    for conn in connections:
+                        conn.close.assert_called_once()
+        # The old spelling has no production emitter and is not a public code.
+        self.assertEqual(C.scanner_host_failure(C.Stop('docker-http-status')),
+                         'filesystem-qualification-failed')
 
     def lost_start_receipt(self, status='running', *, drift=None, inspect_failure=False,
                            stop_failure=False, prestart_failure=False):
