@@ -489,6 +489,14 @@ It binds the installed executables used by the later consumer; earlier library
 builds remain part of trusted SDK production and are not historical execution
 attestations.
 
+Released SDK inventory adoption also requires the separate hosted filesystem
+qualification in [`tools/RELEASED_SDK_INVENTORY.md`](tools/RELEASED_SDK_INVENTORY.md).
+Its schema-2 receipt reconciles lost Docker start responses during fenced cleanup:
+execution is `true` when proven, `false` before an attempt, and `null` when the
+attempt remains unresolved. Successful qualification still requires the accepted
+start response, complete filesystem equality and owned cleanup. The separate
+schema-1 acquisition container remains unstarted.
+
 Shared application libraries live under `/usr/local`; Debian packages provide
 the baseline transitive libraries. Compiler flags use
 `-march=x86-64 -mtune=generic`. Verification checks actual ELF dependency

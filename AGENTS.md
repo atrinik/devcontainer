@@ -142,8 +142,12 @@
   reads. Keep full stat equality for every nonroot path; see
   `tools/RELEASED_SDK_INVENTORY.md` for the root fence contract.
   Fence the scanner's one-file bounded local log with compression disabled;
-  Moby rejects compression with a single retained file. Set its execution claim
-  after Docker accepts the start. Retain only validated fixed failure stages,
+  Moby rejects compression with a single retained file. The schema-2 filesystem
+  receipt records execution as true after an accepted start or complete fenced
+  started-state proof, false before any attempt, and null for an unresolved
+  attempt. Reconcile after cleanup; a created snapshot cannot exclude a pending
+  start. Acquisition remains schema 1 and never starts its container. Recovery
+  observations cannot grant successful qualification. Retain only fixed failure stages,
   codes, exit status and errno names; keep arbitrary logs, paths and exception
   text out of published diagnostics.
 - Validate Dockerfiles with `docker build --check`. Build and smoke-test each
