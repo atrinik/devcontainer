@@ -9,6 +9,7 @@ import io
 import json
 from pathlib import Path
 import struct
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -52,6 +53,7 @@ class ScannerDiagnosticTests(unittest.TestCase):
                 raise error
             out = io.StringIO()
             with self.subTest(reason=reason), patch.object(S.sys, 'argv', ['scanner']), \
+                    patch.object(S.sys, 'flags', SimpleNamespace(isolated=1)), \
                     patch.object(S.os, 'geteuid', return_value=65534), \
                     patch.object(S.os, 'open', return_value=55), patch.object(S.os, 'close') as close, \
                     patch.object(S.signal, 'signal'), patch.object(S.signal, 'alarm'), \
@@ -60,6 +62,26 @@ class ScannerDiagnosticTests(unittest.TestCase):
             close.assert_called_once_with(55)
             self.assertEqual(json.loads(out.getvalue()), {
                 'status': 'stopped', 'reason': reason, 'stage': 'producer-tree', **extra})
+            self.assertNotIn(SECRET, out.getvalue())
+
+    def test_scanner_main_rejects_execution_boundary_before_open(self):
+        for isolated, uid, argv in ((0, 65534, ['scanner']),
+                                    (1, 0, ['scanner']),
+                                    (1, 65534, ['scanner', SECRET])):
+            out = io.StringIO()
+            with self.subTest(isolated=isolated, uid=uid, argv_count=len(argv)), \
+                    patch.object(S.sys, 'argv', argv), \
+                    patch.object(S.sys, 'flags', SimpleNamespace(isolated=isolated)), \
+                    patch.object(S.os, 'geteuid', return_value=uid), \
+                    patch.object(S.os, 'open') as open_root, \
+                    patch.object(S, 'scan') as scan, \
+                    patch.object(S.signal, 'alarm'), contextlib.redirect_stdout(out):
+                self.assertEqual(S.main(), 1)
+            open_root.assert_not_called()
+            scan.assert_not_called()
+            self.assertEqual(json.loads(out.getvalue()), {
+                'status': 'stopped', 'reason': 'scanner-execution-boundary',
+                'stage': 'startup'})
             self.assertNotIn(SECRET, out.getvalue())
 
     def test_real_scan_retains_failed_stage(self):
