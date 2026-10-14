@@ -24,7 +24,17 @@
   source commits or shader inputs. Schema 2 compiler evidence requires every
   selected LLVM utility, including separate Clang C/C++ drivers and
   archiver/ranlib, with canonical paths, versions and hashes; rehash before
-  consumer builds and publication. Portable curl is an LLVM rebuild of
+  consumer builds and publication. The separate schema-1 `installed.json.build_tools`
+  receipt binds fixed `/usr/bin/cmake`, `/usr/bin/ninja` and `/usr/bin/pkgconf`
+  paths, canonical executables, hashes, sizes and full version stdout. Verify
+  all three protected identities before probing any tool and fence
+  configure/build execution;
+  the mandatory `pkg_config` role also fences inventory module-version and
+  consumer/smoke/curl package queries through the canonical executable.
+  reject symlinks in these fixed Debian executable and metadata paths.
+  Missing or incomplete receipts require a rebuilt producer. The producer OS, libraries and
+  CMake modules and earlier library-production builds remain trusted; this
+  receipt does not attest historical execution. Portable curl is an LLVM rebuild of
   security-patched Debian `7.88.1-10+deb12u15` with c-ares 1.34.6, retaining
   existing features including LDAP/LDAPS, RTMP, SCP and SFTP. Its separate
   `portable/curl-toolchain.json`, `portable/build-curl.py`,
@@ -75,6 +85,20 @@
   `candidate-sha-<commit>`. Windows publishes `candidate-sha-<commit>` and
   `classic-check-candidate-sha-<commit>` with cross-build and native Windows
   tests intact. Neither path may move rolling, platform, or version aliases.
+- The Linux publisher captures each loaded image's immutable Docker ID and raw
+  inspection before runtime tests. Curl/TLS, Classic client/server, portable
+  public-CA and offline consumer checks must execute those captured IDs. After
+  all runtime gates, publish only SHA candidates, then verify the actual pushed
+  OCI index, Linux/amd64 manifest and config against the captured RootFS and
+  complete execution config with `tools/verify_published_identity.py`. Only
+  exact source/revision publication labels, creation/history and BuildKit inline
+  cache metadata may differ; unknown raw config and execution fields fail closed.
+  Keep bounded metadata-only authenticated acquisition confined to the
+  same-repository hosted publisher. Retain raw inspection, OCI objects,
+  descriptor relationships and hashed reports as mandatory artifacts before
+  promoting any release aliases. Rerun the failed job in the same workflow run
+  to recover partial promotion; preserve historical released-SDK collector
+  targets and final-cohort gates.
 - `llvm-toolchain.json`, `llvm-bootstrap-packages.lock`, and the shared LLVM
   installer/validator own LLVM 23.1.3 Clang/LLD/compiler-rt/libunwind source,
   licensing, installed metadata, and target contracts. Every affected input
@@ -83,7 +107,11 @@
   compiler limits separate from model-worker concurrency. Build the shared
   `llvm-toolchain` stage once before parallel PR target validation; selected
   image jobs and the required aggregate retain that dependency. Cold source builds
-  may use the supported six-hour hosted-job timeout.
+  may use the supported six-hour hosted-job timeout. Input-filtered trusted
+  `main` pushes seed the same shared LLVM Actions cache for later PRs and
+  measurements; PR merge-ref and release-tag caches cannot seed another PR.
+  Keep that cache-only job separate from required PR image/native checks and
+  private-package access. Cache eviction or changed inputs can require rebuilding.
 - Every semantic release publishes the broad Linux, slim and portable Linux Classic,
   general Windows, and task-focused Windows Classic images with their
   supported tags. The Linux publisher owns `linux-build`, `classic-build`, and
@@ -96,6 +124,32 @@
   candidates before promoting rolling/version aliases, and recover partial
   alias promotion by rerunning the failed job from the same workflow run. Do
   not create manual release tags as a substitute for semantic-release.
+- Released SDK identity collection admits only code-pinned immutable targets on
+  trusted hosted push/dispatch. Preserve the original three 1.18.0 identities.
+  Final portable inventory qualification uses two distinct receipts: an
+  unstarted acquisition container and a separate non-root, read-only,
+  network-disabled filesystem scanner. Complete descriptor-relative enumeration
+  must match all producer, Debian notice and common-license records before
+  wrapper pins are adopted; Docker directory tar framing alone cannot prove
+  completeness. No caller-supplied image, revision or filesystem-path overrides.
+  The fixed `portable-final` target pins the reviewed 1.22.0 producer, consumer
+  and index/platform/config tuple. Its hosted acquisition and filesystem
+  qualification must succeed before wrapper metadata/inventory pins are adopted;
+  release publication alone does not establish those inventories.
+  Docker archive views may mutate root directory size/mtime while switching
+  roots: validate those fields under the exact `/` schema, retain exact stable
+  root fields and bounded UID/mode ownership headers before and after protected
+  reads. Keep full stat equality for every nonroot path; see
+  `tools/RELEASED_SDK_INVENTORY.md` for the root fence contract.
+  Fence the scanner's one-file bounded local log with compression disabled;
+  Moby rejects compression with a single retained file. The schema-2 filesystem
+  receipt records execution as true after an accepted start or complete fenced
+  started-state proof, false before any attempt, and null for an unresolved
+  attempt. Reconcile after cleanup; a created snapshot cannot exclude a pending
+  start. Acquisition remains schema 1 and never starts its container. Recovery
+  observations cannot grant successful qualification. Retain only fixed failure stages,
+  codes, exit status and errno names; keep arbitrary logs, paths and exception
+  text out of published diagnostics.
 - Validate Dockerfiles with `docker build --check`. Build and smoke-test each
   affected image, including `classic-validation` before `classic-final` and the
   Windows `classic-check` target plus native bundle; note that a cold
@@ -105,6 +159,15 @@
   for permissions, pinned actions, check names, and ruleset compatibility.
   Never expose private-package permissions or images to `pull_request` code;
   authenticated measurements belong to the same-repository push/dispatch path.
+- Advisory `Dependency review` covers revisions where the workflow exists. Before
+  merge, Codex reads the latest current-HEAD job summary even if a bot comment
+  exists; fix actionable introduced risk or record explicit maintainer-accepted
+  existing risk. License metadata does not certify compatibility; existing
+  repository license policies apply.
+  For programmatic access, read every runner-scrubbed report in the
+  `dependency-review-job-summary-<head-sha>-<run-id>-<run-attempt>` artifact after
+  verifying its digest and latest current-head run/attempt identity; an absent
+  or unreadable actual report remains unknown, not clean.
 - Commits and pull-request titles use Conventional Commits. Preserve unrelated
   work and finish with `git diff --check`.
 - Update this `AGENTS.md` in the same change when major rework alters image

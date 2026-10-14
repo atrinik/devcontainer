@@ -1,0 +1,79 @@
+# Copyright (c) 2026 Atrinik contributors
+# SPDX-License-Identifier: MIT
+name: Collect released Linux SDK identity
+
+on:
+  push:
+    branches:
+      - build/llvm-sdk118-collector-refresh
+    paths:
+      - .github/workflows/qualify-released-linux-sdk.yml
+      - tools/collect-released-sdk-metadata.py
+      - tools/tests/test_collect_released_sdk_metadata.py
+      - tools/released_sdk_inventory.py
+      - tools/scan-released-sdk-filesystem.py
+      - tools/tests/test_released_sdk_inventory.py
+      - tools/tests/test_released_sdk_filesystem.py
+      - tools/tests/test_released_sdk_diagnostics.py
+      - tools/tests/test_released_sdk_scanner_diagnostics.py
+      - tools/RELEASED_SDK_INVENTORY.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: released-linux-sdk-identity-${{ github.ref }}
+  cancel-in-progress: false
+
+# Private packages stay on trusted same-repository push/dispatch. This workflow
+# never runs pull-request code, publishes, or changes aliases. Historical targets
+# never start image code. Only a future reviewed fixed final target can execute
+# the separately receipted read-only filesystem scanner after created-only reads.
+jobs:
+  collect:
+    name: Collect ${{ matrix.target }} installed identity
+    if: >-
+      github.repository == 'atrinik/devcontainer' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/build/llvm-sdk118-collector-refresh') ||
+       (github.event_name == 'workflow_dispatch' &&
+        (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/build/llvm-sdk118-collector-refresh')))
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ubuntu-26.04
+    timeout-minutes: 65
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [broad, classic, portable-preliminary, portable-final]
+    steps:
+      - name: Check out reviewed collector
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test offline collection boundaries
+        run: python3 -I -B -m unittest discover -s tools/tests -p 'test*released*sdk*.py' -v
+
+      - name: Collect fixed released image metadata
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u SSLKEYLOGFILE -u OPENSSL_CONF -u OPENSSL_MODULES \
+            python3 -I -B tools/collect-released-sdk-metadata.py --target "${TARGET}"
+
+      - name: Retain bounded identity receipts
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: released-linux-sdk-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/released-sdk-evidence/${{ matrix.target }}/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6

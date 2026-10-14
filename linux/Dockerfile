@@ -418,12 +418,31 @@ RUN install -d -o "${USERNAME}" -g "${USERNAME}" "/home/${USERNAME}/.codex" \
         > "/etc/sudoers.d/${USERNAME}" \
     && chmod 0440 "/etc/sudoers.d/${USERNAME}"
 
-# gh-stack v0.1.0 is a non-immutable release tag, so retain the supported pin
-# while independently enforcing its attested linux-amd64 asset digest. The
+# Fetch the pinned asset directly: gh extension install still discovers the
+# latest release through the API even with --pin, which can hit anonymous limits.
+# gh-stack v0.1.0 is a non-immutable release tag, so independently enforce its
+# attested linux-amd64 asset digest before installation. The
 # source commit is the verified release-workflow signer/source digest for
 # github/gh-stack/.github/workflows/release.yml at refs/tags/v0.1.0.
-RUN HOME="/home/${USERNAME}" runuser -u "${USERNAME}" -- \
-        gh extension install github/gh-stack --pin "v${GH_STACK_VERSION}" \
+RUN curl --fail --location --silent --show-error \
+        "https://github.com/github/gh-stack/releases/download/v${GH_STACK_VERSION}/linux-amd64" \
+        --output /tmp/gh-stack-linux-amd64 \
+    && echo "${GH_STACK_SHA256_AMD64}  /tmp/gh-stack-linux-amd64" | sha256sum -c - \
+    && install -d -m 0755 -o "${USERNAME}" -g "${USERNAME}" \
+        "/home/${USERNAME}/.local" "/home/${USERNAME}/.local/share" \
+        "/home/${USERNAME}/.local/share/gh" \
+        "/home/${USERNAME}/.local/share/gh/extensions" \
+        "/home/${USERNAME}/.local/share/gh/extensions/gh-stack" \
+    && install -m 0755 -o "${USERNAME}" -g "${USERNAME}" /tmp/gh-stack-linux-amd64 \
+        "/home/${USERNAME}/.local/share/gh/extensions/gh-stack/gh-stack" \
+    && printf '%s\n' 'owner: github' 'name: gh-stack' 'host: github.com' \
+        "tag: v${GH_STACK_VERSION}" 'ispinned: true' \
+        "path: /home/${USERNAME}/.local/share/gh/extensions/gh-stack/gh-stack" \
+        > "/home/${USERNAME}/.local/share/gh/extensions/gh-stack/manifest.yml" \
+    && chown "${USERNAME}:${USERNAME}" \
+        "/home/${USERNAME}/.local/share/gh/extensions/gh-stack/manifest.yml" \
+    && chmod 0644 "/home/${USERNAME}/.local/share/gh/extensions/gh-stack/manifest.yml" \
+    && rm /tmp/gh-stack-linux-amd64 \
     && echo "${GH_STACK_SHA256_AMD64}  /home/${USERNAME}/.local/share/gh/extensions/gh-stack/gh-stack" \
         | sha256sum -c - \
     && runuser -u "${USERNAME}" -- grep -Fx 'owner: github' \

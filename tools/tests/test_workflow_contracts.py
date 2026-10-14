@@ -21,13 +21,18 @@ def step_script(name, step):
     start = text.index(f'      - name: {step}\n')
     block = text[start:].split('\n      - name: ', 1)[0]
     script = block.split('        run: |\n', 1)[1]
-    return '\n'.join(line[10:] for line in script.splitlines()) + '\n'
+    lines = []
+    for line in script.splitlines():
+        if line.strip() and not line.startswith('          '):
+            break
+        lines.append(line[10:])
+    return '\n'.join(lines) + '\n'
 
 
 class WorkflowContracts(unittest.TestCase):
     def test_portable_public_ca_command_and_failure_are_mandatory(self):
         for name, image in (('validate.yml', 'atrinik-classic-portable:validation'),
-                            ('publish-linux.yml', 'atrinik-classic-portable:release-validation')):
+                            ('publish-linux.yml', 'sha256:' + 'a' * 64)):
             for docker_exit in (0, 17):
                 with self.subTest(workflow=name, docker_exit=docker_exit), tempfile.TemporaryDirectory() as directory:
                     root = Path(directory)
@@ -40,7 +45,7 @@ class WorkflowContracts(unittest.TestCase):
                     docker.chmod(0o755)
                     env = dict(os.environ, PATH=directory + ':' + os.environ['PATH'],
                                GITHUB_WORKSPACE=directory, DOCKER_CALL=str(root / 'docker-call.json'),
-                               DOCKER_EXIT=str(docker_exit), HTTPS_PROXY='http://fixture-user:fixture-password@invalid')
+                               DOCKER_EXIT=str(docker_exit), IMAGE_ID=image, HTTPS_PROXY='http://fixture-user:fixture-password@invalid')
                     result = subprocess.run(['bash', '-euo', 'pipefail', '-c',
                                              step_script(name, 'Verify portable candidate public CA')],
                                             cwd=directory, env=env, capture_output=True, text=True)
@@ -78,7 +83,7 @@ class WorkflowContracts(unittest.TestCase):
             self.assertIn('set -euo pipefail', block)
             if name == 'publish-linux.yml':
                 self.assertLess(gate, text.index('      - name: Publish immutable portable candidate'))
-                self.assertLess(gate, text.index('      - name: Promote validated portable aliases'))
+                self.assertLess(gate, text.index('      - name: Promote validated Linux aliases'))
 
     def run_step(self, name, step, **values):
         with tempfile.TemporaryDirectory() as directory:
@@ -133,7 +138,7 @@ class WorkflowContracts(unittest.TestCase):
     def test_candidate_mode_keeps_qualification_and_fences_promotion(self):
         linux = workflow('publish-linux.yml')
         self.assertEqual(linux.count('if: ${{ !inputs.candidate_only }}'), 1)
-        self.assertIn('Promote validated portable aliases\n        if: ${{ !inputs.candidate_only }}', linux)
+        self.assertIn('Promote validated Linux aliases\n        if: ${{ !inputs.candidate_only }}', linux)
         for target in ('target: classic-validation', 'target: validation',
                        'target: portable-validation'):
             self.assertIn(target, linux)
@@ -144,6 +149,109 @@ class WorkflowContracts(unittest.TestCase):
         native = windows.split('  windows-native:', 1)[1].split('  promote:', 1)[0]
         self.assertNotIn('candidate_only', native)
         self.assertIn('run-classic-native-tests.ps1', native)
+
+    def test_linux_publish_uses_only_sha_tags_then_fences_every_alias(self):
+        text = workflow('publish-linux.yml')
+        for step, output in (('Build and publish Linux image', 'metadata.outputs.publish_tag'),
+                             ('Build and publish Classic image', 'classic-metadata.outputs.publish_tag'),
+                             ('Publish immutable portable candidate', 'portable-metadata.outputs.tag')):
+            block = text.split('      - name: ' + step + '\n')[1].split('\n      - name: ')[0]
+            self.assertIn('tags: ${{ steps.' + output + ' }}', block)
+            self.assertNotIn('outputs.tags', block)
+        fence = text.index('      - name: Verify all published image identities')
+        upload = text.index('      - name: Retain published identity evidence')
+        promote = text.index('      - name: Promote validated Linux aliases')
+        self.assertLess(text.index('      - name: Publish immutable portable candidate'), fence)
+        self.assertLess(fence, upload)
+        self.assertLess(upload, promote)
+        for block in (text[fence:upload], text[upload:promote]):
+            self.assertNotIn('continue-on-error', block)
+            self.assertNotIn('        if:', block)
+        self.assertIn('if-no-files-found: error', text[upload:promote])
+        for candidate in ('false', 'true'):
+            for step, image in (('Select image tags', 'linux-build'),
+                                ('Select Classic image tags', 'classic-build')):
+                result = self.run_step('publish-linux.yml', step, IMAGE_NAME=image,
+                                       CANDIDATE_ONLY=candidate)
+                prefix = 'candidate-' if candidate == 'true' else ''
+                self.assertIn(f'publish_tag=ghcr.io/atrinik/{image}:{prefix}sha-' + 'a' * 40, result)
+
+    def test_linux_runtime_checks_use_captured_ids(self):
+        text = workflow('publish-linux.yml')
+        checks = {
+            'classic': ['Qualify Classic cancellation and public TLS before publication',
+                        'Run Classic client and server checks before publication'],
+            'broad': ['Qualify broad Linux cancellation and public TLS before publication'],
+            'portable': ['Verify portable candidate public CA',
+                         'Validate real portable consumer before publication'],
+        }
+        for target, names in checks.items():
+            captured = text.index('      - name: Capture loaded ' + target + ' image identity')
+            for name in names:
+                start = text.index('      - name: ' + name + '\n')
+                self.assertLess(captured, start)
+                block = text[start:].split('\n      - name: ')[0]
+                self.assertIn('IMAGE_ID: ${{ steps.' + target + '-identity.outputs.image_id }}', block)
+                self.assertIn('"${IMAGE_ID}"', block)
+                self.assertNotIn(':qualification', block)
+                self.assertNotIn(':release-validation', block)
+
+    def test_published_fence_stops_on_first_failed_identity(self):
+        for failed in ('none', 'broad', 'classic', 'portable'):
+            with self.subTest(failed=failed), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                command = root / 'python3'
+                command.write_text('#!/usr/bin/env python3\nimport os, sys\n'
+                    'from pathlib import Path\n'
+                    'target = sys.argv[sys.argv.index("--target") + 1]\n'
+                    'with Path(os.environ["CALLS"]).open("a") as out: out.write(target + "\\n")\n'
+                    'sys.exit(19 if target == os.environ["FAIL_TARGET"] else 0)\n')
+                # Avoid recursively selecting the fake python interpreter.
+                command.write_text(command.read_text().replace('#!/usr/bin/env python3', '#!/usr/bin/python3'))
+                command.chmod(0o755)
+                env = dict(os.environ, PATH=directory + ':' + os.environ['PATH'],
+                           CALLS=str(root / 'calls'), FAIL_TARGET=failed,
+                           BROAD_DIGEST='sha256:' + 'a' * 64, CLASSIC_DIGEST='sha256:' + 'b' * 64,
+                           PORTABLE_DIGEST='sha256:' + 'c' * 64)
+                result = subprocess.run(['bash', '-euo', 'pipefail', '-c',
+                    step_script('publish-linux.yml', 'Verify all published image identities')],
+                    env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0 if failed == 'none' else 19)
+                targets = ['broad', 'classic', 'portable']
+                expected = targets if failed == 'none' else targets[:targets.index(failed) + 1]
+                self.assertEqual((root / 'calls').read_text().splitlines(), expected)
+
+    def test_linux_alias_promotion_uses_verified_digests_and_stops_on_failure(self):
+        for fail_call in (0, 2):
+            with self.subTest(fail_call=fail_call), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                docker = root / 'docker'
+                docker.write_text('#!/usr/bin/python3\nimport json, os, sys\n'
+                    'from pathlib import Path\n'
+                    'path = Path(os.environ["CALLS"])\n'
+                    'calls = json.loads(path.read_text()) if path.exists() else []\n'
+                    'calls.append(sys.argv[1:]); path.write_text(json.dumps(calls))\n'
+                    'sys.exit(17 if len(calls) == int(os.environ["FAIL_CALL"]) else 0)\n')
+                docker.chmod(0o755)
+                digests = ['sha256:' + char * 64 for char in 'abc']
+                env = dict(os.environ, PATH=directory + ':' + os.environ['PATH'],
+                    CALLS=str(root / 'calls'), FAIL_CALL=str(fail_call),
+                    BROAD_DIGEST=digests[0], CLASSIC_DIGEST=digests[1], PORTABLE_DIGEST=digests[2],
+                    GITHUB_REPOSITORY_OWNER='Atrinik', GITHUB_REF_TYPE='tag', GITHUB_REF_NAME='v9.8.7',
+                    GITHUB_STEP_SUMMARY=str(root / 'summary'))
+                result = subprocess.run(['bash', '-euo', 'pipefail', '-c',
+                    step_script('publish-linux.yml', 'Promote validated Linux aliases')],
+                    env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0 if fail_call == 0 else 1, result.stderr)
+                calls = json.loads((root / 'calls').read_text())
+                self.assertEqual(len(calls), 3 if fail_call == 0 else 2)
+                for index, call in enumerate(calls):
+                    image = 'ghcr.io/atrinik/' + ['linux-build', 'classic-build', 'classic-portable-build'][index]
+                    platform = ['ubuntu-26.04', 'ubuntu-26.04', 'debian-12'][index]
+                    self.assertEqual(call, ['buildx', 'imagetools', 'create', '--tag', image + ':latest',
+                        '--tag', image + ':' + platform, '--tag', image + ':9.8.7', image + '@' + digests[index]])
+                if fail_call:
+                    self.assertIn('Rerun the failed job in this workflow run', result.stderr)
 
     def test_shared_llvm_inputs_select_every_image(self):
         script = step_script('validate.yml', 'Detect image changes')
@@ -164,6 +272,100 @@ class WorkflowContracts(unittest.TestCase):
                                env=env, check=True, capture_output=True, text=True)
                 self.assertEqual(set(output.read_text().splitlines()),
                                  {'portable=true', 'classic=true', 'linux=true', 'windows=true'})
+
+    def test_publication_identity_inputs_select_linux_images(self):
+        script = step_script('validate.yml', 'Detect image changes')
+        cases = (
+            ('tools/verify_published_identity.py', True, False),
+            ('tools/tests/test_verify_published_identity.py', True, True),
+            ('tools/collect-released-sdk-metadata.py', True, False),
+            ('tools/tests/test_collect_released_sdk_metadata.py', True, True),
+            ('windows/Dockerfile', False, True),
+            ('README.md', False, False),
+            ('tools/unrelated-helper.py', False, False),
+        )
+        for changed, linux_selected, windows_selected in cases:
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                # Real isolated Git history exercises the workflow's exact diff command.
+                def git(*args):
+                    return subprocess.run(['git', *args], cwd=root, check=True,
+                                          capture_output=True, text=True).stdout.strip()
+                git('init', '-q')
+                git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                    '-c', 'commit.gpgsign=false', 'commit', '-qm', 'base', '--allow-empty')
+                base = git('rev-parse', 'HEAD')
+                source = root / changed
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text('isolated selector input\n')
+                git('add', '--', changed)
+                git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                    '-c', 'commit.gpgsign=false', 'commit', '-qm', 'change')
+                output = root / 'output'
+                env = dict(os.environ, GITHUB_OUTPUT=str(output),
+                           BASE_SHA=base, HEAD_SHA=git('rev-parse', 'HEAD'))
+                subprocess.run(['bash', '-euo', 'pipefail', '-c', script], cwd=root,
+                               env=env, check=True, capture_output=True, text=True)
+                selected = 'true' if linux_selected else 'false'
+                windows = 'true' if windows_selected else 'false'
+                self.assertEqual(set(output.read_text().splitlines()),
+                                 {f'portable={selected}', f'classic={selected}',
+                                  f'linux={selected}', f'windows={windows}'})
+
+    def test_main_cache_trigger_covers_shared_stage_inputs(self):
+        text = workflow('validate.yml')
+        trigger = text.split('  push:\n', 1)[1].split('\npermissions:', 1)[0]
+        self.assertIn('    branches:\n      - main\n', trigger)
+        paths = set(re.findall(r'^      - (.+)$', trigger.split('    paths:\n', 1)[1], re.M))
+        required = {'.dockerignore', '.github/workflows/validate.yml'}
+        for dockerfile, stage in (('linux/Dockerfile', 'llvm-toolchain'),
+                                  ('windows/Dockerfile', 'llvm-toolchain'),
+                                  ('portable/Dockerfile', 'portable-llvm')):
+            required.add(dockerfile)
+            source = (ROOT / dockerfile).read_text()
+            block = source.split(' AS ' + stage + '\n', 1)[1].split('\nFROM ', 1)[0]
+            # Each local COPY source in the shared producer must warm main
+            # when changed, even if that input is outside the Dockerfile tree.
+            for sources in re.findall(r'^COPY (.+)$', block, re.M):
+                required.update(sources.split()[:-1])
+        self.assertEqual(paths, required)
+        for unrelated in ('README.md', 'tools/collect-released-sdk-metadata.py',
+                          'tools/verify_published_identity.py'):
+            self.assertNotIn(unrelated, paths)
+
+    def test_cache_seed_is_main_only_and_keeps_pr_acceptance(self):
+        text = workflow('validate.yml')
+        seed = text.split('  llvm-cache:\n', 1)[1].split('\n  llvm:\n', 1)[0]
+        condition = re.search(r'^    if: (.+)$', seed, re.M).group(1)
+        # Exercise the workflow's actual inline event/ref expression. A fork
+        # PR or another branch/tag must never execute the trusted main writer.
+        for event in ('push', 'pull_request', 'pull_request_target', 'workflow_dispatch'):
+            for ref in ('refs/heads/main', 'refs/heads/review', 'refs/tags/v9.8.7', 'refs/pull/1/merge'):
+                values = {'github.event_name': event, 'github.ref': ref}
+                matches = [re.fullmatch(r"(github\.event_name|github\.ref) == '([^']+)'",
+                                        clause.strip()) for clause in condition.split('&&')]
+                self.assertEqual(len(matches), 2)
+                self.assertTrue(all(matches), condition)
+                selected = all(values[match[1]] == match[2] for match in matches)
+                self.assertEqual(selected, event == 'push' and ref == 'refs/heads/main')
+        self.assertNotIn('    needs:', seed)
+        self.assertNotIn('packages:', seed)
+        self.assertNotIn('docker/login-action', seed)
+        self.assertIn('outputs: type=cacheonly', seed)
+        self.assertIn('target: llvm-toolchain', seed)
+        self.assertIn('build-args: LLVM_BUILD_JOBS=2', seed)
+        self.assertIn('cache-to: type=gha,mode=max,scope=llvm-toolchain-23.1.3,ignore-error=true', seed)
+        # PRs retain their own required producer; a main seed is never proof
+        # that a changed PR toolchain is valid and never replaces that job.
+        llvm = text.split('  llvm:\n', 1)[1].split('\n  linux:\n', 1)[0]
+        self.assertIn('    needs: changes', llvm)
+        self.assertNotIn('llvm-cache', llvm)
+        self.assertEqual(text.count('needs: [changes, llvm]'), 4)
+        changes = text.split('  changes:\n', 1)[1].split('\n  llvm-cache:\n', 1)[0]
+        required = text.split('  required:\n', 1)[1]
+        self.assertIn("    if: github.event_name == 'pull_request'", changes)
+        self.assertIn("    if: always() && github.event_name == 'pull_request'", required)
+        self.assertNotIn('llvm-cache', required)
 
     def test_pr_workflow_remains_private_package_free_and_strict(self):
         text = workflow('validate.yml')
