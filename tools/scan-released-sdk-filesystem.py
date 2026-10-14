@@ -10,6 +10,7 @@ _open_beneath), linux_portable.py (byte_record, verified_tree_inventory).
 See RELEASED_SDK_INVENTORY.md for provenance and execution-claim boundaries.
 """
 import hashlib
+import errno
 import importlib.util
 import json
 import os
@@ -262,30 +263,41 @@ class Filesystem(I.ProviderReader):
             I.require(identity(actual) == expected, 'scanner-path-drift')
 
 
-def scan(root_fd):
+def scan(root_fd, *, progress=None):
+    progress = progress if progress is not None else {}
     fs = Filesystem(root_fd)
+    progress['stage'] = 'metadata'
     raw, metadata_records = {}, {}
     for name in I.METADATA_FILES:
         metadata_records[name], raw[name] = fs.record(I.ROOT + '/' + name, retain=True)
     documents = {name: decode(value) for name, value in raw.items()}
+    progress['stage'] = 'producer-tree'
     maps = {'producer': fs.tree()}
+    progress['stage'] = 'metadata-binding'
     I.bind_metadata(maps['producer'], raw, metadata_records)
+    progress['stage'] = 'source-archives-and-providers'
     I.crosscheck_archives(maps['producer'], documents['runtime-sources.json'], documents['contract.json'], reader=fs)
+    progress['stage'] = 'debian-notices'
     maps['debian_notices'] = {}
     for requested in I.notice_requests(documents['runtime-sources.json'], documents['debian-sources.json']):
         resolved = fs.resolve(requested, I.DOC)
         record, _ = fs.record(resolved)
         maps['debian_notices'][requested] = {**record, 'resolved_path': resolved}
+    progress['stage'] = 'common-licenses'
     maps['common_licenses'] = {name: fs.record(I.COMMON + '/' + name)[0] for name in I.COMMON_LICENSE_NAMES}
+    progress['stage'] = 'build-tools'
     build_tools = I.build_tool_records(documents['installed.json'],
                                      lambda path: fs.record(path, executable=True)[0])
+    progress['stage'] = 'llvm-tools'
     llvm_tools = {}
     for role, (declared, canonical) in I.LLVM_TOOL_FILES.items():
         path, resolved = I.LLVM_PREFIX + '/' + declared, I.LLVM_PREFIX + '/' + canonical
         I.require(fs.resolve(path, I.LLVM_PREFIX) == resolved, 'scanner-llvm-alias')
         record, _ = fs.record(resolved, executable=role not in ('runtime', 'unwinder'))
         llvm_tools[role] = {'path': path, 'canonical_path': resolved, **record}
+    progress['stage'] = 'final-fence'
     fs.fence()
+    progress['stage'] = 'report'
     return {'schema_version': 1, 'claim': 'trusted-producer-filesystem-inventory',
             'image_code_executed': True, 'final_portable_cohort': False,
             'inventories': maps, 'inventory_sha256': {key: I.inventory_digest(value) for key, value in maps.items()},
@@ -295,6 +307,7 @@ def scan(root_fd):
 def main():
     def stop(_number, _frame):
         raise I.InventoryError('scanner-interrupted')
+    progress = {'stage': 'startup'}
     try:
         I.require(sys.flags.isolated == 1 and len(sys.argv) == 1 and os.geteuid() != 0,
                   'scanner-execution-boundary')
@@ -303,15 +316,24 @@ def main():
         signal.alarm(I.MAX_SECONDS)
         fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
-            result = scan(fd)
+            result = scan(fd, progress=progress)
         finally:
             os.close(fd)
         encoded = (json.dumps(result, sort_keys=True, separators=(',', ':')) + '\n').encode()
         I.require(len(encoded) <= MAX_REPORT, 'scanner-report-limit')
         sys.stdout.buffer.write(encoded)
         return 0
-    except BaseException:
-        print('{"status":"stopped","reason":"filesystem-scan-failed"}')
+    except BaseException as error:
+        failure = {'status': 'stopped', 'reason': 'filesystem-scan-failed', 'stage': progress['stage']}
+        if (type(error) is I.InventoryError and len(error.args) == 1
+                and type(error.args[0]) is str
+                and error.args[0] in I.FAILURE_CODES | I.SCANNER_FAILURE_CODES):
+            failure['reason'] = error.args[0]
+        elif isinstance(error, OSError):
+            names = {getattr(errno, name): name for name in I.SCANNER_ERRNOS if name != 'other'}
+            failure.update(reason='scanner-os-error',
+                           errno_name=names.get(error.errno, 'other') if type(error.errno) is int else 'other')
+        print(json.dumps(failure, sort_keys=True, separators=(',', ':')))
         return 1
     finally:
         signal.alarm(0)

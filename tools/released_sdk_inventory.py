@@ -154,6 +154,41 @@ def failure_code(error):
     return 'inventory-operation-failed'
 
 
+SCANNER_STAGES = frozenset({'startup', 'metadata', 'producer-tree', 'metadata-binding',
+    'source-archives-and-providers', 'debian-notices', 'common-licenses', 'build-tools',
+    'llvm-tools', 'final-fence', 'report'})
+SCANNER_ERRNOS = frozenset({'EACCES', 'EPERM', 'ENOENT', 'ELOOP', 'ENOTDIR', 'EROFS',
+                          'EIO', 'EMFILE', 'ENFILE', 'ENOSPC', 'other'})
+SCANNER_FAILURE_CODES = frozenset({
+    'scanner-alias-boundary', 'scanner-alias-cycle-or-limit', 'scanner-alias-drift',
+    'scanner-alias-path', 'scanner-alias-type', 'scanner-deadline', 'scanner-depth-limit',
+    'scanner-duplicate-json-key', 'scanner-empty-tree', 'scanner-execution-boundary',
+    'scanner-file-drift', 'scanner-file-grew', 'scanner-file-limit', 'scanner-interrupted',
+    'scanner-invalid-json', 'scanner-llvm-alias', 'scanner-manifest-bytes-mismatch',
+    'scanner-member-limit', 'scanner-path', 'scanner-path-drift', 'scanner-provider-owner',
+    'scanner-provider-path', 'scanner-report-limit', 'scanner-tool-not-executable',
+    'scanner-total-limit', 'scanner-tree-drift', 'scanner-tree-special-or-link',
+    'scanner-unsafe-directory', 'scanner-unsafe-file',
+})
+
+
+def scanner_failure(value):
+    """Admit only bounded source-defined diagnostics from executed image stdout."""
+    if type(value) is not dict or set(value) not in (
+            {'status', 'reason', 'stage'}, {'status', 'reason', 'stage', 'errno_name'}):
+        return None
+    if (value.get('status') != 'stopped' or type(value.get('reason')) is not str
+            or type(value.get('stage')) is not str or value['stage'] not in SCANNER_STAGES):
+        return None
+    if value['reason'] == 'scanner-os-error':
+        if type(value.get('errno_name')) is not str or value['errno_name'] not in SCANNER_ERRNOS:
+            return None
+    elif ('errno_name' in value or value['reason'] not in
+          FAILURE_CODES | SCANNER_FAILURE_CODES | {'filesystem-scan-failed'}):
+        return None
+    return dict(value)
+
+
 class ProviderReader(ABC):
     """Authenticated byte reader supplied by the source-inventory caller.
 

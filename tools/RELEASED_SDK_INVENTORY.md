@@ -162,16 +162,63 @@ privileges or credentials, fixed `/usr/bin/python3 -I -B` entrypoint and bounded
 wait/log output. Host-side image, command, source, mount and ownership fences
 surround execution and cleanup. Only this owned executed scanner may be stopped
 on failure; the acquisition container remains unstarted.
+The local log driver uses exactly one 128 MiB file with `compress=false`, and
+that configuration is checked with the other container fences. Moby's
+[local driver configuration](https://github.com/moby/moby/blob/docker-v29.4.2/daemon/logger/local/config.go)
+rejects its default compression setting when `max-file=1`; explicit disabling
+allows startup while preserving the log bound.
 
-Its separate `filesystem-qualification.json` receipt explicitly records
-`image_code_executed: true`, the exact index/platform/config/producer/consumer,
-scanner/helper hashes, run identity, its own container and cleanup outcome.
+Its separate schema-2 `filesystem-qualification.json` receipt records
+`image_code_executed` as `true`, `false` or `null`, along with the exact
+index/platform/config/producer/consumer, scanner/helper hashes, run identity,
+its own container and cleanup outcome. `true` requires an accepted Docker start
+response or a complete owned-container fence with coherent running/exited state,
+true-integer PID, nonzero valid UTC RFC3339Nano `StartedAt`, and false paused,
+restarting and dead flags. This records Docker's execution boundary, not proof
+of particular CPU instructions. Moby's [start implementation](https://github.com/moby/moby/blob/docker-v29.4.2/daemon/start.go)
+starts the task before setting the running state; its
+[state transitions](https://github.com/moby/moby/blob/docker-v29.4.2/daemon/container/state.go)
+preserve `StartedAt` after exit, and its
+[inspection](https://github.com/moby/moby/blob/docker-v29.4.2/daemon/inspect.go)
+formats that timestamp as RFC3339Nano.
+
+A start response can be lost after execution begins. Cleanup's complete fences
+before mutation and after stop also reconcile this evidence; proven execution
+survives later cleanup failure. `false` means no start was attempted and no
+fenced started state was observed. After any attempted start, missing inspection,
+fence drift, malformed state or only a created/zero-start snapshot leaves `null`
+unless a prior accepted response or fenced observation proved `true`. A created
+snapshot cannot exclude a pending start request, even when removal succeeds.
+Only fixed booleans and null enter this evidence; raw state/timestamps are not
+published. Acquisition receipts and scanner reports retain their separate
+schema 1. Reconciliation never grants qualification: success still requires the
+accepted start response, completed scan, full comparison and successful cleanup.
 Success requires exact equality of all three maps, every metadata/tool field and
 canonical digests. An omitted unrelated producer file, missing notice, changed
 resolved path, malformed report, source drift or cleanup failure stops the final
 collection. This is trusted-producer filesystem qualification; image Python and
 OS remain trusted. It does not establish runtime, export, gameplay or audible
 acceptance, and does not claim independence from a malicious image OS.
+
+Failed filesystem qualification retains a fixed host phase and, after a valid
+Docker wait response, an integer exit status in `0..255`. Unexpected Docker HTTP
+statuses retain the fixed `docker-request-denied` code without response bodies
+or request paths. The original fixed qualification error also remains in
+`failure.reason` if cleanup fails independently. The top-level reason then
+reports `owned-cleanup-failed` with `owned_container_removed: false`; a failed
+lookup, including 404 after a rejected or ambiguous create, never certifies
+removal. Resolving the generated name still requires the full ownership fence
+before any mutation. The collector fences the exited container before reading logs
+even when the process failed. Nonzero
+exit output is limited to 4 KiB and must use the same strict stdout-only Docker
+framing as successful reports. The only retained scanner output is an exact
+stopped-report schema containing a fixed stage and allowlisted failure code,
+plus an allowlisted errno name for OS errors. Unknown codes, extra fields,
+stderr, raw tracebacks, paths, exception strings and malformed output never
+enter the receipt. A nonzero exit always fails qualification, including when
+its output resembles a successful inventory. Diagnostics preserve owned
+cleanup and every source, image, mount, isolation and inventory comparison gate;
+they provide failure evidence rather than SDK acceptance.
 
 The fixed `portable-final` row admits only `atrinik/classic-portable-build:1.22.0`
 with this authenticated release identity:

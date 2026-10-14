@@ -312,6 +312,61 @@ class WorkflowContracts(unittest.TestCase):
                                  {f'portable={selected}', f'classic={selected}',
                                   f'linux={selected}', f'windows={windows}'})
 
+    def test_main_cache_trigger_covers_shared_stage_inputs(self):
+        text = workflow('validate.yml')
+        trigger = text.split('  push:\n', 1)[1].split('\npermissions:', 1)[0]
+        self.assertIn('    branches:\n      - main\n', trigger)
+        paths = set(re.findall(r'^      - (.+)$', trigger.split('    paths:\n', 1)[1], re.M))
+        required = {'.dockerignore', '.github/workflows/validate.yml'}
+        for dockerfile, stage in (('linux/Dockerfile', 'llvm-toolchain'),
+                                  ('windows/Dockerfile', 'llvm-toolchain'),
+                                  ('portable/Dockerfile', 'portable-llvm')):
+            required.add(dockerfile)
+            source = (ROOT / dockerfile).read_text()
+            block = source.split(' AS ' + stage + '\n', 1)[1].split('\nFROM ', 1)[0]
+            # Each local COPY source in the shared producer must warm main
+            # when changed, even if that input is outside the Dockerfile tree.
+            for sources in re.findall(r'^COPY (.+)$', block, re.M):
+                required.update(sources.split()[:-1])
+        self.assertEqual(paths, required)
+        for unrelated in ('README.md', 'tools/collect-released-sdk-metadata.py',
+                          'tools/verify_published_identity.py'):
+            self.assertNotIn(unrelated, paths)
+
+    def test_cache_seed_is_main_only_and_keeps_pr_acceptance(self):
+        text = workflow('validate.yml')
+        seed = text.split('  llvm-cache:\n', 1)[1].split('\n  llvm:\n', 1)[0]
+        condition = re.search(r'^    if: (.+)$', seed, re.M).group(1)
+        # Exercise the workflow's actual inline event/ref expression. A fork
+        # PR or another branch/tag must never execute the trusted main writer.
+        for event in ('push', 'pull_request', 'pull_request_target', 'workflow_dispatch'):
+            for ref in ('refs/heads/main', 'refs/heads/review', 'refs/tags/v9.8.7', 'refs/pull/1/merge'):
+                values = {'github.event_name': event, 'github.ref': ref}
+                matches = [re.fullmatch(r"(github\.event_name|github\.ref) == '([^']+)'",
+                                        clause.strip()) for clause in condition.split('&&')]
+                self.assertEqual(len(matches), 2)
+                self.assertTrue(all(matches), condition)
+                selected = all(values[match[1]] == match[2] for match in matches)
+                self.assertEqual(selected, event == 'push' and ref == 'refs/heads/main')
+        self.assertNotIn('    needs:', seed)
+        self.assertNotIn('packages:', seed)
+        self.assertNotIn('docker/login-action', seed)
+        self.assertIn('outputs: type=cacheonly', seed)
+        self.assertIn('target: llvm-toolchain', seed)
+        self.assertIn('build-args: LLVM_BUILD_JOBS=2', seed)
+        self.assertIn('cache-to: type=gha,mode=max,scope=llvm-toolchain-23.1.3,ignore-error=true', seed)
+        # PRs retain their own required producer; a main seed is never proof
+        # that a changed PR toolchain is valid and never replaces that job.
+        llvm = text.split('  llvm:\n', 1)[1].split('\n  linux:\n', 1)[0]
+        self.assertIn('    needs: changes', llvm)
+        self.assertNotIn('llvm-cache', llvm)
+        self.assertEqual(text.count('needs: [changes, llvm]'), 4)
+        changes = text.split('  changes:\n', 1)[1].split('\n  llvm-cache:\n', 1)[0]
+        required = text.split('  required:\n', 1)[1]
+        self.assertIn("    if: github.event_name == 'pull_request'", changes)
+        self.assertIn("    if: always() && github.event_name == 'pull_request'", required)
+        self.assertNotIn('llvm-cache', required)
+
     def test_pr_workflow_remains_private_package_free_and_strict(self):
         text = workflow('validate.yml')
         self.assertNotIn('packages:', text)
