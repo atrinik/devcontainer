@@ -143,7 +143,8 @@ class ScannerDiagnosticTests(unittest.TestCase):
                    'stage': 'source-archives-and-providers'}
         receipt, scanner = self.qualification(failure)
         self.assertEqual(receipt['reason'], 'scanner-process-failed')
-        self.assertEqual(receipt['failure'], {'phase': 'container-logs', 'exit_code': 1,
+        self.assertEqual(receipt['failure'], {'reason': 'scanner-process-failed',
+                                             'phase': 'container-logs', 'exit_code': 1,
                                              'start_attempted': True, 'start_accepted': True, 'scan_failure': failure})
         self.assertTrue(receipt['image_code_executed'])
         self.assertEqual(scanner.docker.request.call_count, 3)
@@ -269,6 +270,7 @@ class ScannerDiagnosticTests(unittest.TestCase):
                     self.assertEqual(receipt['status'], 'stopped')
                     self.assertEqual(receipt['reason'], 'docker-request-denied')
                     self.assertEqual(receipt['failure']['phase'], phase)
+                    self.assertEqual(receipt['failure']['reason'], 'docker-request-denied')
                     self.assertIs(receipt['image_code_executed'], executed)
                     self.assertTrue(receipt['owned_container_removed'])
                     self.assertEqual(calls[-1], ('DELETE', '/containers/' + value['Id']))
@@ -282,6 +284,93 @@ class ScannerDiagnosticTests(unittest.TestCase):
         # The old spelling has no production emitter and is not a public code.
         self.assertEqual(C.scanner_host_failure(C.Stop('docker-http-status')),
                          'filesystem-qualification-failed')
+
+    def rejected_create_receipt(self, create_status, lookup):
+        fixture = F.QualificationTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        scanner, value = fixture.scanner()
+        scanner.identifier, scanner.attempted = None, False
+        scanner.docker = C.Docker('/fixture-only', (1, 2, 3))
+        connections, denied, calls = [], [], []
+        if lookup == 'foreign':
+            value['Config']['Labels'][C.OWNER_LABEL] = SECRET
+
+        def connection(*args, **kwargs):
+            conn = Mock()
+            connections.append(conn)
+            current = {}
+            def request(method, path, **kwargs):
+                current.update(method=method, path=path)
+                calls.append((method, path))
+            def getresponse():
+                response_status, raw = 200, b''
+                if current['method'] == 'POST':
+                    self.assertIn('/create?', current['path'])
+                    if create_status is None:
+                        raise ConnectionResetError(SECRET)
+                    response_status, raw = create_status, SECRET.encode()
+                elif current['method'] == 'GET':
+                    if type(lookup) is int:
+                        response_status, raw = lookup, SECRET.encode()
+                    elif lookup == 'malformed':
+                        raw = F.encoded({'Id': SECRET})
+                    else:
+                        raw = F.encoded(value)
+                elif current['method'] == 'DELETE':
+                    self.assertEqual(lookup, 'owned')
+                    self.assertEqual(current['path'], '/containers/' + value['Id'])
+                    response_status = 204
+                else:
+                    self.fail('unexpected request')
+                response = F.Response(raw)
+                response.status = response_status
+                if response_status not in (200, 204):
+                    response.read = Mock(wraps=response.read)
+                    denied.append(response)
+                return response
+            conn.request.side_effect = request
+            conn.getresponse.side_effect = getresponse
+            return conn
+
+        with patch.object(C, 'ScannerImage', return_value=scanner), \
+                patch.object(C, 'LocalConnection', side_effect=connection):
+            receipt = C.qualify_filesystem(scanner.docker, F.TARGET, fixture.context,
+                                           fixture.verified, {'expected': 'inventory'})
+        self.assertEqual(receipt['status'], 'stopped')
+        self.assertIs(receipt['image_code_executed'], False)
+        self.assertEqual(receipt['failure']['phase'], 'container-create')
+        self.assertNotIn('start_attempted', receipt['failure'])
+        self.assertNotIn('scan', receipt)
+        self.assertNotIn(SECRET, json.dumps(receipt))
+        self.assertNotIn('/containers/', json.dumps(receipt))
+        for response in denied:
+            response.read.assert_not_called()
+        for conn in connections:
+            conn.close.assert_called_once()
+        return receipt, calls
+
+    def test_create_failure_preserved_when_named_cleanup_is_unresolved(self):
+        for create_status in (403, 500, None):
+            for lookup in (404, 403, 500, 'malformed', 'foreign'):
+                with self.subTest(create_status=create_status, lookup=lookup):
+                    receipt, calls = self.rejected_create_receipt(create_status, lookup)
+                    self.assertEqual(receipt['reason'], 'owned-cleanup-failed')
+                    self.assertIs(receipt['owned_container_removed'], False)
+                    self.assertEqual(receipt['failure']['reason'],
+                        'filesystem-qualification-failed' if create_status is None else 'docker-request-denied')
+                    self.assertEqual([method for method, _ in calls],
+                                     ['POST', 'GET', 'GET'] if lookup == 'foreign' else ['POST', 'GET'])
+
+    def test_create_failure_preserved_after_fenced_owned_cleanup(self):
+        for create_status in (403, 500, None):
+            with self.subTest(create_status=create_status):
+                receipt, calls = self.rejected_create_receipt(create_status, 'owned')
+                reason = 'filesystem-qualification-failed' if create_status is None else 'docker-request-denied'
+                self.assertEqual(receipt['reason'], reason)
+                self.assertEqual(receipt['failure']['reason'], reason)
+                self.assertIs(receipt['owned_container_removed'], True)
+                self.assertEqual([method for method, _ in calls], ['POST', 'GET', 'GET', 'DELETE'])
 
     def lost_start_receipt(self, status='running', *, drift=None, inspect_failure=False,
                            stop_failure=False, prestart_failure=False):

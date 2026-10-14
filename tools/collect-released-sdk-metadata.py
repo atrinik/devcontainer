@@ -1232,7 +1232,10 @@ def qualify_filesystem(docker, target, context, verified, expected):
         receipt['scan'] = observed
         receipt['status'] = 'verified-filesystem-equality'
     except BaseException as error:
-        receipt.update(status='stopped', reason=scanner_host_failure(error), failure=dict(progress))
+        reason = scanner_host_failure(error)
+        # Cleanup may fail independently; retain the original fixed diagnostic
+        # even when the top-level reason must report unresolved owned cleanup.
+        receipt.update(status='stopped', reason=reason, failure={**progress, 'reason': reason})
     finally:
         if scanner is not None:
             try:

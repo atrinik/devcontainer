@@ -203,7 +203,12 @@ acceptance, and does not claim independence from a malicious image OS.
 Failed filesystem qualification retains a fixed host phase and, after a valid
 Docker wait response, an integer exit status in `0..255`. Unexpected Docker HTTP
 statuses retain the fixed `docker-request-denied` code without response bodies
-or request paths. The collector fences the exited container before reading logs
+or request paths. The original fixed qualification error also remains in
+`failure.reason` if cleanup fails independently. The top-level reason then
+reports `owned-cleanup-failed` with `owned_container_removed: false`; a failed
+lookup, including 404 after a rejected or ambiguous create, never certifies
+removal. Resolving the generated name still requires the full ownership fence
+before any mutation. The collector fences the exited container before reading logs
 even when the process failed. Nonzero
 exit output is limited to 4 KiB and must use the same strict stdout-only Docker
 framing as successful reports. The only retained scanner output is an exact
