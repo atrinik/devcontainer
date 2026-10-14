@@ -168,13 +168,31 @@ that configuration is checked with the other container fences. Moby's
 rejects its default compression setting when `max-file=1`; explicit disabling
 allows startup while preserving the log bound.
 
-Its separate `filesystem-qualification.json` receipt explicitly records
-`image_code_executed: true` only after Docker accepts the scanner start, along
-with the exact index/platform/config/producer/consumer,
-scanner/helper hashes, run identity, its own container and cleanup outcome.
-Failed create/start operations retain `image_code_executed: false`; a later
-wait, scan or comparison failure retains `true`. This records the accepted
-execution boundary, not proof of particular CPU instructions.
+Its separate schema-2 `filesystem-qualification.json` receipt records
+`image_code_executed` as `true`, `false` or `null`, along with the exact
+index/platform/config/producer/consumer, scanner/helper hashes, run identity,
+its own container and cleanup outcome. `true` requires an accepted Docker start
+response or a complete owned-container fence with coherent running/exited state,
+true-integer PID, nonzero valid UTC RFC3339Nano `StartedAt`, and false paused,
+restarting and dead flags. This records Docker's execution boundary, not proof
+of particular CPU instructions. Moby's [start implementation](https://github.com/moby/moby/blob/docker-v29.4.2/daemon/start.go)
+starts the task before setting the running state; its
+[state transitions](https://github.com/moby/moby/blob/docker-v29.4.2/daemon/container/state.go)
+preserve `StartedAt` after exit, and its
+[inspection](https://github.com/moby/moby/blob/docker-v29.4.2/daemon/inspect.go)
+formats that timestamp as RFC3339Nano.
+
+A start response can be lost after execution begins. Cleanup's complete fences
+before mutation and after stop also reconcile this evidence; proven execution
+survives later cleanup failure. `false` means no start was attempted and no
+fenced started state was observed. After any attempted start, missing inspection,
+fence drift, malformed state or only a created/zero-start snapshot leaves `null`
+unless a prior accepted response or fenced observation proved `true`. A created
+snapshot cannot exclude a pending start request, even when removal succeeds.
+Only fixed booleans and null enter this evidence; raw state/timestamps are not
+published. Acquisition receipts and scanner reports retain their separate
+schema 1. Reconciliation never grants qualification: success still requires the
+accepted start response, completed scan, full comparison and successful cleanup.
 Success requires exact equality of all three maps, every metadata/tool field and
 canonical digests. An omitted unrelated producer file, missing notice, changed
 resolved path, malformed report, source drift or cleanup failure stops the final

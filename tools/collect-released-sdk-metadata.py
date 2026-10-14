@@ -1,11 +1,12 @@
 #!/usr/bin/python3 -I
 # Copyright (c) 2026 Atrinik contributors
 # SPDX-License-Identifier: MIT
-"""Collect bounded installed identity from three fixed released Linux SDKs.
+"""Collect bounded identity from fixed historical and final released Linux SDKs.
 
 Only trusted same-repository push/dispatch on GitHub-hosted Linux may acquire.
-No image code runs: a task-owned container stays in created state until removal.
-Artifacts prove installed identity, not runtime health or a final portable cohort.
+Acquisition never starts its container. Final filesystem qualification executes
+a separate isolated scanner and retains its distinct execution receipt.
+Artifacts do not establish runtime health or a final portable cohort.
 
 RegistryToken semantics: moby/moby v28.5.1 api/types/registry/authconfig.go and
  distribution/registry.go. Archive HEAD resolves LinkTarget in daemon/containerfs_linux.go;
@@ -13,6 +14,7 @@ GET returns a tar stream (daemon/archive_unix.go). No archive is extracted.
 """
 import argparse
 import base64
+import datetime
 import hashlib
 import http.client
 import importlib.util
@@ -1032,6 +1034,35 @@ def scanner_logs(response, *, limit=SCANNER_LIMIT):
     return decode(bytes(result))
 
 
+def scanner_started_state(state):
+    """Recognize Moby's started state; never infer it from status alone.
+
+    Inspect serializes StartedAt as RFC3339Nano; SetStopped preserves it.
+    Only call this after the complete owned-container fence succeeds.
+    """
+    if type(state) is not dict:
+        return False
+    status, pid, started = state.get('Status'), state.get('Pid'), state.get('StartedAt')
+    if not (status in ('running', 'exited') and type(pid) is int
+            and (0 < pid <= 2**31 - 1 if status == 'running' else pid == 0)
+            and state.get('Running') is (status == 'running')
+            and all(state.get(key) is False for key in ('Paused', 'Restarting', 'Dead'))
+            and type(started) is str and len(started) <= 30):
+        return False
+    match = re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):'
+                         r'[0-5][0-9]:[0-5][0-9](?:\.([0-9]{1,9}))?Z', started)
+    if match is None:
+        return False
+    try:
+        timestamp = datetime.datetime.fromisoformat(started)
+    except ValueError:
+        return False
+    # Python truncates sub-microsecond fractions; check Go's zero time without
+    # accidentally treating a nonzero nanosecond as zero.
+    return (timestamp != datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+            or int(match[1] or '0') != 0)
+
+
 class ScannerImage(StoppedImage):
     """Separate executed qualification; never weakens StoppedImage's fence."""
     def __init__(self, docker, target, context, verified, sources):
@@ -1042,6 +1073,7 @@ class ScannerImage(StoppedImage):
         require(set(sources) == set(SCANNER_FILES), 'scanner-source-set')
         super().__init__(docker, target, context, verified)
         self.name = 'atrinik-sdk-filesystem-' + self.owner
+        self.started_observed = False
         self.sources = sources
         self.entrypoint = ['/usr/bin/python3', '-I', '-B', '/scan/scan-released-sdk-filesystem.py']
         # Moby's local driver defaults to compression, which is incompatible
@@ -1101,12 +1133,19 @@ class ScannerImage(StoppedImage):
         selected = value.get('ImageManifestDescriptor')
         if selected is not None or image != self.verified['config_digest']:
             require(selected_manifest_matches(selected, self.verified), 'container-manifest-mismatch')
+        # Retain only a bounded fact, after every identity/isolation fence.
+        # Cleanup also reaches this site before mutation and after stopping.
+        if scanner_started_state(state):
+            self.started_observed = True
         return value
 
     def execute(self, *, progress=None):
         progress = progress if progress is not None else {}
         progress['phase'] = 'container-start'
         self.fence()
+        # The daemon may execute even if the response is lost. From this point
+        # a failed call means unknown until a fully fenced start is observed.
+        progress['start_attempted'] = True
         conn, _ = self.docker.request('POST', '/containers/' + self.identifier + '/start', expected=204)
         progress['start_accepted'] = True
         conn.close()
@@ -1167,7 +1206,7 @@ class ScannerImage(StoppedImage):
 def qualify_filesystem(docker, target, context, verified, expected):
     policy = target_policy(target)
     require(target in FINAL_TARGETS, 'final-target-required')
-    receipt = {**context, 'schema_version': 1, 'claim': 'trusted-producer-filesystem-equality',
+    receipt = {**context, 'schema_version': 2, 'claim': 'trusted-producer-filesystem-equality',
         'image_code_executed': False, 'final_portable_cohort': False, 'target': target,
         'index_digest': TARGETS[target][2], 'manifest_digest': verified['manifest_digest'],
         'config_digest': verified['config_digest'], **policy, 'status': 'started'}
@@ -1195,9 +1234,6 @@ def qualify_filesystem(docker, target, context, verified, expected):
     except BaseException as error:
         receipt.update(status='stopped', reason=scanner_host_failure(error), failure=dict(progress))
     finally:
-        # A successful Docker start is the execution boundary, not instruction
-        # tracing. Failed create/start calls never assert scanner execution.
-        receipt['image_code_executed'] = progress.get('start_accepted') is True
         if scanner is not None:
             try:
                 signal.alarm(120)
@@ -1205,6 +1241,15 @@ def qualify_filesystem(docker, target, context, verified, expected):
                 receipt['owned_container_removed'] = True
             except BaseException:
                 receipt.update(status='stopped', reason='owned-cleanup-failed', owned_container_removed=False)
+        # Cleanup may supply the first complete observation after a lost 204.
+        # No observation can promote a failed qualification to success. A
+        # created snapshot cannot exclude a still-pending daemon start request.
+        if progress.get('start_accepted') is True or (scanner is not None and scanner.started_observed is True):
+            receipt['image_code_executed'] = True
+        elif progress.get('start_attempted') is True:
+            receipt['image_code_executed'] = None
+        else:
+            receipt['image_code_executed'] = False
     return receipt
 
 def collect(target, context, original, folder):
