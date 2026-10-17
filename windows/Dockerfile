@@ -2,7 +2,7 @@
 
 # One Debian 12-built LLVM cohort serves Ubuntu and portable consumers. The
 # bootstrap is build-only; every owned dependency uses the resulting Clang.
-FROM debian:bookworm-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867 AS llvm-toolchain
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS llvm-toolchain
 ARG TARGETARCH
 ARG LLVM_BUILD_JOBS=2
 ENV DEBIAN_FRONTEND=noninteractive
