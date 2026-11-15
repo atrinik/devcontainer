@@ -8,12 +8,18 @@ updates:
       github-actions:
         patterns:
           - "*"
+    assignees:
+      - zoeyrose
   - package-ecosystem: docker
     directory: /linux
     schedule:
       interval: weekly
+    assignees:
+      - zoeyrose
   - package-ecosystem: docker
     directory: /windows
     schedule:
       interval: weekly
+    assignees:
+      - zoeyrose
 
